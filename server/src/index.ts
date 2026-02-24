@@ -49,7 +49,7 @@ const server = Bun.serve({
       }
       const sessionName = url.pathname.replace("/ws/sessions/", "");
       if (sessionName) {
-        const upgraded = server.upgrade(req, { data: { sessionName } });
+        const upgraded = server.upgrade(req, { data: { sessionName } as any });
         if (upgraded) return undefined;
         return new Response("WebSocket upgrade failed", { status: 500 });
       }
