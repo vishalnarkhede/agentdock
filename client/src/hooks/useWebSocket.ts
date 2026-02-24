@@ -22,8 +22,8 @@ export function useWebSocket(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
-  const reconnectTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const pingInterval = useRef<ReturnType<typeof setInterval>>();
+  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pingInterval = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const onDataRef = useRef(onData);
   const onClosedRef = useRef(onClosed);
   onDataRef.current = onData;
@@ -107,7 +107,7 @@ export function useWebSocket(
 
   // --- Input buffering: batch printable chars, flush before special keys ---
   const inputBuffer = useRef("");
-  const flushTimer = useRef<ReturnType<typeof setTimeout>>();
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const flushBuffer = useCallback(() => {
     if (inputBuffer.current && wsRef.current?.readyState === WebSocket.OPEN) {

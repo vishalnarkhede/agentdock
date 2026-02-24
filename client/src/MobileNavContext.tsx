@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 
-export type Tab = "terminal" | "plan" | "changes";
+export type Tab = "terminal" | "plan" | "changes" | "sub-agents";
 
 interface MobileNav {
   inSession: boolean;
