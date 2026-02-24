@@ -1,0 +1,450 @@
+import type {
+  SessionInfo,
+  RepoConfig,
+  LinearTicket,
+  CreateSessionRequest,
+  AgentType,
+} from "./types";
+
+const BASE = "";
+
+export async function fetchSessions(): Promise<SessionInfo[]> {
+  const res = await fetch(`${BASE}/api/sessions`);
+  return res.json();
+}
+
+export async function createSession(
+  req: CreateSessionRequest,
+): Promise<{ sessions: string[] }> {
+  const res = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to create session");
+  }
+  return res.json();
+}
+
+export async function reorderSessions(order: string[]): Promise<void> {
+  await fetch(`${BASE}/api/sessions/reorder`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  });
+}
+
+export async function deleteSession(name: string): Promise<void> {
+  await fetch(`${BASE}/api/sessions/${name}`, { method: "DELETE" });
+}
+
+export async function deleteAllSessions(): Promise<void> {
+  await fetch(`${BASE}/api/sessions`, { method: "DELETE" });
+}
+
+export async function fetchPlan(sessionName: string): Promise<string | null> {
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/plan`);
+  const data = await res.json();
+  return data.plan || null;
+}
+
+export async function openInIterm(name: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/sessions/${name}/open-iterm`, { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to open iTerm");
+  }
+}
+
+export async function switchAgent(
+  sessionName: string,
+  agentType: AgentType,
+  contextMessage?: string,
+  onStep?: (step: string) => void,
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/switch-agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentType, contextMessage }),
+  });
+
+  if (!res.ok) {
+    // Non-SSE error (e.g. validation)
+    const data = await res.json();
+    throw new Error(data.error || "Failed to switch agent");
+  }
+
+  // Parse SSE stream
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response stream");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n\n");
+    buffer = lines.pop() || "";
+
+    for (const chunk of lines) {
+      const dataLine = chunk.split("\n").find(l => l.startsWith("data: "));
+      if (!dataLine) continue;
+      const json = JSON.parse(dataLine.slice(6));
+      onStep?.(json.step);
+      if (json.error) throw new Error(json.step);
+    }
+  }
+}
+
+export async function fetchRepos(): Promise<RepoConfig[]> {
+  const res = await fetch(`${BASE}/api/repos`);
+  return res.json();
+}
+
+export async function fetchTicket(id: string): Promise<LinearTicket> {
+  const res = await fetch(`${BASE}/api/tickets/${id}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to fetch ticket");
+  }
+  return res.json();
+}
+
+export async function transcribeAudio(blob: Blob): Promise<string> {
+  const form = new FormData();
+  form.append("audio", blob, "audio.webm");
+  const res = await fetch(`${BASE}/api/transcribe`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Transcription failed");
+  }
+  const data = await res.json();
+  return data.text;
+}
+
+export async function fetchGitChanges(
+  path: string,
+): Promise<{ status: string; diff: string; branch: string; prUrl: string | null }> {
+  const res = await fetch(`${BASE}/api/git/changes?path=${encodeURIComponent(path)}`);
+  return res.json();
+}
+
+export async function fetchPRDiff(path: string): Promise<{ diff: string }> {
+  const res = await fetch(`${BASE}/api/git/pr-diff?path=${encodeURIComponent(path)}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to fetch PR diff");
+  }
+  return res.json();
+}
+
+export async function pushChanges(path: string): Promise<{ ok: boolean; branch: string }> {
+  const res = await fetch(`${BASE}/api/git/push`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to push");
+  }
+  return res.json();
+}
+
+export async function createPR(
+  path: string,
+  title: string,
+  body?: string,
+): Promise<{ url: string }> {
+  const res = await fetch(`${BASE}/api/git/create-pr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, title, body }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to create PR");
+  }
+  return res.json();
+}
+
+export interface SessionTemplate {
+  id: string;
+  name: string;
+  targets: string[];
+  prompt?: string;
+  isolated?: boolean;
+  grouped?: boolean;
+}
+
+export async function fetchTemplates(): Promise<SessionTemplate[]> {
+  const res = await fetch(`${BASE}/api/templates`);
+  return res.json();
+}
+
+export async function saveTemplate(
+  template: Omit<SessionTemplate, "id">,
+): Promise<SessionTemplate> {
+  const res = await fetch(`${BASE}/api/templates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(template),
+  });
+  return res.json();
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  await fetch(`${BASE}/api/templates/${id}`, { method: "DELETE" });
+}
+
+export async function slackToFix(
+  link: string,
+  targets?: string[],
+): Promise<{ ticket: { identifier: string; title: string; url?: string }; sessions: string[] }> {
+  const res = await fetch(`${BASE}/api/quick/slack-to-fix`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ link, targets }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to process Slack message");
+  }
+  return res.json();
+}
+
+export async function sendSessionInput(sessionName: string, text: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/input`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to send input");
+  }
+}
+
+export async function uploadFile(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/api/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Upload failed");
+  }
+  const data = await res.json();
+  return data.path;
+}
+
+export async function fetchSessionOutput(
+  sessionName: string,
+  lines = 50,
+): Promise<{ output: string; status: string; statusLine?: { type: string; message: string } }> {
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/output?lines=${lines}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to fetch output");
+  }
+  return res.json();
+}
+
+export async function fetchSessionChildren(sessionName: string): Promise<SessionInfo[]> {
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/children`);
+  return res.json();
+}
+
+export function wsUrl(sessionName: string): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws/sessions/${sessionName}`;
+}
+
+// ─── Settings API ───
+
+export interface ToolHealth {
+  installed: boolean;
+  version: string;
+}
+
+export interface SettingsHealth {
+  tmux: ToolHealth;
+  claude: ToolHealth;
+  cursor: ToolHealth;
+  git: ToolHealth;
+  gh: ToolHealth;
+  bun: ToolHealth;
+  psql: ToolHealth;
+}
+
+export interface IntegrationStatus {
+  linear: { configured: boolean; hasTeamId: boolean };
+  slack: { configured: boolean };
+}
+
+export interface SettingsStatus {
+  firstRun: boolean;
+  repoCount: number;
+  hasReposFile: boolean;
+  linear: boolean;
+  slack: boolean;
+}
+
+export async function fetchSettingsHealth(): Promise<SettingsHealth> {
+  const res = await fetch(`${BASE}/api/settings/health`);
+  return res.json();
+}
+
+export async function fetchIntegrations(): Promise<IntegrationStatus> {
+  const res = await fetch(`${BASE}/api/settings/integrations`);
+  return res.json();
+}
+
+export async function fetchSettingsStatus(): Promise<SettingsStatus> {
+  const res = await fetch(`${BASE}/api/settings/status`);
+  return res.json();
+}
+
+export async function fetchBasePath(): Promise<string> {
+  const res = await fetch(`${BASE}/api/settings/base-path`);
+  const data = await res.json();
+  return data.path;
+}
+
+export async function updateBasePath(path: string): Promise<void> {
+  await fetch(`${BASE}/api/settings/base-path`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function fetchSettingsRepos(): Promise<RepoConfig[]> {
+  const res = await fetch(`${BASE}/api/settings/repos`);
+  return res.json();
+}
+
+export async function addSettingsRepo(repo: RepoConfig): Promise<void> {
+  await fetch(`${BASE}/api/settings/repos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(repo),
+  });
+}
+
+export async function deleteSettingsRepo(alias: string): Promise<void> {
+  await fetch(`${BASE}/api/settings/repos/${encodeURIComponent(alias)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function saveIntegrationKey(
+  type: "linear-key" | "linear-team-id" | "slack-token",
+  value: string,
+): Promise<void> {
+  const keyMap = { "linear-key": "key", "linear-team-id": "id", "slack-token": "token" };
+  await fetch(`${BASE}/api/settings/${type}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ [keyMap[type]]: value }),
+  });
+}
+
+export async function deleteIntegrationKey(
+  type: "linear-key" | "linear-team-id" | "slack-token",
+): Promise<void> {
+  await fetch(`${BASE}/api/settings/${type}`, { method: "DELETE" });
+}
+
+// ─── Auth API ───
+
+export interface AuthStatus {
+  enabled: boolean;
+  loggedIn: boolean;
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  const res = await fetch(`${BASE}/api/auth/status`);
+  return res.json();
+}
+
+export async function login(password: string): Promise<{ ok?: boolean; error?: string }> {
+  const res = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  return res.json();
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${BASE}/api/auth/logout`, { method: "POST" });
+}
+
+export async function setPassword(password: string): Promise<{ ok?: boolean; error?: string }> {
+  const res = await fetch(`${BASE}/api/auth/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  return res.json();
+}
+
+// ─── Database Shards API ───
+
+export interface DbShardInfo {
+  name: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  engine?: string;
+  sslmode?: string;
+}
+
+export async function fetchDbShards(): Promise<DbShardInfo[]> {
+  const res = await fetch(`${BASE}/api/db/shards`);
+  return res.json();
+}
+
+export async function addDbShardApi(shard: {
+  name: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  engine?: string;
+  sslmode?: string;
+}): Promise<void> {
+  const res = await fetch(`${BASE}/api/db/shards`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(shard),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to add shard");
+  }
+}
+
+export async function deleteDbShard(name: string): Promise<void> {
+  await fetch(`${BASE}/api/db/shards/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function testDbShard(name: string): Promise<{ ok: boolean; error?: string; duration?: number }> {
+  const res = await fetch(`${BASE}/api/db/test/${encodeURIComponent(name)}`);
+  return res.json();
+}

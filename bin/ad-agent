@@ -1,0 +1,296 @@
+#!/usr/bin/env bash
+# ad-agent — CLI for spawning and managing sub-agents from within a parent agent session.
+# Used by agents running inside agentdock to delegate work to child agents.
+#
+# Usage:
+#   ad-agent spawn --repo <alias> [--prompt "..."] [--agent-type claude|cursor] [--skip-perms]
+#   ad-agent status <session-name>
+#   ad-agent output <session-name> [--lines N]
+#   ad-agent wait <session-name> [--timeout SECONDS]
+#   ad-agent send <session-name> --text "..."
+#   ad-agent list
+#   ad-agent kill <session-name>
+
+set -euo pipefail
+
+SERVER="${AGENTDOCK_SERVER:-http://localhost:4800}"
+PARENT="${AD_AGENT_PARENT:-}"
+AUTH_TOKEN="${AD_AUTH_TOKEN:-}"
+
+# Build curl auth args (cookie header if token is set)
+CURL_AUTH=()
+if [[ -n "$AUTH_TOKEN" ]]; then
+  CURL_AUTH=(-b "ad_session=${AUTH_TOKEN}")
+fi
+
+# ─── Helpers ───
+
+json_val() {
+  # Extract a simple JSON string/number value by key. Works for flat responses.
+  local key="$1" input="$2"
+  echo "$input" | grep -o "\"${key}\":[^,}]*" | head -1 | sed "s/\"${key}\":\s*//;s/\"//g"
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+# ─── Commands ───
+
+cmd_spawn() {
+  local repo="" prompt="" agent_type="claude" skip_perms="false" name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo) repo="$2"; shift 2 ;;
+      --prompt) prompt="$2"; shift 2 ;;
+      --agent-type) agent_type="$2"; shift 2 ;;
+      --skip-perms) skip_perms="true"; shift ;;
+      --name) name="$2"; shift 2 ;;
+      *) die "spawn: unknown option $1" ;;
+    esac
+  done
+
+  [[ -z "$repo" ]] && die "spawn: --repo is required"
+  [[ -z "$PARENT" ]] && die "spawn: AD_AGENT_PARENT env var not set (are you running inside an agentdock session?)"
+
+  local body
+  body=$(cat <<EOF
+{
+  "targets": ["${repo}"],
+  "prompt": $(printf '%s' "$prompt" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))'),
+  "agentType": "${agent_type}",
+  "dangerouslySkipPermissions": ${skip_perms},
+  "enableSubAgents": true,
+  "parentSession": "${PARENT}"$([ -n "$name" ] && echo ", \"name\": \"${name}\"" || true)
+}
+EOF
+)
+
+  local response
+  response=$(curl -s -X POST "${SERVER}/api/sessions" \
+    -H "Content-Type: application/json" \
+    "${CURL_AUTH[@]}" \
+    -d "$body")
+
+  # Extract session names from response
+  local sessions
+  sessions=$(echo "$response" | grep -o '"sessions":\s*\[[^]]*\]' | sed 's/"sessions":\s*\[//;s/\]//;s/"//g;s/,/ /g')
+
+  if [[ -z "$sessions" ]]; then
+    local err
+    err=$(json_val "error" "$response")
+    die "spawn failed: ${err:-unknown error}"
+  fi
+
+  echo "$sessions"
+}
+
+cmd_status() {
+  local name="${1:-}"
+  [[ -z "$name" ]] && die "status: session name required"
+
+  local response
+  response=$(curl -s "${CURL_AUTH[@]}" "${SERVER}/api/sessions")
+
+  # Find the session and extract status
+  local status
+  status=$(echo "$response" | python3 -c "
+import sys, json
+sessions = json.load(sys.stdin)
+for s in sessions:
+    if s['name'] == '${name}':
+        print(s.get('status', 'unknown'))
+        break
+else:
+    print('not_found')
+")
+  echo "$status"
+}
+
+cmd_output() {
+  local name="" lines=50
+
+  name="${1:-}"
+  shift || true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lines) lines="$2"; shift 2 ;;
+      *) die "output: unknown option $1" ;;
+    esac
+  done
+
+  [[ -z "$name" ]] && die "output: session name required"
+
+  local response
+  response=$(curl -s "${CURL_AUTH[@]}" "${SERVER}/api/sessions/${name}/output?lines=${lines}")
+
+  local err
+  err=$(json_val "error" "$response")
+  if [[ -n "$err" ]]; then
+    die "output: $err"
+  fi
+
+  # Extract the output field
+  echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data.get('output', ''))
+if data.get('statusLine'):
+    sl = data['statusLine']
+    print(f\"\\n[STATUS: {sl['type']} | {sl['message']}]\")
+"
+}
+
+cmd_wait() {
+  local name="" timeout=300 poll_interval=5
+
+  name="${1:-}"
+  shift || true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --timeout) timeout="$2"; shift 2 ;;
+      --poll) poll_interval="$2"; shift 2 ;;
+      *) die "wait: unknown option $1" ;;
+    esac
+  done
+
+  [[ -z "$name" ]] && die "wait: session name required"
+
+  local elapsed=0
+  while [[ $elapsed -lt $timeout ]]; do
+    local status
+    status=$(cmd_status "$name")
+
+    case "$status" in
+      waiting)
+        echo "done"
+        return 0
+        ;;
+      not_found)
+        die "session '$name' not found"
+        ;;
+      shell)
+        echo "shell"
+        return 0
+        ;;
+      *)
+        # still working
+        sleep "$poll_interval"
+        elapsed=$((elapsed + poll_interval))
+        ;;
+    esac
+  done
+
+  echo "timeout"
+  return 1
+}
+
+cmd_send() {
+  local name="" text=""
+
+  name="${1:-}"
+  shift || true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --text) text="$2"; shift 2 ;;
+      *) die "send: unknown option $1" ;;
+    esac
+  done
+
+  [[ -z "$name" ]] && die "send: session name required"
+  [[ -z "$text" ]] && die "send: --text is required"
+
+  local body
+  body=$(cat <<EOF
+{"text": $(printf '%s' "$text" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}
+EOF
+)
+
+  curl -s -X POST "${SERVER}/api/sessions/${name}/input" \
+    -H "Content-Type: application/json" \
+    "${CURL_AUTH[@]}" \
+    -d "$body" > /dev/null
+
+  echo "ok"
+}
+
+cmd_list() {
+  if [[ -z "$PARENT" ]]; then
+    # List all sessions
+    curl -s "${CURL_AUTH[@]}" "${SERVER}/api/sessions" | python3 -c "
+import sys, json
+sessions = json.load(sys.stdin)
+for s in sessions:
+    parent = s.get('parentSession', '')
+    children = s.get('children', [])
+    suffix = ''
+    if parent:
+        suffix = f' (child of {parent})'
+    elif children:
+        suffix = f' ({len(children)} sub-agents)'
+    print(f\"{s['name']}: {s['status']}{suffix}\")
+"
+  else
+    # List children of the current parent
+    curl -s "${CURL_AUTH[@]}" "${SERVER}/api/sessions/${PARENT}/children" | python3 -c "
+import sys, json
+children = json.load(sys.stdin)
+if not children:
+    print('no sub-agents')
+else:
+    for c in children:
+        sl = c.get('statusLine', {})
+        msg = f\" — {sl['message']}\" if sl and 'message' in sl else ''
+        print(f\"{c['name']}: {c['status']}{msg}\")
+"
+  fi
+}
+
+cmd_kill() {
+  local name="${1:-}"
+  [[ -z "$name" ]] && die "kill: session name required"
+
+  curl -s -X DELETE "${CURL_AUTH[@]}" "${SERVER}/api/sessions/${name}" > /dev/null
+  echo "killed $name"
+}
+
+cmd_help() {
+  cat <<'HELP'
+ad-agent — manage sub-agents from within a parent session
+
+Commands:
+  spawn   --repo <alias> [--prompt "..."] [--agent-type claude|cursor] [--skip-perms] [--name <name>]
+  status  <session-name>
+  output  <session-name> [--lines N]
+  wait    <session-name> [--timeout SECONDS] [--poll SECONDS]
+  send    <session-name> --text "..."
+  list
+  kill    <session-name>
+
+Environment:
+  AD_AGENT_PARENT        Parent session name (auto-set by agentdock)
+  AGENTDOCK_SERVER       Server URL (default: http://localhost:4800)
+HELP
+}
+
+# ─── Main ───
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  spawn)  cmd_spawn "$@" ;;
+  status) cmd_status "$@" ;;
+  output) cmd_output "$@" ;;
+  wait)   cmd_wait "$@" ;;
+  send)   cmd_send "$@" ;;
+  list)   cmd_list "$@" ;;
+  kill)   cmd_kill "$@" ;;
+  help|--help|-h) cmd_help ;;
+  *) die "unknown command: $cmd (try: ad-agent help)" ;;
+esac

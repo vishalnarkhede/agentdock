@@ -1,0 +1,564 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─────────────────────────────────────────────────────────
+# agentdock — spin up parallel AI coding agents
+# in separate tmux sessions using repo aliases
+# ─────────────────────────────────────────────────────────
+
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WEB_UI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG_DIR="${HOME}/.config/agentdock"
+LINEAR_KEY_FILE="${CONFIG_DIR}/linear-api-key"
+SESSIONS_DIR="${CONFIG_DIR}/sessions"
+PREFIX="claude"
+AUTO_LAUNCH=true
+PROMPT=""
+GROUP_MODE=false
+ISOLATED=false
+NEW_BRANCH=""
+TICKET=""
+
+# Base path where all repos live.
+# Priority: env var > config file > default
+REPOS_FILE="${CONFIG_DIR}/repos.json"
+BASE_PATH_FILE="${CONFIG_DIR}/base-path"
+
+if [[ -n "${AGENTDOCK_BASE_PATH:-}" ]]; then
+  BASE_PATH="$AGENTDOCK_BASE_PATH"
+elif [[ -f "$BASE_PATH_FILE" ]]; then
+  BASE_PATH="$(cat "$BASE_PATH_FILE" | tr -d '[:space:]')"
+else
+  BASE_PATH="${HOME}/projects"
+fi
+
+# ── Repo map: alias|path|remote ──
+# Reads from ~/.config/agentdock/repos.json
+REPOS=()
+
+load_repos() {
+  if [[ -f "$REPOS_FILE" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && REPOS+=("$line")
+    done < <(python3 -c "
+import json, sys
+with open('$REPOS_FILE') as f:
+    repos = json.load(f)
+for r in repos:
+    alias = r.get('alias', '')
+    path = r.get('path', '')
+    remote = r.get('remote', '')
+    if alias and path:
+        print(f'{alias}|{path}|{remote}')
+" 2>/dev/null)
+  else
+    echo "No repos configured. Run '$SCRIPT_NAME web' and add repos in Settings."
+  fi
+}
+
+load_repos
+
+usage() {
+  cat <<EOF
+Usage:
+  $SCRIPT_NAME start  <target> [target ...]  [options]
+  $SCRIPT_NAME list
+  $SCRIPT_NAME attach <session>
+  $SCRIPT_NAME stop   <session | --all>
+  $SCRIPT_NAME repos
+  $SCRIPT_NAME web
+
+Targets:
+  alias                 Use existing clone, one session per alias
+    $SCRIPT_NAME start myapp backend
+
+  alias:branch          Create worktree, one session per alias
+    $SCRIPT_NAME start myapp:feature-x backend:bugfix-42
+
+  -r (group)            Group repos into ONE session (for cross-repo work)
+    $SCRIPT_NAME start -r myapp dashboard -m "update the API and dashboard together"
+
+  --isolated            Create a separate worktree for each repo
+    $SCRIPT_NAME start -r myapp dashboard backend --isolated
+
+  --new-branch BASE     Cut a new branch from BASE for each worktree
+    $SCRIPT_NAME start -r myapp dashboard --isolated --new-branch PROJ-123
+
+  --ticket ID           Fetch Linear ticket, auto-isolate + generate prompt
+    $SCRIPT_NAME start myapp --ticket PROJ-123
+    (implies --isolated, creates branch from main, auto-generates prompt)
+
+Commands:
+  start    Open tmux sessions for the given targets
+  list     Show active claude tmux sessions
+  attach   Attach to a session (use name from 'list')
+  stop     Kill tmux session(s) and clean up worktrees
+  repos    Show configured repo aliases
+  web      Open the web dashboard (http://localhost:5173)
+
+Options for 'start':
+  -r                Group all aliases into ONE session (cross-repo agent)
+  --isolated        Create a separate worktree for each repo
+  --new-branch BASE Cut new branch from BASE (use with --isolated)
+  --ticket ID       Linear ticket ID (e.g. PROJ-123). Implies --isolated.
+  -m PROMPT         Launch claude with this prompt (sent as initial message)
+  --no-launch       Don't auto-launch claude (just open a shell)
+  -p PREFIX         Session name prefix (default: "claude")
+
+Base path: ${BASE_PATH} (override with AGENTDOCK_BASE_PATH)
+EOF
+  exit 1
+}
+
+# ── Helpers ──────────────────────────────────────────────
+
+die() { echo "error: $*" >&2; exit 1; }
+
+save_worktree_meta() {
+  local sess="$1" repo_path="$2" wt_dir="$3"
+  mkdir -p "$SESSIONS_DIR"
+  echo "${repo_path}|${wt_dir}" >> "${SESSIONS_DIR}/${sess}"
+}
+
+cleanup_worktrees_for_session() {
+  local sess="$1"
+  local meta_file="${SESSIONS_DIR}/${sess}"
+  [[ -f "$meta_file" ]] || return 0
+
+  while IFS='|' read -r repo_path wt_dir; do
+    [[ -z "$repo_path" ]] && continue
+    if [[ -d "$wt_dir" ]]; then
+      echo "removing worktree: $wt_dir"
+      git -C "$repo_path" worktree remove --force "$wt_dir" 2>/dev/null \
+        || echo "  warning: could not remove $wt_dir"
+    fi
+  done < "$meta_file"
+
+  rm -f "$meta_file"
+}
+
+fetch_linear_ticket() {
+  local ticket_id="$1"
+
+  if [[ ! -f "$LINEAR_KEY_FILE" ]]; then
+    die "Linear API key not found. Save your key to: ${LINEAR_KEY_FILE}
+  Get one at: Linear > Settings > API > Personal API keys
+  Then: echo 'lin_api_xxxxx' > ${LINEAR_KEY_FILE} && chmod 600 ${LINEAR_KEY_FILE}"
+  fi
+
+  local api_key
+  api_key="$(cat "$LINEAR_KEY_FILE" | tr -d '[:space:]')"
+  [[ -n "$api_key" ]] || die "Linear API key file is empty: ${LINEAR_KEY_FILE}"
+
+  echo "fetching Linear ticket: $ticket_id ..."
+
+  local response
+  response="$(curl -s -X POST \
+    -H "Authorization: $api_key" \
+    -H "Content-Type: application/json" \
+    -d "{\"query\": \"{ issueSearch(filter: { identifier: { eq: \\\"${ticket_id}\\\" } }) { nodes { title description url identifier branchName } } }\"}" \
+    https://api.linear.app/graphql 2>&1)" \
+    || die "failed to call Linear API"
+
+  if echo "$response" | grep -q '"errors"'; then
+    local err_msg
+    err_msg="$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin)['errors'][0]['message'])" 2>/dev/null || echo "$response")"
+    die "Linear API error: $err_msg"
+  fi
+
+  TICKET_TITLE="$(echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+print(nodes[0]['title'] if nodes else '')
+" 2>/dev/null)" || TICKET_TITLE=""
+
+  TICKET_DESC="$(echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+desc = nodes[0].get('description', '') if nodes else ''
+print(desc or '')
+" 2>/dev/null)" || TICKET_DESC=""
+
+  TICKET_URL="$(echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+print(nodes[0].get('url', '') if nodes else '')
+" 2>/dev/null)" || TICKET_URL=""
+
+  TICKET_BRANCH="$(echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+nodes = data.get('data', {}).get('issueSearch', {}).get('nodes', [])
+print(nodes[0].get('branchName', '') if nodes else '')
+" 2>/dev/null)" || TICKET_BRANCH=""
+
+  if [[ -z "$TICKET_TITLE" ]]; then
+    die "ticket '$ticket_id' not found in Linear"
+  fi
+
+  echo "  title: $TICKET_TITLE"
+  [[ -n "$TICKET_URL" ]] && echo "  url:   $TICKET_URL"
+  echo ""
+}
+
+# Resolve an alias to its local path and remote.
+# Sets: REPO_PATH, REPO_REMOTE
+resolve_alias() {
+  local alias="$1"
+  REPO_PATH=""
+  REPO_REMOTE=""
+
+  for entry in "${REPOS[@]}"; do
+    IFS='|' read -r a path remote <<< "$entry"
+    if [[ "$a" == "$alias" ]]; then
+      REPO_PATH="$path"
+      REPO_REMOTE="$remote"
+      break
+    fi
+  done
+
+  [[ -n "$REPO_PATH" ]] || die "unknown alias '$alias' — run '$SCRIPT_NAME repos' to see available aliases"
+
+  if [[ ! -d "$REPO_PATH" ]]; then
+    if [[ -n "$REPO_REMOTE" ]]; then
+      echo "repo not found at $REPO_PATH"
+      echo "cloning from $REPO_REMOTE ..."
+      git clone "$REPO_REMOTE" "$REPO_PATH"
+    else
+      die "repo not found at $REPO_PATH (no remote configured to clone from)"
+    fi
+  fi
+}
+
+session_name_from_target() {
+  local target="$1"
+  local name="${target//:/-}"
+  name="${name//\//-}"
+  echo "${PREFIX}-${name}"
+}
+
+parse_piece() {
+  local piece="$1"
+  if [[ "$piece" == *":"* ]]; then
+    PARSED_ALIAS="${piece%%:*}"
+    PARSED_BRANCH="${piece#*:}"
+  else
+    PARSED_ALIAS="$piece"
+    PARSED_BRANCH=""
+  fi
+}
+
+resolve_piece() {
+  local piece="$1"
+  parse_piece "$piece"
+  local alias="$PARSED_ALIAS"
+  local branch="$PARSED_BRANCH"
+
+  resolve_alias "$alias"
+  local repo_path="$REPO_PATH"
+  PIECE_WORK_DIR="$repo_path"
+  PIECE_REPO_PATH="$repo_path"
+  PIECE_IS_WORKTREE=false
+
+  if [[ -n "$branch" ]]; then
+    PIECE_IS_WORKTREE=true
+    local safe_branch="${branch//\//-}"
+    local wt_dir="${BASE_PATH}/$(basename "$repo_path")-${safe_branch}"
+    if [[ -d "$wt_dir" ]]; then
+      echo "worktree exists:  $wt_dir"
+    else
+      if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+        echo "creating worktree: $wt_dir  (existing branch: $branch)"
+        git -C "$repo_path" worktree add "$wt_dir" "$branch"
+      else
+        local base="${NEW_BRANCH:-main}"
+        # Try main, then master, then HEAD
+        if ! git -C "$repo_path" show-ref --verify --quiet "refs/heads/$base" 2>/dev/null; then
+          if git -C "$repo_path" show-ref --verify --quiet "refs/heads/master" 2>/dev/null; then
+            base="master"
+          else
+            base="HEAD"
+          fi
+        fi
+        echo "creating worktree: $wt_dir  (new branch: $branch from $base)"
+        git -C "$repo_path" worktree add "$wt_dir" -b "$branch" "$base"
+      fi
+    fi
+    PIECE_WORK_DIR="$wt_dir"
+  fi
+}
+
+# ── Commands ─────────────────────────────────────────────
+
+cmd_start() {
+  [[ $# -ge 1 ]] || usage
+
+  local targets=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -r) GROUP_MODE=true ;;
+      --isolated) ISOLATED=true ;;
+      --new-branch) NEW_BRANCH="${2:?'--new-branch requires a base branch'}"; shift ;;
+      --ticket) TICKET="${2:?'--ticket requires a ticket ID'}"; shift ;;
+      -m) PROMPT="${2:?'-m requires a prompt'}"; shift ;;
+      --no-launch) AUTO_LAUNCH=false ;;
+      -p) PREFIX="${2:?'-p requires a value'}"; shift ;;
+      -*) die "unknown option: $1" ;;
+       *) targets+=("$1") ;;
+    esac
+    shift
+  done
+
+  [[ ${#targets[@]} -gt 0 ]] || die "no targets specified"
+
+  if [[ -n "$TICKET" ]]; then
+    fetch_linear_ticket "$TICKET"
+    ISOLATED=true
+    if [[ -z "$NEW_BRANCH" ]]; then
+      NEW_BRANCH="main"
+    fi
+    if [[ -z "$PROMPT" ]]; then
+      local ticket_prompt="Linear ticket: ${TICKET}"
+      ticket_prompt+="\nTitle: ${TICKET_TITLE}"
+      [[ -n "$TICKET_URL" ]] && ticket_prompt+="\nURL: ${TICKET_URL}"
+      if [[ -n "$TICKET_DESC" ]]; then
+        ticket_prompt+="\n\nDescription:\n${TICKET_DESC}"
+      fi
+      ticket_prompt+="\n\nInstructions:"
+      ticket_prompt+="\n1. Read and understand the ticket above"
+      ticket_prompt+="\n2. Explore the codebase to understand the relevant code"
+      ticket_prompt+="\n3. Implement the fix/feature described in the ticket"
+      ticket_prompt+="\n4. Make sure to test your changes"
+      ticket_prompt+="\n5. Create a PR with the ticket ID ${TICKET} in the title"
+      PROMPT="$(printf '%b' "$ticket_prompt")"
+    fi
+  fi
+
+  if $ISOLATED; then
+    local short_id
+    short_id="$(date +%s | shasum | cut -c1-6)"
+    local wt_branch
+    if [[ -n "$TICKET" ]]; then
+      wt_branch="${TICKET}"
+    elif [[ -n "$NEW_BRANCH" ]]; then
+      wt_branch="${NEW_BRANCH}-${short_id}"
+    else
+      wt_branch="wt-${short_id}"
+    fi
+    local expanded=()
+    for t in "${targets[@]}"; do
+      if [[ "$t" == *":"* ]]; then
+        expanded+=("$t")
+      else
+        expanded+=("${t}:${wt_branch}")
+      fi
+    done
+    targets=("${expanded[@]}")
+    echo "worktree branch: $wt_branch"
+  fi
+
+  if $GROUP_MODE && [[ ${#targets[@]} -gt 1 ]]; then
+    local joined
+    joined="$(IFS='+'; echo "${targets[*]}")"
+    targets=("$joined")
+  fi
+
+  for target in "${targets[@]}"; do
+    local sess
+    sess="$(session_name_from_target "$target")"
+
+    if [[ "$target" == *"+"* ]]; then
+      IFS='+' read -ra pieces <<< "$target"
+      local work_dirs=()
+      local repo_names=()
+
+      for piece in "${pieces[@]}"; do
+        resolve_piece "$piece"
+        work_dirs+=("$PIECE_WORK_DIR")
+        repo_names+=("$(basename "$PIECE_WORK_DIR")")
+        if $PIECE_IS_WORKTREE; then
+          save_worktree_meta "$sess" "$PIECE_REPO_PATH" "$PIECE_WORK_DIR"
+        fi
+      done
+
+      local session_dir="${BASE_PATH}"
+
+      if tmux has-session -t "=$sess" 2>/dev/null; then
+        echo "session exists:   $sess  →  ${repo_names[*]}"
+      else
+        echo "creating session: $sess  →  ${repo_names[*]}"
+        tmux new-session -d -s "$sess" -c "$session_dir"
+
+        if $AUTO_LAUNCH; then
+          local repo_context="You are working across multiple repos:\n"
+          for wd in "${work_dirs[@]}"; do
+            repo_context+="  - ${wd}\n"
+          done
+
+          if [[ -n "$PROMPT" ]]; then
+            local full_prompt
+            full_prompt="$(printf '%b' "$repo_context")"$'\n\n'"${PROMPT}"
+            local escaped_prompt="${full_prompt//\'/\'\\\'\'}"
+            tmux send-keys -t "$sess" "claude -p '${escaped_prompt}'" Enter
+          else
+            for wd in "${work_dirs[@]}"; do
+              tmux send-keys -t "$sess" "echo 'repo: ${wd}'" Enter
+            done
+            tmux send-keys -t "$sess" "claude" Enter
+          fi
+        fi
+      fi
+
+    else
+      resolve_piece "$target"
+      local work_dir="$PIECE_WORK_DIR"
+      if $PIECE_IS_WORKTREE; then
+        save_worktree_meta "$sess" "$PIECE_REPO_PATH" "$PIECE_WORK_DIR"
+      fi
+
+      if tmux has-session -t "=$sess" 2>/dev/null; then
+        echo "session exists:   $sess  →  $work_dir"
+      else
+        echo "creating session: $sess  →  $work_dir"
+        tmux new-session -d -s "$sess" -c "$work_dir"
+        if $AUTO_LAUNCH; then
+          if [[ -n "$PROMPT" ]]; then
+            local escaped_prompt="${PROMPT//\'/\'\\\'\'}"
+            tmux send-keys -t "$sess" "claude -p '${escaped_prompt}'" Enter
+          else
+            tmux send-keys -t "$sess" "claude" Enter
+          fi
+        fi
+      fi
+    fi
+  done
+
+  if [[ -z "$PROMPT" ]]; then
+    echo ""
+    echo "attaching to: $sess"
+    exec tmux attach -t "=$sess"
+  else
+    echo ""
+    echo "── Active sessions ──"
+    tmux list-sessions -F "  #{session_name}  →  #{session_path}" 2>/dev/null \
+      | grep "^  ${PREFIX}-" || echo "  (none)"
+    echo ""
+    echo "Attach with:  $SCRIPT_NAME attach $sess"
+  fi
+}
+
+cmd_list() {
+  echo "── Agent sessions ──"
+  tmux list-sessions -F "  #{session_name}  (#{session_windows} windows)  #{session_path}" 2>/dev/null \
+    | grep "^  ${PREFIX}-" || echo "  (none)"
+}
+
+cmd_repos() {
+  local source="not configured"
+  [[ -f "$REPOS_FILE" ]] && source="$REPOS_FILE"
+  echo "── Configured repos (source: ${source}) ──"
+  for entry in "${REPOS[@]}"; do
+    IFS='|' read -r alias path remote <<< "$entry"
+    local status="ok"
+    [[ ! -d "$path" ]] && status="NOT FOUND"
+    printf "  %-16s %s" "$alias" "$path"
+    [[ -n "$remote" ]] && printf "  (%s)" "$remote"
+    [[ "$status" != "ok" ]] && printf "  [%s]" "$status"
+    echo ""
+  done
+}
+
+cmd_attach() {
+  [[ $# -ge 1 ]] || die "usage: $SCRIPT_NAME attach <session-name>"
+  local input="$1"
+  local sess="$input"
+  if ! tmux has-session -t "=$sess" 2>/dev/null; then
+    sess="${PREFIX}-${input}"
+  fi
+  tmux has-session -t "=$sess" 2>/dev/null || die "no session named '$input' or '$sess'"
+  exec tmux attach -t "=$sess"
+}
+
+cmd_stop() {
+  [[ $# -ge 1 ]] || die "usage: $SCRIPT_NAME stop <session-name | --all>"
+
+  if [[ "$1" == "--all" ]]; then
+    local sessions
+    sessions="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^${PREFIX}-" || true)"
+    if [[ -z "$sessions" ]]; then
+      echo "no active agent sessions"
+      if [[ -d "$SESSIONS_DIR" ]]; then
+        for meta_file in "$SESSIONS_DIR"/*; do
+          [[ -f "$meta_file" ]] || continue
+          local orphan_sess
+          orphan_sess="$(basename "$meta_file")"
+          echo "cleaning orphaned worktrees for: $orphan_sess"
+          cleanup_worktrees_for_session "$orphan_sess"
+        done
+      fi
+      return
+    fi
+    while IFS= read -r sess; do
+      echo "killing session: $sess"
+      tmux kill-session -t "=$sess"
+      cleanup_worktrees_for_session "$sess"
+    done <<< "$sessions"
+  else
+    local input="$1"
+    local sess="$input"
+    if ! tmux has-session -t "=$sess" 2>/dev/null; then
+      sess="${PREFIX}-${input}"
+    fi
+    if tmux has-session -t "=$sess" 2>/dev/null; then
+      echo "killing session: $sess"
+      tmux kill-session -t "=$sess"
+    else
+      echo "no session named '$input' or '$sess' (cleaning up worktrees anyway)"
+    fi
+    cleanup_worktrees_for_session "$sess"
+  fi
+}
+
+cmd_web() {
+  # Ensure bun is available
+  local bun_bin="${HOME}/.bun/bin/bun"
+  if [[ ! -x "$bun_bin" ]]; then
+    bun_bin="$(command -v bun 2>/dev/null)" || die "bun not found — run ./setup.sh first"
+  fi
+
+  if [[ ! -d "$WEB_UI_DIR/node_modules" ]]; then
+    echo "installing dependencies..."
+    (cd "$WEB_UI_DIR" && "$bun_bin" install)
+  fi
+
+  echo "starting web dashboard..."
+  echo "  server: http://localhost:4800"
+  echo "  UI:     http://localhost:5173"
+  echo ""
+
+  (sleep 2 && open "http://localhost:5173" 2>/dev/null) &
+
+  exec "$bun_bin" run --cwd "$WEB_UI_DIR" dev
+}
+
+# ── Main ─────────────────────────────────────────────────
+
+[[ $# -ge 1 ]] || usage
+
+CMD="$1"; shift
+case "$CMD" in
+  start)  cmd_start "$@" ;;
+  list)   cmd_list "$@" ;;
+  attach) cmd_attach "$@" ;;
+  stop)   cmd_stop "$@" ;;
+  clean)  cmd_stop "$@" ;;
+  repos)  cmd_repos "$@" ;;
+  web)    cmd_web "$@" ;;
+  -h|--help|help) usage ;;
+  *) die "unknown command: $CMD (try '$SCRIPT_NAME --help')" ;;
+esac
