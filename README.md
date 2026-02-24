@@ -51,6 +51,14 @@ agentdock web
 
 Opens http://localhost:5173 with the API server on port 4800.
 
+**Voice input (optional):**
+
+```bash
+.venv/bin/python bin/whisper-server.py
+```
+
+First run downloads ~1.6GB model from HuggingFace. Requires ffmpeg (`brew install ffmpeg` or `sudo apt install ffmpeg`).
+
 **CLI:**
 
 ```bash
