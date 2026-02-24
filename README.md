@@ -103,6 +103,10 @@ All integrations are optional and activate only when configured:
 
 For agent-side ticket management (comments, updates), install the [Linear MCP server](https://github.com/linear/linear-mcp) in your agent's MCP configuration.
 
+### Recommended: Session Persistence
+
+[Cortex](https://github.com/hjertefolger/cortex) adds persistent local memory to Claude Code sessions. It automatically archives context to a local SQLite database and enables cross-session recall using hybrid semantic + keyword search. Works seamlessly inside agentdock sessions — install it in your Claude Code MCP config and memories will persist across session restarts, compactions, and token limit resets.
+
 ## How It Works
 
 1. **Create a session** — pick repos, choose an agent (Claude or Cursor), optionally enable worktree isolation
