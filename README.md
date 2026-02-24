@@ -19,6 +19,7 @@ Create sessions, watch live terminal output, type input, switch between agents m
 - **Prompt templates** — Save and reuse common prompts
 - **Linear integration** — Create sessions from Linear tickets (via [Linear MCP](https://github.com/linear/linear-mcp))
 - **Slack integration** — Pull context from Slack threads into agent prompts
+- **Mobile-friendly UI** — Manage agents from your phone or tablet
 - **Browser notifications** — Get notified when agents finish or need input
 - **Password protection** — Optional authentication for network access
 
