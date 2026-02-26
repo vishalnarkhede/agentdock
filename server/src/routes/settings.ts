@@ -4,6 +4,7 @@ import {
   addRepo,
   removeRepo,
   hasReposFile,
+  hasBasePath,
   getBasePath,
   setBasePath,
   getLinearApiKey,
@@ -15,6 +16,9 @@ import {
   getSlackToken,
   setSlackToken,
   deleteSlackToken,
+  getCustomActions,
+  saveCustomAction,
+  deleteCustomAction,
 } from "../services/config";
 import type { RepoConfig } from "../types";
 
@@ -137,11 +141,38 @@ app.get("/status", (c) => {
   const repos = getRepos();
   return c.json({
     firstRun: !hasReposFile() && repos.length > 0, // has legacy repos but no repos.json
+    needsSetup: !hasBasePath() && !hasReposFile(),
+    basePath: getBasePath(),
     repoCount: repos.length,
     hasReposFile: hasReposFile(),
     linear: !!getLinearApiKey(),
     slack: !!getSlackToken(),
   });
+});
+
+// ─── Custom quick actions ───
+
+app.get("/quick-actions", (c) => {
+  return c.json(getCustomActions());
+});
+
+app.post("/quick-actions", async (c) => {
+  const body = await c.req.json();
+  if (!body.label || !body.prompt) {
+    return c.json({ error: "label and prompt are required" }, 400);
+  }
+  const action = saveCustomAction({
+    label: body.label,
+    hint: body.hint || "",
+    prompt: body.prompt,
+  });
+  return c.json(action, 201);
+});
+
+app.delete("/quick-actions/:id", (c) => {
+  const id = c.req.param("id");
+  deleteCustomAction(id);
+  return c.json({ ok: true });
 });
 
 export default app;

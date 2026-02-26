@@ -294,10 +294,19 @@ export interface IntegrationStatus {
 
 export interface SettingsStatus {
   firstRun: boolean;
+  needsSetup: boolean;
+  basePath: string;
   repoCount: number;
   hasReposFile: boolean;
   linear: boolean;
   slack: boolean;
+}
+
+export interface CustomAction {
+  id: string;
+  label: string;
+  hint: string;
+  prompt: string;
 }
 
 export async function fetchSettingsHealth(): Promise<SettingsHealth> {
@@ -447,4 +456,26 @@ export async function deleteDbShard(name: string): Promise<void> {
 export async function testDbShard(name: string): Promise<{ ok: boolean; error?: string; duration?: number }> {
   const res = await fetch(`${BASE}/api/db/test/${encodeURIComponent(name)}`);
   return res.json();
+}
+
+// ─── Custom Quick Actions API ───
+
+export async function fetchCustomActions(): Promise<CustomAction[]> {
+  const res = await fetch(`${BASE}/api/settings/quick-actions`);
+  return res.json();
+}
+
+export async function createCustomAction(action: Omit<CustomAction, "id">): Promise<CustomAction> {
+  const res = await fetch(`${BASE}/api/settings/quick-actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(action),
+  });
+  return res.json();
+}
+
+export async function deleteCustomAction(id: string): Promise<void> {
+  await fetch(`${BASE}/api/settings/quick-actions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }

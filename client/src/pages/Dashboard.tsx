@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { QuickActions } from "../components/QuickActions";
@@ -285,6 +285,32 @@ export function Dashboard() {
   const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
   const activeTab = mobileNav?.activeTab ?? "terminal";
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
+
+  // First-run setup
+  const [showSetup, setShowSetup] = useState(false);
+  const [setupPath, setSetupPath] = useState("~/projects");
+  const [setupSaving, setSetupSaving] = useState(false);
+
+  useEffect(() => {
+    fetchSettingsStatus().then((status) => {
+      if (status.needsSetup) {
+        setSetupPath(status.basePath);
+        setShowSetup(true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleSetupSave = async () => {
+    setSetupSaving(true);
+    try {
+      await updateBasePath(setupPath);
+      setShowSetup(false);
+    } catch {
+      // ignore
+    } finally {
+      setSetupSaving(false);
+    }
+  };
 
   const toolbarRef = useRef<HTMLDivElement>(null);
   const activeSession = searchParams.get("session");
@@ -613,6 +639,41 @@ export function Dashboard() {
           </div>
         )}
       </div>
+
+      {showSetup && (
+        <div className="settings-overlay">
+          <div className="settings-modal setup-modal">
+            <div className="settings-header">
+              <span className="settings-title">welcome to agentdock</span>
+            </div>
+            <div className="settings-body">
+              <div className="setup-content">
+                <p className="setup-description">
+                  Set the base directory where your repos live. You can change this later in Settings.
+                </p>
+                <label className="form-label">Base path</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={setupPath}
+                  onChange={(e) => setSetupPath(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSetupSave(); }}
+                  autoFocus
+                />
+                <div className="setup-actions">
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleSetupSave}
+                    disabled={setupSaving || !setupPath.trim()}
+                  >
+                    {setupSaving ? "Saving..." : "Save & Continue"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

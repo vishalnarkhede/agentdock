@@ -16,6 +16,7 @@ const DB_SHARDS_DIR = join(CONFIG_DIR, "db-shards");
 const DB_SHARDS_FILE = join(DB_SHARDS_DIR, "shards.json");
 const SESSIONS_DIR = join(CONFIG_DIR, "sessions");
 const PLANS_DIR = join(CONFIG_DIR, "plans");
+const QUICK_ACTIONS_FILE = join(CONFIG_DIR, "quick-actions.json");
 
 // No legacy repos — configure repos via the web UI or repos.json
 
@@ -24,6 +25,10 @@ function ensureConfigDir(): void {
 }
 
 // ─── Base path ───
+
+export function hasBasePath(): boolean {
+  return existsSync(BASE_PATH_FILE);
+}
 
 export function getBasePath(): string {
   if (process.env.AGENTDOCK_BASE_PATH) return process.env.AGENTDOCK_BASE_PATH;
@@ -362,6 +367,42 @@ export function getPlan(sessionName: string): string | null {
   const planFile = join(PLANS_DIR, `${sessionName}.md`);
   if (!existsSync(planFile)) return null;
   return readFileSync(planFile, "utf-8");
+}
+
+// ─── Custom quick actions ───
+
+export interface CustomAction {
+  id: string;
+  label: string;
+  hint: string;
+  prompt: string;
+}
+
+export function getCustomActions(): CustomAction[] {
+  if (!existsSync(QUICK_ACTIONS_FILE)) return [];
+  try {
+    const data = JSON.parse(readFileSync(QUICK_ACTIONS_FILE, "utf-8"));
+    if (Array.isArray(data)) return data;
+  } catch { /* corrupt file */ }
+  return [];
+}
+
+export function saveCustomAction(action: Omit<CustomAction, "id">): CustomAction {
+  ensureConfigDir();
+  const actions = getCustomActions();
+  const newAction: CustomAction = {
+    ...action,
+    id: `custom-${Date.now().toString(36)}`,
+  };
+  actions.push(newAction);
+  writeFileSync(QUICK_ACTIONS_FILE, JSON.stringify(actions, null, 2));
+  return newAction;
+}
+
+export function deleteCustomAction(id: string): void {
+  const actions = getCustomActions().filter((a) => a.id !== id);
+  ensureConfigDir();
+  writeFileSync(QUICK_ACTIONS_FILE, JSON.stringify(actions, null, 2));
 }
 
 // ─── Exports ───

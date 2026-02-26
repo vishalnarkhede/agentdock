@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { createSession, fetchRepos, slackToFix, fetchIntegrations, fetchDbShards, type IntegrationStatus, type DbShardInfo } from "../api";
+import { createSession, fetchRepos, slackToFix, fetchIntegrations, fetchDbShards, fetchCustomActions, createCustomAction, deleteCustomAction, type IntegrationStatus, type DbShardInfo, type CustomAction } from "../api";
 import type { RepoConfig } from "../types";
 
-type ActionType = "review-pr" | "fix-comments" | "ticket" | "fix-ci" | "customer" | "slack" | "merge" | null;
+type ActionType = "review-pr" | "fix-comments" | "ticket" | "fix-ci" | "customer" | "slack" | "merge" | string | null;
 
 const ACTIONS: { type: ActionType & string; label: string; hint: string }[] = [
   { type: "review-pr", label: "review pr", hint: "paste a PR url" },
@@ -199,11 +199,17 @@ export function QuickActions({ onCreated }: { onCreated: (sessionName?: string) 
   const [dbShards, setDbShards] = useState<DbShardInfo[]>([]);
   const [shardName, setShardName] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [customActions, setCustomActions] = useState<CustomAction[]>([]);
+  const [showCreateAction, setShowCreateAction] = useState(false);
+  const [newActionLabel, setNewActionLabel] = useState("");
+  const [newActionHint, setNewActionHint] = useState("");
+  const [newActionPrompt, setNewActionPrompt] = useState("");
 
   useEffect(() => {
     fetchRepos().then(setRepos);
     fetchIntegrations().then(setIntegrations).catch(() => {});
     fetchDbShards().then(setDbShards).catch(() => {});
+    fetchCustomActions().then(setCustomActions).catch(() => {});
   }, []);
 
   const toggleRepo = (alias: string) => {
@@ -236,6 +242,26 @@ export function QuickActions({ onCreated }: { onCreated: (sessionName?: string) 
       if (targets.length === 0 && (active === "review-pr" || active === "fix-comments" || active === "fix-ci" || active === "merge")) {
         const alias = detectRepoFromUrl(input, repos);
         if (alias) targets = [alias];
+      }
+
+      // Handle custom actions
+      const activeCustom = customActions.find((a) => a.id === active);
+      if (activeCustom) {
+        const prompt = activeCustom.prompt.replace(/\{\{input\}\}/g, input.trim());
+        const result = await createSession({
+          targets,
+          prompt,
+          name: `${activeCustom.label.replace(/\s+/g, "-").toLowerCase()}-${Date.now().toString(36).slice(-4)}`,
+          grouped: true,
+          isolated,
+          dangerouslySkipPermissions: skipPerms || undefined,
+          agentType,
+        });
+        onCreated(result.sessions[0]);
+        setInput("");
+        setActive(null);
+        navigate("/");
+        return;
       }
 
       if (active === "ticket") {
@@ -301,7 +327,9 @@ export function QuickActions({ onCreated }: { onCreated: (sessionName?: string) 
     setCustomerId("");
   };
 
-  const activeAction = ACTIONS.find((a) => a.type === active);
+  const activeBuiltIn = ACTIONS.find((a) => a.type === active);
+  const activeCustomAction = customActions.find((a) => a.id === active);
+  const activeAction = activeBuiltIn || (activeCustomAction ? { type: activeCustomAction.id, label: activeCustomAction.label, hint: activeCustomAction.hint } : undefined);
 
   return (
     <>
@@ -332,6 +360,44 @@ export function QuickActions({ onCreated }: { onCreated: (sessionName?: string) 
               </button>
             );
           })}
+          {customActions.map((ca) => (
+            <button
+              key={ca.id}
+              className={`quick-action-btn quick-action-custom ${active === ca.id ? "quick-action-active" : ""}`}
+              onClick={() => {
+                const next = active === ca.id ? null : ca.id as ActionType;
+                setActive(next);
+                setInput("");
+                setError("");
+                setResult(null);
+                setSelectedRepos([]);
+                setIsolated(false);
+                setSkipPerms(false);
+              }}
+            >
+              {ca.label}
+              <span
+                className="custom-action-delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteCustomAction(ca.id).then(() => {
+                    setCustomActions((prev) => prev.filter((a) => a.id !== ca.id));
+                    if (active === ca.id) setActive(null);
+                  });
+                }}
+                title="Delete custom action"
+              >
+                &times;
+              </span>
+            </button>
+          ))}
+          <button
+            className="quick-action-btn quick-action-add"
+            onClick={() => setShowCreateAction(true)}
+            title="Create custom action"
+          >
+            +
+          </button>
         </div>
       </div>
 
@@ -485,6 +551,72 @@ export function QuickActions({ onCreated }: { onCreated: (sessionName?: string) 
                     </div>
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showCreateAction && createPortal(
+        <div className="settings-overlay" onClick={() => setShowCreateAction(false)}>
+          <div className="settings-modal quick-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-header">
+              <span className="settings-title">create custom action</span>
+              <button className="settings-close-btn" onClick={() => setShowCreateAction(false)}>
+                &times;
+              </button>
+            </div>
+            <div className="settings-body">
+              <div className="quick-action-modal-content">
+                <label className="form-label">Label</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. deploy staging"
+                  value={newActionLabel}
+                  onChange={(e) => setNewActionLabel(e.target.value)}
+                  autoFocus
+                />
+                <label className="form-label">Input hint</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. branch name"
+                  value={newActionHint}
+                  onChange={(e) => setNewActionHint(e.target.value)}
+                />
+                <label className="form-label">Prompt template</label>
+                <textarea
+                  className="form-textarea"
+                  placeholder={"Use {{input}} for user input\ne.g. Deploy {{input}} to staging"}
+                  value={newActionPrompt}
+                  onChange={(e) => setNewActionPrompt(e.target.value)}
+                  rows={5}
+                />
+                <div className="quick-action-modal-actions">
+                  <button
+                    className="btn btn-primary"
+                    disabled={!newActionLabel.trim() || !newActionPrompt.trim()}
+                    onClick={async () => {
+                      const action = await createCustomAction({
+                        label: newActionLabel.trim(),
+                        hint: newActionHint.trim(),
+                        prompt: newActionPrompt.trim(),
+                      });
+                      setCustomActions((prev) => [...prev, action]);
+                      setShowCreateAction(false);
+                      setNewActionLabel("");
+                      setNewActionHint("");
+                      setNewActionPrompt("");
+                    }}
+                  >
+                    Create
+                  </button>
+                  <button className="btn" onClick={() => setShowCreateAction(false)}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
