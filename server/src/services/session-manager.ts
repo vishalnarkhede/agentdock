@@ -23,7 +23,6 @@ import {
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
 import { fetchTicket, buildTicketPrompt } from "./linear";
-import { syncRepoConfig } from "./config-sync";
 import type { CreateSessionRequest, LinearTicket, AgentType } from "../types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -139,13 +138,6 @@ async function launchAgent(
   dangerouslySkipPermissions?: boolean,
   parentSession?: string,
 ): Promise<void> {
-  // Sync configuration before launching agent
-  try {
-    await syncRepoConfig(cwd);
-  } catch (err) {
-    // Don't fail launch if sync fails, just log it
-    console.warn(`Config sync failed for ${cwd}:`, err);
-  }
 
   // Pass env vars via tmux's -e flag so they are set BEFORE the shell starts.
   // This avoids race conditions with shell init (oh-my-zsh prompts, plugins, etc.)
