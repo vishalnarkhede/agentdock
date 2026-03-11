@@ -14,11 +14,11 @@ Create sessions, watch live terminal output, type input, switch between agents m
 - **Git worktrees** — Isolate work with automatic worktree creation per session
 - **Multi-repo sessions** — Work across multiple repositories in grouped sessions
 - **Live terminal** — Stream agent output in real-time via WebSocket + xterm.js
-- **Quick actions** — One-click workflows: fix a ticket, review a PR, implement from a Slack thread
 - **Voice input** — Dictate prompts using local Whisper transcription
 - **Prompt templates** — Save and reuse common prompts
-- **Linear integration** — Create sessions from Linear tickets (via [Linear MCP](https://github.com/linear/linear-mcp))
-- **Slack integration** — Pull context from Slack threads into agent prompts
+- **Session pinning** — Pin important sessions to the top of the list
+- **Collapsible sidebar** — Maximize terminal space with one click
+- **Auto plan tracking** — Agents automatically save plans viewable in the Plan tab
 - **Mobile-friendly UI** — Manage agents from your phone or tablet
 - **Browser notifications** — Get notified when agents finish or need input
 - **Password protection** — Optional authentication for network access
@@ -92,17 +92,13 @@ Repos are expected under a base directory (default: `~/projects`). Override with
 export AGENTDOCK_BASE_PATH="$HOME/code"
 ```
 
-### Optional Integrations
+### Optional Configuration
 
-All integrations are optional and activate only when configured:
+| Config file | Purpose |
+|---|---|
+| `~/.config/agentdock/auth-password` | Protect the web UI with a password |
 
-| Integration | Config file | Purpose |
-|---|---|---|
-| Linear | `~/.config/agentdock/linear-api-key` | Create sessions from tickets |
-| Slack | `~/.config/agentdock/slack-token` | Pull context from Slack threads |
-| Password | `~/.config/agentdock/password` | Protect the web UI |
-
-For agent-side ticket management (comments, updates), install the [Linear MCP server](https://github.com/linear/linear-mcp) in your agent's MCP configuration.
+MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be added via **Settings > MCP Servers** in the web UI and are automatically synced to all agent configs.
 
 ### Recommended: Session Persistence
 
@@ -140,12 +136,11 @@ agentdock/
   client/                 # React + Vite + xterm.js (port 5173)
     src/
       pages/
-        Dashboard.tsx       # Session grid with status
-        CreateSession.tsx   # New session form
-        SessionDetail.tsx   # Live terminal view
+        Dashboard.tsx       # Split-panel: session list + terminal/plan/changes
+        CreateSession.tsx   # New session form with repo search + templates
       components/
         TerminalView.tsx    # xterm.js + WebSocket
-        QuickActions.tsx    # One-click workflows
+        ChangesView.tsx     # Git diff viewer with inline commenting
         SubAgentsView.tsx   # Sub-agent monitoring
 ```
 
