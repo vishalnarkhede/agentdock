@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { Rocket, Save, ArrowLeft } from "lucide-react";
 import {
   createSession,
   fetchTemplates,
@@ -77,6 +78,16 @@ export function CreateSession() {
 
   return (
     <div className="page">
+      <button
+        type="button"
+        className="btn btn-sm"
+        onClick={() => navigate("/")}
+        style={{ marginBottom: 12 }}
+      >
+        <ArrowLeft size={14} className="inline mr-1" />
+        back
+      </button>
+
       {templates.length > 0 && (
         <div className="templates-section">
           <div className="form-label">Templates</div>
@@ -173,7 +184,7 @@ export function CreateSession() {
 
         <div className="form-actions">
           <button type="submit" className="btn btn-primary btn-large" disabled={submitting}>
-            {submitting ? "creating..." : "./launch"}
+            {submitting ? "creating..." : <><Rocket size={14} className="inline mr-1" />./launch</>}
           </button>
           <button
             type="button"
@@ -181,7 +192,7 @@ export function CreateSession() {
             onClick={handleSaveTemplate}
             disabled={savingTemplate}
           >
-            save as template
+            <Save size={14} className="inline mr-1" />save as template
           </button>
         </div>
       </form>

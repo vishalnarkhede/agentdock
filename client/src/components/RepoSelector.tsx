@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { Search } from "lucide-react";
 import { fetchRepos } from "../api";
 import type { RepoConfig } from "../types";
 
@@ -53,13 +54,21 @@ export function RepoSelector({ selected, onChange }: Props) {
       <label className="form-label">Repositories</label>
       <p className="form-hint">Select which repos the agent will work in. Multiple repos create one session with access to all of them.</p>
       {repos.length > INITIAL_LIMIT && (
-        <input
-          type="text"
-          className="form-input repo-search"
-          placeholder="Search repos..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="relative">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2"
+            style={{ color: "var(--text-dim)" }}
+          />
+          <input
+            type="text"
+            className="form-input repo-search"
+            style={{ paddingLeft: 32 }}
+            placeholder="Search repos..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       )}
       <div className="repo-list">
         {visible.map((repo) => (

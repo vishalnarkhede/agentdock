@@ -492,6 +492,15 @@ h1 {
   color: var(--text-dim);
 }
 
+.sidebar-section-header {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .sidebar-expand-btn {
   font-size: calc(var(--fs-base) - 1px);
   color: var(--text-dim);

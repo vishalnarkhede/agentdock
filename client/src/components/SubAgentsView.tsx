@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { Users } from "lucide-react";
+import { motion } from "framer-motion";
+import { StatusIndicator, AgentAvatar } from "./StatusIndicator";
 import { deleteSession } from "../api";
 import type { SessionInfo } from "../types";
 
@@ -64,13 +67,22 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
   if (children.length === 0) {
     return (
       <div className="sub-agents-view">
-        <div className="sub-agents-empty">
-          <div className="sub-agents-empty-icon">&#x2693;</div>
-          <div>no sub-agents running</div>
-          <div className="sub-agents-empty-hint">
-            the agent can spawn sub-agents using the ad-agent CLI
+        <motion.div
+          className="flex flex-col items-center justify-center py-16"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div
+            className="flex items-center justify-center rounded-2xl mb-3"
+            style={{ width: 48, height: 48, background: "var(--bg-hover)" }}
+          >
+            <Users size={22} style={{ color: "var(--text-dim)" }} />
           </div>
-        </div>
+          <p style={{ color: "var(--text-dim)", fontSize: 13 }}>No sub-agents yet</p>
+          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 4, opacity: 0.7 }}>
+            The agent will spawn helpers automatically when tackling complex tasks.
+          </p>
+        </motion.div>
       </div>
     );
   }
@@ -119,7 +131,7 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
               onClick={() => onSelectChild(child.name)}
             >
               <div className="sub-agent-card-header">
-                <span className={`sub-agent-dot status-${ds}`} />
+                <StatusIndicator status={ds} size="sm" />
                 <span className="sub-agent-name">{child.displayName}</span>
                 <span className={`sub-agent-status-badge status-${ds}`}>
                   {statusLabel(child)}
@@ -138,9 +150,7 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
                 </span>
                 <span className="sub-agent-age">{timeAgo(child.created)}</span>
                 {child.agentType && (
-                  <span className="sub-agent-agent">
-                    {child.agentType === "claude" ? "Claude" : "Cursor"}
-                  </span>
+                  <AgentAvatar agentType={child.agentType as "claude" | "cursor"} size="sm" />
                 )}
                 <button
                   className="sub-agent-view-btn"

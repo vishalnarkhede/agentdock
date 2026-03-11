@@ -9,6 +9,7 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
 import { MicButton } from "./MicButton";
+import { Copy, ExternalLink, Mic, ArrowRightLeft, Maximize2, Minimize2, Wifi, WifiOff } from "lucide-react";
 import type { AgentType } from "../types";
 
 interface PaneSnapshot {
@@ -348,13 +349,14 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
   const toolbarContent = (
     <div className={`terminal-toolbar ${connected ? "connected" : "disconnected"}`}>
-      <span className="terminal-toolbar-status">
-        {connected ? "Connected" : "Connecting..."}
+      <span className="terminal-toolbar-status" title={connected ? "Connected" : "Connecting..."}>
+        {connected ? <Wifi size={14} /> : <WifiOff size={14} />}
       </span>
       <div className="terminal-status-actions">
         {lastContent && (
           <button
             className="terminal-copy-btn"
+            title={copied ? "Copied!" : "Copy terminal content"}
             onClick={() => {
               const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
               navigator.clipboard.writeText(clean.trim());
@@ -362,7 +364,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
               setTimeout(() => setCopied(false), 1500);
             }}
           >
-            {copied ? "copied" : "copy"}
+            <Copy size={14} />
           </button>
         )}
         {connected && (
@@ -371,7 +373,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             onClick={() => openInIterm(sessionName)}
             title="Open in iTerm2"
           >
-            iTerm
+            <ExternalLink size={14} />
           </button>
         )}
         {connected && <MicButton onTranscript={handleTranscript} />}
@@ -382,7 +384,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             disabled={switchingAgent}
             title={`Switch to ${agentType === "claude" ? "Cursor" : "Claude"}`}
           >
-            {switchingAgent ? "..." : agentType === "claude" ? "→ Cursor" : "→ Claude"}
+            {switchingAgent ? "..." : <><ArrowRightLeft size={14} /> {agentType === "claude" ? "Cursor" : "Claude"}</>}
           </button>
         )}
         <button
@@ -390,7 +392,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           onClick={() => setFullscreen((f) => !f)}
           title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
         >
-          {fullscreen ? "exit" : "full"}
+          {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
       </div>
     </div>

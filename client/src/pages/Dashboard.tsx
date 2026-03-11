@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,6 +10,7 @@ import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
 import { StatusIndicator, AgentAvatar, ActivitySparkline, ProgressBar } from "../components/StatusIndicator";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo } from "../types";
 
@@ -545,6 +546,20 @@ export function Dashboard() {
     setGoBack?.(() => setMobileShowTerminal(false));
   }, [setGoBack]);
 
+  // Keyboard shortcuts
+  useKeyboardShortcuts([
+    { key: "n", handler: () => navigate("/create"), ignoreInputs: true },
+    { key: "b", meta: true, handler: () => setSidebarCollapsed((c) => !c) },
+  ]);
+
+  // Compute pinned vs unpinned for section headers
+  const hasPinnedSessions = orderedSessions.some(
+    (e) => !e.isChild && pinnedSessions.has(e.session.name),
+  );
+  const hasUnpinnedSessions = orderedSessions.some(
+    (e) => !e.isChild && !pinnedSessions.has(e.session.name),
+  );
+
   return (
     <div className={`split-layout ${mobileShowTerminal && activeSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div className="split-sidebar">
@@ -595,32 +610,44 @@ export function Dashboard() {
               </button>
             </motion.div>
           ) : (
-            orderedSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
-              <SessionRow
-                key={session.name}
-                session={session}
-                active={session.name === activeSession}
-                isChild={isChild}
-                isLastChild={isLastChild}
-                childrenSummary={childrenSummary}
-                childrenExpanded={childrenExpanded}
-                onToggleChildren={() => toggleParentCollapse(session.name)}
-                pinned={pinnedSessions.has(session.name)}
-                onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
-                onSelect={() => {
-                  setActiveSession(session.name);
-                  setMobileShowTerminal(true);
-                }}
-                onStopped={handleStopped}
-                draggable={!isChild}
-                onDragStart={!isChild ? handleDragStart(parentIdx) : undefined}
-                onDragOver={!isChild ? handleDragOver(parentIdx) : undefined}
-                onDragEnd={!isChild ? handleDragEnd : undefined}
-                onDrop={!isChild ? handleDrop(parentIdx) : undefined}
-                isDragging={!isChild && dragIdx === parentIdx}
-                isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
-              />
-            ))
+            orderedSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }, idx) => {
+              const isPinned = !isChild && pinnedSessions.has(session.name);
+              const isFirstPinned = isPinned && !orderedSessions.slice(0, idx).some(e => !e.isChild && pinnedSessions.has(e.session.name));
+              const isFirstUnpinned = !isChild && !pinnedSessions.has(session.name) && !orderedSessions.slice(0, idx).some(e => !e.isChild && !pinnedSessions.has(e.session.name));
+              return (
+                <React.Fragment key={session.name}>
+                  {isFirstPinned && hasPinnedSessions && (
+                    <div className="sidebar-section-header">📌 Pinned</div>
+                  )}
+                  {isFirstUnpinned && hasUnpinnedSessions && hasPinnedSessions && (
+                    <div className="sidebar-section-header">🚀 Sessions</div>
+                  )}
+                  <SessionRow
+                    session={session}
+                    active={session.name === activeSession}
+                    isChild={isChild}
+                    isLastChild={isLastChild}
+                    childrenSummary={childrenSummary}
+                    childrenExpanded={childrenExpanded}
+                    onToggleChildren={() => toggleParentCollapse(session.name)}
+                    pinned={pinnedSessions.has(session.name)}
+                    onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
+                    onSelect={() => {
+                      setActiveSession(session.name);
+                      setMobileShowTerminal(true);
+                    }}
+                    onStopped={handleStopped}
+                    draggable={!isChild}
+                    onDragStart={!isChild ? handleDragStart(parentIdx) : undefined}
+                    onDragOver={!isChild ? handleDragOver(parentIdx) : undefined}
+                    onDragEnd={!isChild ? handleDragEnd : undefined}
+                    onDrop={!isChild ? handleDrop(parentIdx) : undefined}
+                    isDragging={!isChild && dragIdx === parentIdx}
+                    isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
+                  />
+                </React.Fragment>
+              );
+            })
           )}
         </div>
       </div>

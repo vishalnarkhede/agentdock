@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { Palette, Terminal, Bell, FolderGit2, Server, Shield, HeartPulse, Search } from "lucide-react";
 import { useSettings, type Settings } from "../hooks/useSettings";
 import { useAuth } from "../hooks/useAuth";
 import {
@@ -27,14 +28,14 @@ type Category =
   | "security"
   | "health";
 
-const CATEGORIES: { id: Category; label: string }[] = [
-  { id: "appearance", label: "Appearance" },
-  { id: "terminal", label: "Terminal" },
-  { id: "notifications", label: "Notifications" },
-  { id: "repos", label: "Repositories" },
-  { id: "mcp", label: "MCP Servers" },
-  { id: "security", label: "Security" },
-  { id: "health", label: "Health" },
+const CATEGORIES: { id: Category; label: string; icon: any }[] = [
+  { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "repos", label: "Repositories", icon: FolderGit2 },
+  { id: "mcp", label: "MCP Servers", icon: Server },
+  { id: "security", label: "Security", icon: Shield },
+  { id: "health", label: "Health", icon: HeartPulse },
 ];
 
 const THEMES: { id: Settings["theme"]; label: string }[] = [
@@ -110,32 +111,41 @@ export function SettingsModal({ open, onClose }: Props) {
         </div>
         <div className="settings-body">
           <div className="settings-sidebar">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                className={`settings-sidebar-btn ${category === cat.id ? "settings-sidebar-btn-active" : ""}`}
-                onClick={() => setCategory(cat.id)}
-              >
-                {cat.label}
-              </button>
-            ))}
+            {CATEGORIES.map((cat) => {
+              const Icon = cat.icon;
+              return (
+                <button
+                  key={cat.id}
+                  className={`settings-sidebar-btn ${category === cat.id ? "settings-sidebar-btn-active" : ""}`}
+                  onClick={() => setCategory(cat.id)}
+                >
+                  <Icon size={16} className="inline mr-2" style={{ verticalAlign: "-2px" }} />
+                  {cat.label}
+                </button>
+              );
+            })}
           </div>
           <div className="settings-panel">
             {category === "appearance" && (
               <>
                 <div className="settings-row">
                   <label className="settings-label">Theme</label>
-                  <select
-                    className="settings-select"
-                    value={settings.theme}
-                    onChange={(e) => updateSetting("theme", e.target.value as Settings["theme"])}
-                  >
-                    {THEMES.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
+                </div>
+                <div className="grid grid-cols-4 gap-2 mb-4">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t.id}
+                      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-[12px] font-medium ${
+                        settings.theme === t.id
+                          ? "border-[var(--accent)] bg-[var(--accent)]/10"
+                          : "border-[var(--border)] hover:border-[var(--text-dim)]"
+                      }`}
+                      style={{ background: settings.theme === t.id ? undefined : "var(--bg-card)" }}
+                      onClick={() => updateSetting("theme", t.id)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
                 </div>
                 <div className="settings-row">
                   <label className="settings-label">Font Size</label>
@@ -268,7 +278,9 @@ function HealthPanel() {
       <div className="settings-health-list">
         {tools.map((tool) => (
           <div key={tool.name} className="settings-health-row">
-            <span className={`settings-health-dot ${tool.installed ? "green" : "red"}`} />
+            <span className={`settings-health-dot ${tool.installed ? "green" : "red"}`}>
+              {tool.installed ? "\u2713" : "\u26A0"}
+            </span>
             <span className="settings-health-name">{tool.name}</span>
             {tool.installed ? (
               <span className="settings-health-version">{tool.version}</span>
