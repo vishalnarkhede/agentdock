@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync } from "fs";
 import { join } from "path";
-import type { RepoConfig, WorktreeMeta, DbShard } from "../types";
+import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
 
 import { homedir } from "os";
 
@@ -80,6 +80,67 @@ export function addRepo(repo: RepoConfig): void {
 export function removeRepo(alias: string): void {
   const repos = getRepos().filter((r) => r.alias !== alias);
   saveReposFile(repos);
+}
+
+/** Sync repos.json with what's actually on disk in the base path. */
+export function syncRepos(): void {
+  const scanned = scanBasePath();
+  if (scanned.length === 0) return;
+  const current = getRepos();
+  const currentByPath = new Map(current.map((r) => [r.path, r]));
+  const scannedPaths = new Set(scanned.map((r) => r.path));
+
+  let changed = false;
+  const merged = [...current];
+
+  // Add new repos found on disk
+  for (const repo of scanned) {
+    if (!currentByPath.has(repo.path)) {
+      merged.push(repo);
+      changed = true;
+    }
+  }
+
+  // Remove repos whose directories no longer exist
+  const filtered = merged.filter((r) => {
+    if (scannedPaths.has(r.path)) return true;
+    // Keep repos outside the base path (manually added)
+    const base = getBasePath();
+    if (!r.path.startsWith(base)) return true;
+    // Remove if directory is gone
+    if (!existsSync(r.path)) {
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+
+  if (changed) saveReposFile(filtered);
+}
+
+export function scanBasePath(): RepoConfig[] {
+  const base = getBasePath();
+  if (!existsSync(base)) return [];
+  const entries = readdirSync(base, { withFileTypes: true });
+  const repos: RepoConfig[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const dirPath = join(base, entry.name);
+    if (existsSync(join(dirPath, ".git"))) {
+      // Try to get remote URL
+      let remote: string | undefined;
+      try {
+        const configFile = join(dirPath, ".git", "config");
+        if (existsSync(configFile)) {
+          const content = readFileSync(configFile, "utf-8");
+          const match = content.match(/url\s*=\s*(.+)/);
+          if (match) remote = match[1].trim();
+        }
+      } catch { /* ignore */ }
+      repos.push({ alias: entry.name, path: dirPath, remote });
+    }
+  }
+  return repos;
 }
 
 export function hasReposFile(): boolean {
@@ -403,6 +464,107 @@ export function deleteCustomAction(id: string): void {
   const actions = getCustomActions().filter((a) => a.id !== id);
   ensureConfigDir();
   writeFileSync(QUICK_ACTIONS_FILE, JSON.stringify(actions, null, 2));
+}
+
+// ─── MCP Servers ───
+
+const MCP_SERVERS_FILE = join(CONFIG_DIR, "mcp-servers.json");
+const MCP_SYNCED_NAMES_FILE = join(CONFIG_DIR, "mcp-synced-names.json");
+const CLAUDE_CONFIG_FILE = join(HOME, ".claude.json");
+const CURSOR_MCP_FILE = join(HOME, ".cursor", "mcp.json");
+
+export function getMcpServers(): McpServer[] {
+  if (!existsSync(MCP_SERVERS_FILE)) return [];
+  try {
+    const data = JSON.parse(readFileSync(MCP_SERVERS_FILE, "utf-8"));
+    if (Array.isArray(data)) return data;
+  } catch { /* corrupt file */ }
+  return [];
+}
+
+function saveMcpServers(servers: McpServer[]): void {
+  ensureConfigDir();
+  writeFileSync(MCP_SERVERS_FILE, JSON.stringify(servers, null, 2));
+}
+
+function getSyncedNames(): string[] {
+  if (!existsSync(MCP_SYNCED_NAMES_FILE)) return [];
+  try {
+    const data = JSON.parse(readFileSync(MCP_SYNCED_NAMES_FILE, "utf-8"));
+    if (Array.isArray(data)) return data;
+  } catch { /* corrupt file */ }
+  return [];
+}
+
+function saveSyncedNames(names: string[]): void {
+  ensureConfigDir();
+  writeFileSync(MCP_SYNCED_NAMES_FILE, JSON.stringify(names));
+}
+
+function syncAgentConfigFile(filePath: string, servers: McpServer[], previousNames: string[]): void {
+  let config: Record<string, any> = {};
+  if (existsSync(filePath)) {
+    try {
+      config = JSON.parse(readFileSync(filePath, "utf-8"));
+    } catch { /* corrupt file, start fresh */ }
+  }
+
+  if (!config.mcpServers) config.mcpServers = {};
+
+  // Remove previously-synced servers that are no longer in the canonical list
+  const currentNames = new Set(servers.map((s) => s.name));
+  for (const name of previousNames) {
+    if (!currentNames.has(name)) {
+      delete config.mcpServers[name];
+    }
+  }
+
+  // Add/update current servers
+  for (const server of servers) {
+    const entry: Record<string, any> = {
+      type: "stdio",
+      command: server.command,
+      args: server.args,
+    };
+    if (server.env && Object.keys(server.env).length > 0) {
+      entry.env = server.env;
+    }
+    config.mcpServers[server.name] = entry;
+  }
+
+  // Ensure parent directory exists
+  const dir = filePath.substring(0, filePath.lastIndexOf("/"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(filePath, JSON.stringify(config, null, 2));
+}
+
+export function syncMcpToAgents(): void {
+  const servers = getMcpServers();
+  const previousNames = getSyncedNames();
+
+  syncAgentConfigFile(CLAUDE_CONFIG_FILE, servers, previousNames);
+  syncAgentConfigFile(CURSOR_MCP_FILE, servers, previousNames);
+
+  // Update tracked names
+  saveSyncedNames(servers.map((s) => s.name));
+}
+
+export function addMcpServer(server: McpServer): void {
+  const servers = getMcpServers();
+  const existing = servers.findIndex((s) => s.name === server.name);
+  if (existing !== -1) {
+    servers[existing] = server;
+  } else {
+    servers.push(server);
+  }
+  saveMcpServers(servers);
+  syncMcpToAgents();
+}
+
+export function removeMcpServer(name: string): void {
+  const servers = getMcpServers().filter((s) => s.name !== name);
+  saveMcpServers(servers);
+  syncMcpToAgents();
 }
 
 // ─── Exports ───

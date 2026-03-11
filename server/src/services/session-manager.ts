@@ -67,11 +67,35 @@ function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolea
   return `claude --allowedTools ${tools}`;
 }
 
+const PLANS_DIR = `${HOME_DIR}/.config/agentdock/plans`;
+
+function buildSystemInstructions(sessionName: string): string {
+  return [
+    `## AgentDock System Instructions`,
+    ``,
+    `### Plans`,
+    `Whenever you create a plan — whether entering plan mode, being asked to plan, or designing an implementation approach — ALWAYS save it as a markdown file:`,
+    `- Save the plan to: ${PLANS_DIR}/${sessionName}.md`,
+    `- Create the directory if it doesn't exist: mkdir -p ${PLANS_DIR}`,
+    `- Overwrite the file each time the plan is updated`,
+    `- Use clear markdown formatting with headings, checklists, and code blocks`,
+    `- Do this BEFORE presenting the plan to the user — save first, then discuss`,
+    ``,
+    `### After Creating a PR`,
+    `After creating a pull request:`,
+    `1. Update the plan file with the PR link`,
+    `2. Monitor CI with \`gh pr checks <number> --watch\``,
+    `3. If a check fails due to your changes, fix and push. If unrelated, restart the job.`,
+    ``,
+  ].join("\n");
+}
+
 function writePromptFile(sessionName: string, prompt: string): string {
   const { mkdirSync, writeFileSync } = require("fs");
   mkdirSync(PROMPT_DIR, { recursive: true });
   const promptFile = `${PROMPT_DIR}/${sessionName}.txt`;
-  writeFileSync(promptFile, prompt);
+  const fullPrompt = buildSystemInstructions(sessionName) + "\n---\n\n" + prompt;
+  writeFileSync(promptFile, fullPrompt);
   return promptFile;
 }
 

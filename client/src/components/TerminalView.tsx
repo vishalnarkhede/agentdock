@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useNotifications } from "../hooks/useNotifications";
@@ -113,6 +114,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
     fitAddon.fit();
 

@@ -3,10 +3,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
-import { QuickActions } from "../components/QuickActions";
 import { SubAgentsView } from "../components/SubAgentsView";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo } from "../types";
@@ -40,6 +39,8 @@ function SessionRow({
   childrenSummary,
   childrenExpanded,
   onToggleChildren,
+  pinned,
+  onTogglePin,
   draggable,
   onDragStart,
   onDragOver,
@@ -57,6 +58,8 @@ function SessionRow({
   childrenSummary?: { total: number; working: number; done: number; error: number };
   childrenExpanded?: boolean;
   onToggleChildren?: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -126,6 +129,7 @@ function SessionRow({
           </span>
         )}
         <span className={`session-row-dot status-${displayStatus || session.status}`} />
+        {pinned && <span className="session-row-pin" title="Pinned">&#x25C6;</span>}
         <span className="session-row-name">
           {session.displayName}
         </span>
@@ -187,6 +191,11 @@ function SessionRow({
           </button>
           {menuOpen && (
             <div className="session-row-menu">
+              {onTogglePin && (
+                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); }}>
+                  {pinned ? "Unpin" : "Pin to top"}
+                </button>
+              )}
               <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
               <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
               <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
@@ -288,8 +297,10 @@ export function Dashboard() {
 
   // First-run setup
   const [showSetup, setShowSetup] = useState(false);
+  const [setupStep, setSetupStep] = useState<"path" | "repos">("path");
   const [setupPath, setSetupPath] = useState("~/projects");
   const [setupSaving, setSetupSaving] = useState(false);
+  const [discoveredRepos, setDiscoveredRepos] = useState<{ alias: string; path: string; remote?: string; selected: boolean }[]>([]);
 
   useEffect(() => {
     fetchSettingsStatus().then((status) => {
@@ -300,10 +311,29 @@ export function Dashboard() {
     }).catch(() => {});
   }, []);
 
-  const handleSetupSave = async () => {
+  const handleSetupScanRepos = async () => {
     setSetupSaving(true);
     try {
       await updateBasePath(setupPath);
+      const repos = await scanRepos();
+      if (repos.length > 0) {
+        setDiscoveredRepos(repos.map((r) => ({ ...r, selected: true })));
+        setSetupStep("repos");
+      } else {
+        setShowSetup(false);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setSetupSaving(false);
+    }
+  };
+
+  const handleSetupFinish = async () => {
+    setSetupSaving(true);
+    try {
+      const selected = discoveredRepos.filter((r) => r.selected);
+      await Promise.all(selected.map((r) => addSettingsRepo({ alias: r.alias, path: r.path, remote: r.remote })));
       setShowSetup(false);
     } catch {
       // ignore
@@ -330,20 +360,41 @@ export function Dashboard() {
   }, []);
 
   // Drag-and-drop state for reordering parent sessions
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("agentdock-pinned-sessions");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+  const togglePin = useCallback((name: string) => {
+    setPinnedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      localStorage.setItem("agentdock-pinned-sessions", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
-  // Build ordered session list: parents first, then their children indented below
+  // Build ordered session list: pinned first, then parents, then their children indented below
   const orderedSessions = useMemo(() => {
     const childNames = new Set<string>();
     for (const s of sessions) {
       if (s.parentSession) childNames.add(s.name);
     }
 
+    // Separate parents into pinned and unpinned, preserving original order within each group
+    const parents = sessions.filter((s) => !childNames.has(s.name));
+    const pinnedParents = parents.filter((s) => pinnedSessions.has(s.name));
+    const unpinnedParents = parents.filter((s) => !pinnedSessions.has(s.name));
+    const sortedParents = [...pinnedParents, ...unpinnedParents];
+
     const result: { session: SessionInfo; isChild: boolean; isLastChild: boolean; childrenSummary?: { total: number; working: number; done: number; error: number }; childrenExpanded: boolean; parentIdx: number }[] = [];
     let pIdx = 0;
-    for (const session of sessions) {
-      if (childNames.has(session.name)) continue;
+    for (const session of sortedParents) {
 
       // Compute children summary for parents
       const childList = (session.children || [])
@@ -375,7 +426,7 @@ export function Dashboard() {
       }
     }
     return result;
-  }, [sessions, collapsedParents]);
+  }, [sessions, collapsedParents, pinnedSessions]);
 
   // Check if active session has children or is a child (for sub-agents tab & breadcrumb)
   const activeSessionInfo = sessions.find((s) => s.name === activeSession);
@@ -474,7 +525,7 @@ export function Dashboard() {
   }, [setGoBack]);
 
   return (
-    <div className={`split-layout ${mobileShowTerminal && activeSession ? "mobile-show-terminal" : ""}`}>
+    <div className={`split-layout ${mobileShowTerminal && activeSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div className="split-sidebar">
         <div className="sidebar-header">
           <span className="sidebar-title">sessions</span>
@@ -487,16 +538,15 @@ export function Dashboard() {
             <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")}>
               + new
             </button>
+            <button
+              className="btn btn-sm sidebar-collapse-btn"
+              onClick={() => setSidebarCollapsed(true)}
+              title="Collapse sidebar"
+            >
+              &laquo;
+            </button>
           </div>
         </div>
-
-        <QuickActions onCreated={(sessionName) => {
-          refresh();
-          if (sessionName) {
-            setActiveSession(sessionName);
-            setMobileShowTerminal(true);
-          }
-        }} />
 
         <div className="session-list">
           {loading ? (
@@ -520,6 +570,8 @@ export function Dashboard() {
                 childrenSummary={childrenSummary}
                 childrenExpanded={childrenExpanded}
                 onToggleChildren={() => toggleParentCollapse(session.name)}
+                pinned={pinnedSessions.has(session.name)}
+                onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
                 onSelect={() => {
                   setActiveSession(session.name);
                   setMobileShowTerminal(true);
@@ -542,6 +594,15 @@ export function Dashboard() {
         {activeSession ? (
           <>
             <div className="main-tabs">
+              {sidebarCollapsed && (
+                <button
+                  className="main-tab sidebar-expand-btn"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title="Expand sidebar"
+                >
+                  &raquo;
+                </button>
+              )}
               <button
                 className="main-tab mobile-back-btn"
                 onClick={() => setMobileShowTerminal(false)}
@@ -648,27 +709,66 @@ export function Dashboard() {
             </div>
             <div className="settings-body">
               <div className="setup-content">
-                <p className="setup-description">
-                  Set the base directory where your repos live. You can change this later in Settings.
-                </p>
-                <label className="form-label">Base path</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={setupPath}
-                  onChange={(e) => setSetupPath(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleSetupSave(); }}
-                  autoFocus
-                />
-                <div className="setup-actions">
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleSetupSave}
-                    disabled={setupSaving || !setupPath.trim()}
-                  >
-                    {setupSaving ? "Saving..." : "Save & Continue"}
-                  </button>
-                </div>
+                {setupStep === "path" ? (
+                  <>
+                    <p className="setup-description">
+                      Set the base directory where your repos live.
+                    </p>
+                    <label className="form-label">Base path</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={setupPath}
+                      onChange={(e) => setSetupPath(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleSetupScanRepos(); }}
+                      autoFocus
+                    />
+                    <div className="setup-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSetupScanRepos}
+                        disabled={setupSaving || !setupPath.trim()}
+                      >
+                        {setupSaving ? "Scanning..." : "Continue"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="setup-description">
+                      Found {discoveredRepos.length} git repo{discoveredRepos.length !== 1 ? "s" : ""} in <strong>{setupPath}</strong>. Select which ones to add:
+                    </p>
+                    <div className="setup-repo-list">
+                      {discoveredRepos.map((repo, i) => (
+                        <label key={repo.alias} className="setup-repo-item">
+                          <input
+                            type="checkbox"
+                            checked={repo.selected}
+                            onChange={() => setDiscoveredRepos((prev) =>
+                              prev.map((r, j) => j === i ? { ...r, selected: !r.selected } : r)
+                            )}
+                          />
+                          <span className="setup-repo-name">{repo.alias}</span>
+                          {repo.remote && (
+                            <span className="setup-repo-remote">{repo.remote.replace(/^https?:\/\/github\.com\//, "")}</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="setup-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSetupFinish}
+                        disabled={setupSaving}
+                      >
+                        {setupSaving ? "Adding..." : `Add ${discoveredRepos.filter((r) => r.selected).length} repos`}
+                      </button>
+                      <button className="btn" onClick={() => setShowSetup(false)}>
+                        Skip
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

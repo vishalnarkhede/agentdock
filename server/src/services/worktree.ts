@@ -108,6 +108,10 @@ export async function createWorktree(
   }
   // Ensure parent directory exists for session worktrees
   mkdirSync(dirname(wtDir), { recursive: true });
+  // Prune stale worktree entries before creating (handles cases where
+  // a previous worktree directory was deleted without proper git cleanup)
+  await git(repoPath, ["worktree", "prune"]);
+
   const exists = await branchExists(repoPath, branch);
   if (exists) {
     const result = await git(repoPath, ["worktree", "add", wtDir, branch]);
@@ -138,6 +142,10 @@ export async function removeWorktree(
   repoPath: string,
   wtDir: string,
 ): Promise<void> {
-  if (!existsSync(wtDir)) return;
-  await git(repoPath, ["worktree", "remove", "--force", wtDir]);
+  if (existsSync(wtDir)) {
+    await git(repoPath, ["worktree", "remove", "--force", wtDir]);
+  }
+  // Always prune to clean up stale registry entries (e.g. if directory was
+  // already deleted but git still tracks the worktree internally)
+  await git(repoPath, ["worktree", "prune"]);
 }

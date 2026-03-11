@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^2.1.4"
+  },
+  "dependencies": {
+    "@xterm/addon-web-links": "^0.12.0"
   }
 }

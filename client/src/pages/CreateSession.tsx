@@ -77,8 +77,6 @@ export function CreateSession() {
 
   return (
     <div className="page">
-      <h1 className="cursor-blink">new session</h1>
-
       {templates.length > 0 && (
         <div className="templates-section">
           <div className="form-label">Templates</div>

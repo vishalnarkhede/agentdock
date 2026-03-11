@@ -351,6 +351,11 @@ export async function addSettingsRepo(repo: RepoConfig): Promise<void> {
   });
 }
 
+export async function scanRepos(): Promise<RepoConfig[]> {
+  const res = await fetch(`${BASE}/api/settings/repos/scan`);
+  return res.json();
+}
+
 export async function deleteSettingsRepo(alias: string): Promise<void> {
   await fetch(`${BASE}/api/settings/repos/${encodeURIComponent(alias)}`, {
     method: "DELETE",
@@ -476,6 +481,38 @@ export async function createCustomAction(action: Omit<CustomAction, "id">): Prom
 
 export async function deleteCustomAction(id: string): Promise<void> {
   await fetch(`${BASE}/api/settings/quick-actions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+// ─── MCP Servers API ───
+
+export interface McpServerInfo {
+  name: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
+export async function fetchMcpServers(): Promise<McpServerInfo[]> {
+  const res = await fetch(`${BASE}/api/settings/mcp-servers`);
+  return res.json();
+}
+
+export async function addMcpServerApi(server: McpServerInfo): Promise<void> {
+  const res = await fetch(`${BASE}/api/settings/mcp-servers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(server),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to add MCP server");
+  }
+}
+
+export async function deleteMcpServer(name: string): Promise<void> {
+  await fetch(`${BASE}/api/settings/mcp-servers/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
 }

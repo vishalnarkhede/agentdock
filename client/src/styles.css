@@ -470,6 +470,26 @@ h1 {
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--bg);
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
+.sidebar-collapsed .split-sidebar {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+.sidebar-collapse-btn {
+  padding: 5px 8px !important;
+  font-size: calc(var(--fs-base) - 1px) !important;
+  color: var(--text-dim);
+}
+
+.sidebar-expand-btn {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-dim);
+  border-right: 1px solid var(--border);
 }
 
 .sidebar-header {
@@ -565,6 +585,12 @@ h1 {
 .session-row-dot.attached {
   background: var(--cyan);
   box-shadow: 0 0 4px rgba(0, 255, 204, 0.3);
+}
+
+.session-row-pin {
+  font-size: 8px;
+  color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .session-row-name {
@@ -1009,6 +1035,13 @@ h1 {
   color: #444;
 }
 
+.form-hint {
+  margin: -4px 0 4px;
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
 .form-input,
 .form-textarea {
   width: 100%;
@@ -1295,6 +1328,43 @@ h1 {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+
+.setup-repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.setup-repo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 1px);
+}
+
+.setup-repo-item:hover {
+  border-color: var(--accent);
+}
+
+.setup-repo-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.setup-repo-remote {
+  color: var(--text-dim);
+  font-size: calc(var(--fs-base) - 2px);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quick-action-form {
@@ -1617,6 +1687,17 @@ h1 {
 .repo-path {
   color: var(--text-dim);
   font-size: calc(var(--fs-base) - 2px);
+}
+
+.repo-search {
+  margin-bottom: 8px;
+}
+
+.repo-show-more {
+  margin-top: 6px;
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-dim);
+  border-color: var(--border);
 }
 
 /* ─── Main tabs ─── */

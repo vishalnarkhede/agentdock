@@ -4,22 +4,17 @@ import { useSettings, type Settings } from "../hooks/useSettings";
 import { useAuth } from "../hooks/useAuth";
 import {
   fetchSettingsHealth,
-  fetchIntegrations,
   fetchSettingsRepos,
   fetchBasePath,
   updateBasePath,
   addSettingsRepo,
   deleteSettingsRepo,
-  saveIntegrationKey,
-  deleteIntegrationKey,
   setPassword as apiSetPassword,
-  fetchDbShards,
-  addDbShardApi,
-  deleteDbShard,
-  testDbShard,
+  fetchMcpServers,
+  addMcpServerApi,
+  deleteMcpServer,
   type SettingsHealth,
-  type IntegrationStatus,
-  type DbShardInfo,
+  type McpServerInfo,
 } from "../api";
 import type { RepoConfig } from "../types";
 
@@ -28,8 +23,7 @@ type Category =
   | "terminal"
   | "notifications"
   | "repos"
-  | "integrations"
-  | "database"
+  | "mcp"
   | "security"
   | "health";
 
@@ -38,8 +32,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "notifications", label: "Notifications" },
   { id: "repos", label: "Repositories" },
-  { id: "integrations", label: "Integrations" },
-  { id: "database", label: "Database" },
+  { id: "mcp", label: "MCP Servers" },
   { id: "security", label: "Security" },
   { id: "health", label: "Health" },
 ];
@@ -234,8 +227,7 @@ export function SettingsModal({ open, onClose }: Props) {
               </>
             )}
             {category === "repos" && <ReposPanel />}
-            {category === "integrations" && <IntegrationsPanel />}
-            {category === "database" && <DatabasePanel />}
+            {category === "mcp" && <McpServersPanel />}
             {category === "security" && <SecurityPanel />}
             {category === "health" && <HealthPanel />}
           </div>
@@ -412,205 +404,62 @@ function ReposPanel() {
   );
 }
 
-// ─── Integrations Panel ───
+// ─── MCP Servers Panel ───
 
-function IntegrationsPanel() {
-  const [integrations, setIntegrations] = useState<IntegrationStatus | null>(null);
-  const [linearKey, setLinearKey] = useState("");
-  const [linearTeamId, setLinearTeamId] = useState("");
-  const [slackToken, setSlackToken] = useState("");
-  const [saving, setSaving] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    fetchIntegrations().then(setIntegrations);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const handleSave = async (type: "linear-key" | "linear-team-id" | "slack-token", value: string) => {
-    if (!value.trim()) return;
-    setSaving(type);
-    await saveIntegrationKey(type, value.trim());
-    if (type === "linear-key") setLinearKey("");
-    if (type === "linear-team-id") setLinearTeamId("");
-    if (type === "slack-token") setSlackToken("");
-    load();
-    setSaving(null);
-  };
-
-  const handleDelete = async (type: "linear-key" | "linear-team-id" | "slack-token") => {
-    setSaving(type);
-    await deleteIntegrationKey(type);
-    load();
-    setSaving(null);
-  };
-
-  if (!integrations) return <div className="settings-loading">Loading...</div>;
-
-  return (
-    <>
-      <div className="settings-integration-block">
-        <label className="settings-label" style={{ marginBottom: 8, display: "block" }}>Linear</label>
-        <div className="settings-integration-row">
-          <span className="settings-integration-label">API Key</span>
-          <span className={`settings-health-dot ${integrations.linear.configured ? "green" : "red"}`} />
-          {integrations.linear.configured ? (
-            <button
-              className="btn btn-danger-sm"
-              onClick={() => handleDelete("linear-key")}
-              disabled={saving === "linear-key"}
-            >
-              Remove
-            </button>
-          ) : (
-            <div className="settings-inline-form">
-              <input
-                className="form-input"
-                type="password"
-                value={linearKey}
-                onChange={(e) => setLinearKey(e.target.value)}
-                placeholder="lin_api_..."
-              />
-              <button
-                className="btn btn-primary"
-                onClick={() => handleSave("linear-key", linearKey)}
-                disabled={!linearKey || saving === "linear-key"}
-              >
-                Save
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="settings-integration-row">
-          <span className="settings-integration-label">Team ID</span>
-          <span className={`settings-health-dot ${integrations.linear.hasTeamId ? "green" : "red"}`} />
-          {integrations.linear.hasTeamId ? (
-            <button
-              className="btn btn-danger-sm"
-              onClick={() => handleDelete("linear-team-id")}
-              disabled={saving === "linear-team-id"}
-            >
-              Remove
-            </button>
-          ) : (
-            <div className="settings-inline-form">
-              <input
-                className="form-input"
-                value={linearTeamId}
-                onChange={(e) => setLinearTeamId(e.target.value)}
-                placeholder="Team UUID"
-              />
-              <button
-                className="btn btn-primary"
-                onClick={() => handleSave("linear-team-id", linearTeamId)}
-                disabled={!linearTeamId || saving === "linear-team-id"}
-              >
-                Save
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="settings-integration-block">
-        <label className="settings-label" style={{ marginBottom: 8, display: "block" }}>Slack</label>
-        <div className="settings-integration-row">
-          <span className="settings-integration-label">Bot Token</span>
-          <span className={`settings-health-dot ${integrations.slack.configured ? "green" : "red"}`} />
-          {integrations.slack.configured ? (
-            <button
-              className="btn btn-danger-sm"
-              onClick={() => handleDelete("slack-token")}
-              disabled={saving === "slack-token"}
-            >
-              Remove
-            </button>
-          ) : (
-            <div className="settings-inline-form">
-              <input
-                className="form-input"
-                type="password"
-                value={slackToken}
-                onChange={(e) => setSlackToken(e.target.value)}
-                placeholder="xoxb-..."
-              />
-              <button
-                className="btn btn-primary"
-                onClick={() => handleSave("slack-token", slackToken)}
-                disabled={!slackToken || saving === "slack-token"}
-              >
-                Save
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── Database Panel ───
-
-function DatabasePanel() {
-  const [shards, setShards] = useState<DbShardInfo[]>([]);
+function McpServersPanel() {
+  const [servers, setServers] = useState<McpServerInfo[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [testing, setTesting] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; error?: string; duration?: number }>>({});
-  const [error, setError] = useState<string | null>(null);
-
-  // Form state
   const [name, setName] = useState("");
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("5432");
-  const [database, setDatabase] = useState("");
-  const [user, setUser] = useState("");
-  const [password, setPassword] = useState("");
-  const [engine, setEngine] = useState<string>("postgres");
-  const [sslmode, setSslmode] = useState("require");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [envPairs, setEnvPairs] = useState<{ key: string; value: string }[]>([]);
 
   const load = useCallback(() => {
-    fetchDbShards().then(setShards);
+    fetchMcpServers().then(setServers);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const handleAdd = async () => {
-    if (!name || !host || !database || !user || !password) return;
-    setError(null);
-    try {
-      await addDbShardApi({
-        name, host, port: parseInt(port, 10), database, user, password,
-        engine: engine as any, sslmode,
-      });
-      setName(""); setHost(""); setPort("5432"); setDatabase("");
-      setUser(""); setPassword(""); setEngine("postgres"); setSslmode("require");
-      setShowAdd(false);
-      load();
-    } catch (err: any) {
-      setError(err.message);
+    if (!name || !command) return;
+    const parsedArgs = args.trim()
+      ? args.split(/[\s,]+/).map(a => a.replace(/^["']|["']$/g, "")).filter(Boolean)
+      : [];
+    const env: Record<string, string> = {};
+    for (const pair of envPairs) {
+      if (pair.key.trim()) env[pair.key.trim()] = pair.value;
     }
-  };
-
-  const handleDelete = async (shardName: string) => {
-    await deleteDbShard(shardName);
+    await addMcpServerApi({
+      name,
+      command,
+      args: parsedArgs,
+      env: Object.keys(env).length > 0 ? env : undefined,
+    });
+    setName(""); setCommand(""); setArgs(""); setEnvPairs([]);
+    setShowAdd(false);
     load();
   };
 
-  const handleTest = async (shardName: string) => {
-    setTesting(shardName);
-    try {
-      const result = await testDbShard(shardName);
-      setTestResults((prev) => ({ ...prev, [shardName]: result }));
-    } catch {
-      setTestResults((prev) => ({ ...prev, [shardName]: { ok: false, error: "Request failed" } }));
-    }
-    setTesting(null);
+  const handleDelete = async (serverName: string) => {
+    await deleteMcpServer(serverName);
+    load();
   };
+
+  const addEnvPair = () => setEnvPairs([...envPairs, { key: "", value: "" }]);
+  const updateEnvPair = (i: number, field: "key" | "value", val: string) => {
+    const updated = [...envPairs];
+    updated[i][field] = val;
+    setEnvPairs(updated);
+  };
+  const removeEnvPair = (i: number) => setEnvPairs(envPairs.filter((_, idx) => idx !== i));
 
   return (
     <>
+      <p className="settings-security-desc">
+        MCP servers are synced to all agent configs (Claude, Cursor) so every session has access.
+      </p>
       <div className="settings-row">
-        <label className="settings-label">Database Shards</label>
+        <label className="settings-label">Servers</label>
         <button className="btn btn-primary settings-add-btn" onClick={() => setShowAdd(!showAdd)}>
           {showAdd ? "Cancel" : "+ Add"}
         </button>
@@ -618,71 +467,48 @@ function DatabasePanel() {
 
       {showAdd && (
         <div className="settings-add-form">
-          <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. us_east:c1)" />
-          <div className="settings-db-row">
-            <input className="form-input" value={host} onChange={(e) => setHost(e.target.value)} placeholder="Host" style={{ flex: 3 }} />
-            <input className="form-input" value={port} onChange={(e) => setPort(e.target.value)} placeholder="Port" style={{ flex: 1 }} />
+          <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. linear)" />
+          <input className="form-input" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. npx)" />
+          <input className="form-input" value={args} onChange={(e) => setArgs(e.target.value)} placeholder="Args (space-separated, e.g. -y @mseep/linear-mcp)" />
+          <div style={{ marginTop: 4 }}>
+            <label className="settings-label" style={{ fontSize: 12 }}>Environment Variables</label>
+            {envPairs.map((pair, i) => (
+              <div key={i} className="settings-db-row" style={{ marginBottom: 4 }}>
+                <input className="form-input" value={pair.key} onChange={(e) => updateEnvPair(i, "key", e.target.value)} placeholder="KEY" style={{ flex: 1 }} />
+                <input className="form-input" value={pair.value} onChange={(e) => updateEnvPair(i, "value", e.target.value)} placeholder="value" style={{ flex: 2 }} />
+                <button className="btn btn-danger-sm" onClick={() => removeEnvPair(i)}>x</button>
+              </div>
+            ))}
+            <button className="btn btn-sm" onClick={addEnvPair} style={{ marginTop: 4 }}>+ Add env var</button>
           </div>
-          <input className="form-input" value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="Database" />
-          <div className="settings-db-row">
-            <input className="form-input" value={user} onChange={(e) => setUser(e.target.value)} placeholder="User" style={{ flex: 1 }} />
-            <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" style={{ flex: 1 }} />
-          </div>
-          <div className="settings-db-row">
-            <select className="settings-select" value={engine} onChange={(e) => setEngine(e.target.value)} style={{ flex: 1 }}>
-              <option value="postgres">PostgreSQL</option>
-              <option value="cockroachdb">CockroachDB</option>
-            </select>
-            <select className="settings-select" value={sslmode} onChange={(e) => setSslmode(e.target.value)} style={{ flex: 1 }}>
-              <option value="require">SSL: require</option>
-              <option value="verify-full">SSL: verify-full</option>
-              <option value="disable">SSL: disable</option>
-            </select>
-          </div>
-          {error && <div className="form-error">{error}</div>}
-          <button className="btn btn-primary" onClick={handleAdd} disabled={!name || !host || !database || !user || !password}>
-            Add Shard
+          <button className="btn btn-primary" onClick={handleAdd} disabled={!name || !command} style={{ marginTop: 8 }}>
+            Add Server
           </button>
         </div>
       )}
 
       <div className="settings-repo-list">
-        {shards.length === 0 && (
-          <div className="settings-empty">No database shards configured.</div>
+        {servers.length === 0 && (
+          <div className="settings-empty">No MCP servers configured.</div>
         )}
-        {shards.map((shard) => {
-          const result = testResults[shard.name];
-          return (
-            <div key={shard.name} className="settings-repo-row">
-              <div className="settings-repo-info">
-                <span className="settings-repo-alias">{shard.name}</span>
-                <span className="settings-repo-path">
-                  {shard.host}:{shard.port}/{shard.database}
-                </span>
+        {servers.map((server) => (
+          <div key={server.name} className="settings-repo-row">
+            <div className="settings-repo-info">
+              <span className="settings-repo-alias">{server.name}</span>
+              <span className="settings-repo-path">
+                {server.command} {server.args.join(" ")}
+              </span>
+              {server.env && Object.keys(server.env).length > 0 && (
                 <span className="settings-repo-remote">
-                  {shard.engine || "postgres"} &middot; {shard.user}
+                  env: {Object.keys(server.env).join(", ")}
                 </span>
-              </div>
-              <div className="settings-db-actions">
-                {result && (
-                  <span className={`settings-db-test-result ${result.ok ? "green" : "red"}`}>
-                    {result.ok ? `${result.duration}ms` : result.error?.slice(0, 30)}
-                  </span>
-                )}
-                <button
-                  className="btn btn-sm"
-                  onClick={() => handleTest(shard.name)}
-                  disabled={testing === shard.name}
-                >
-                  {testing === shard.name ? "..." : "Test"}
-                </button>
-                <button className="btn btn-danger-sm" onClick={() => handleDelete(shard.name)}>
-                  Remove
-                </button>
-              </div>
+              )}
             </div>
-          );
-        })}
+            <button className="btn btn-danger-sm" onClick={() => handleDelete(server.name)}>
+              Remove
+            </button>
+          </div>
+        ))}
       </div>
     </>
   );
