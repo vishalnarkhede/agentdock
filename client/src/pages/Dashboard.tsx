@@ -2,11 +2,14 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { motion, AnimatePresence } from "framer-motion";
+import { Sparkles, Plus, Skull, PanelLeftClose, PanelLeftOpen, Pin, Copy, FolderOpen, ExternalLink, Trash2 } from "lucide-react";
 import { useSessions } from "../hooks/useSessions";
 import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
+import { StatusIndicator, AgentAvatar, ActivitySparkline, ProgressBar } from "../components/StatusIndicator";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo } from "../types";
 
@@ -122,17 +125,19 @@ function SessionRow({
       onDragEnd={onDragEnd}
       onDrop={onDrop}
     >
+      {/* Line 1: status + name + avatar + pin */}
       <div className="session-row-main">
         {isChild && (
           <span className="session-row-tree-connector">
             {isLastChild ? "\u2514\u2500" : "\u251C\u2500"}
           </span>
         )}
-        <span className={`session-row-dot status-${displayStatus || session.status}`} />
-        {pinned && <span className="session-row-pin" title="Pinned">&#x25C6;</span>}
+        <StatusIndicator status={displayStatus || session.status} size="sm" />
+        {pinned && <Pin size={12} style={{ color: "var(--text-dim)" }} className="shrink-0" />}
         <span className="session-row-name">
           {session.displayName}
         </span>
+        {session.agentType && <AgentAvatar agentType={session.agentType} size="sm" />}
         {session.sessionType && (
           <span className={`session-row-type-badge ${session.sessionType}`}>
             {session.sessionType === "fix-comments" ? "fix comments" :
@@ -160,25 +165,18 @@ function SessionRow({
             )}
           </button>
         )}
-        {displayStatus && (
-          <span className={`session-row-status status-${displayStatus}`}>
-            {displayStatus}
-          </span>
-        )}
         <span className="session-row-age">{timeAgo(session.created)}</span>
+        <ActivitySparkline status={displayStatus || session.status} />
       </div>
-      {session.statusLine && (
-        <div className={`session-row-statusline status-${session.statusLine.type}`}>
-          {session.statusLine.message}
-        </div>
-      )}
+
+      {/* Line 2: repo path + status message */}
       <div className="session-row-meta">
         <span className="session-row-path" title={session.path}>
           {session.path.replace(/^\/Users\/[^/]+\//, "~/")}
         </span>
-        {session.agentType && (
-          <span className="session-row-agent" title={`Agent: ${session.agentType}`}>
-            {session.agentType === "claude" ? "Claude" : "Cursor"}
+        {displayStatus && (
+          <span className={`session-row-status status-${displayStatus}`}>
+            {displayStatus}
           </span>
         )}
         <div className="session-row-menu-wrap" ref={menuRef}>
@@ -193,17 +191,40 @@ function SessionRow({
             <div className="session-row-menu">
               {onTogglePin && (
                 <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); }}>
+                  <Pin size={13} className="inline mr-1.5" style={{ verticalAlign: "-2px" }} />
                   {pinned ? "Unpin" : "Pin to top"}
                 </button>
               )}
-              <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
-              <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
-              <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
-              <button className="session-row-menu-item danger" onClick={handleKill}>Kill session</button>
+              <button className="session-row-menu-item" onClick={handleCopy}>
+                <Copy size={13} className="inline mr-1.5" style={{ verticalAlign: "-2px" }} />
+                Copy name
+              </button>
+              <button className="session-row-menu-item" onClick={handleCopyPath}>
+                <FolderOpen size={13} className="inline mr-1.5" style={{ verticalAlign: "-2px" }} />
+                Copy path
+              </button>
+              <button className="session-row-menu-item" onClick={handleOpenIterm}>
+                <ExternalLink size={13} className="inline mr-1.5" style={{ verticalAlign: "-2px" }} />
+                Open in iTerm
+              </button>
+              <button className="session-row-menu-item danger" onClick={handleKill}>
+                <Trash2 size={13} className="inline mr-1.5" style={{ verticalAlign: "-2px" }} />
+                Kill session
+              </button>
             </div>
           )}
         </div>
       </div>
+
+      {/* Status line message */}
+      {session.statusLine && (
+        <div className={`session-row-statusline status-${session.statusLine.type}`}>
+          {session.statusLine.message}
+        </div>
+      )}
+
+      {/* Progress bar for working sessions */}
+      <ProgressBar status={displayStatus || session.status} />
     </div>
   );
 }
@@ -531,34 +552,48 @@ export function Dashboard() {
           <span className="sidebar-title">sessions</span>
           <div className="sidebar-actions">
             {sessions.length > 0 && (
-              <button className="btn btn-stop btn-sm" onClick={handleStopAll}>
-                kill --all
+              <button className="btn btn-stop btn-sm flex items-center gap-1" onClick={handleStopAll}>
+                <Skull size={13} /> kill all
               </button>
             )}
-            <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")}>
-              + new
+            <button className="btn btn-primary btn-sm flex items-center gap-1" onClick={() => navigate("/create")}>
+              <Plus size={14} /> new
             </button>
             <button
               className="btn btn-sm sidebar-collapse-btn"
               onClick={() => setSidebarCollapsed(true)}
-              title="Collapse sidebar"
+              title="Collapse sidebar (⌘B)"
             >
-              &laquo;
+              <PanelLeftClose size={16} />
             </button>
           </div>
         </div>
 
         <div className="session-list">
           {loading ? (
-            <div className="loading">LOADING...</div>
+            <div className="loading">Loading sessions...</div>
           ) : sessions.length === 0 ? (
-            <div className="empty-state">
-              <pre className="ascii-art">{ASCII_LOGO}</pre>
-              <p>no active sessions</p>
+            <motion.div
+              className="empty-state"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div
+                className="flex items-center justify-center rounded-2xl mx-auto mb-4"
+                style={{ width: 64, height: 64, background: "var(--bg-hover)" }}
+              >
+                <Sparkles size={28} style={{ color: "var(--accent)" }} />
+              </div>
+              <p style={{ color: "var(--text-dim)", marginBottom: 12 }}>No active sessions</p>
+              <p style={{ color: "var(--text-dim)", fontSize: 12, marginBottom: 16 }}>
+                Press <kbd className="px-1.5 py-0.5 rounded text-[11px] font-mono" style={{ background: "var(--bg-hover)", border: "1px solid var(--border)" }}>N</kbd> or click below to start one.
+              </p>
               <button className="btn btn-primary" onClick={() => navigate("/create")}>
-                ./create-session
+                <Plus size={14} className="inline mr-1" style={{ verticalAlign: "-2px" }} />
+                New Session
               </button>
-            </div>
+            </motion.div>
           ) : (
             orderedSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
               <SessionRow
@@ -598,9 +633,9 @@ export function Dashboard() {
                 <button
                   className="main-tab sidebar-expand-btn"
                   onClick={() => setSidebarCollapsed(false)}
-                  title="Expand sidebar"
+                  title="Expand sidebar (⌘B)"
                 >
-                  &raquo;
+                  <PanelLeftOpen size={16} />
                 </button>
               )}
               <button
@@ -695,11 +730,53 @@ export function Dashboard() {
             </div>
           </>
         ) : (
-          <div className="split-empty">
-            <span className="split-empty-text">select a session</span>
-          </div>
+          <motion.div
+            className="split-empty"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div
+              className="flex items-center justify-center rounded-2xl mx-auto mb-4"
+              style={{ width: 64, height: 64, background: "var(--bg-hover)" }}
+            >
+              <Sparkles size={28} style={{ color: "var(--accent)" }} />
+            </div>
+            <p className="split-empty-text">No session selected</p>
+            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 4 }}>
+              Select a session from the sidebar to see what your AI agents are up to.
+            </p>
+          </motion.div>
         )}
       </div>
+
+      {/* Status bar */}
+      {sessions.length > 0 && (
+        <div
+          className="flex items-center gap-5 px-4 py-1.5 text-[12px] shrink-0 border-t tabular-nums"
+          style={{
+            background: "var(--bg-card)",
+            borderColor: "var(--border)",
+            color: "var(--text-dim)",
+          }}
+        >
+          {(() => {
+            const working = sessions.filter((s) => s.status === "working").length;
+            const waiting = sessions.filter((s) => s.status === "waiting" || getDisplayStatus(s) === "waiting").length;
+            const done = sessions.filter((s) => getDisplayStatus(s) === "done" || s.status === "shell").length;
+            const error = sessions.filter((s) => getDisplayStatus(s) === "error").length;
+            return (
+              <>
+                {working > 0 && <span>🔨 {working} working</span>}
+                {waiting > 0 && <span>⏳ {waiting} waiting</span>}
+                {done > 0 && <span>✅ {done} done</span>}
+                {error > 0 && <span>❌ {error} error</span>}
+              </>
+            );
+          })()}
+          <span className="ml-auto">{sessions.length} session{sessions.length !== 1 ? "s" : ""}</span>
+        </div>
+      )}
 
       {showSetup && (
         <div className="settings-overlay">

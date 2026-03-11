@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Sparkles, Settings, LogOut, Menu, X } from "lucide-react";
 import { SettingsModal } from "./SettingsModal";
 import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
@@ -19,7 +20,6 @@ export function Header() {
   const mobileNav = useMobileNav();
   const { enabled: authEnabled, logout } = useAuth();
 
-  // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     function handleClick(e: MouseEvent) {
@@ -31,7 +31,6 @@ export function Header() {
     return () => document.removeEventListener("click", handleClick);
   }, [menuOpen]);
 
-  // Close menu on route change
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname]);
@@ -43,20 +42,30 @@ export function Header() {
           &lt; sessions
         </button>
       )}
-      <Link to="/" className="header-title">
-        Multi-Claude
+      <Link to="/" className="header-title flex items-center gap-2">
+        <div
+          className="flex items-center justify-center rounded-lg"
+          style={{ width: 24, height: 24, background: "var(--accent)" }}
+        >
+          <Sparkles size={14} color="var(--bg)" strokeWidth={2.5} />
+        </div>
+        <span>AgentDock</span>
       </Link>
       <nav className="header-nav header-nav-desktop">
         <button
-          className="settings-gear-btn"
+          className="settings-gear-btn flex items-center gap-1"
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
         >
-          &#9881;
+          <Settings size={16} />
         </button>
         {authEnabled && (
-          <button className="header-logout-btn" onClick={logout}>
-            Logout
+          <button
+            className="header-logout-btn flex items-center gap-1"
+            onClick={logout}
+          >
+            <LogOut size={14} />
+            <span>Logout</span>
           </button>
         )}
       </nav>
@@ -66,7 +75,7 @@ export function Header() {
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label="Menu"
         >
-          {menuOpen ? "\u2715" : "\u2630"}
+          {menuOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
         {menuOpen && (
           <div className="header-mobile-menu">
@@ -87,20 +96,20 @@ export function Header() {
               </div>
             )}
             <button
-              className="settings-gear-btn"
+              className="settings-gear-btn flex items-center gap-2"
               onClick={() => {
                 setSettingsOpen(true);
                 setMenuOpen(false);
               }}
             >
-              &#9881; Settings
+              <Settings size={16} /> Settings
             </button>
             {authEnabled && (
               <button
-                className="header-logout-btn"
+                className="header-logout-btn flex items-center gap-2"
                 onClick={() => { logout(); setMenuOpen(false); }}
               >
-                Logout
+                <LogOut size={14} /> Logout
               </button>
             )}
           </div>

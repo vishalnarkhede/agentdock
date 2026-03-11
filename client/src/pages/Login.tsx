@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { motion } from "framer-motion";
+import { Sparkles, ArrowRight, Lock } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { setPassword as apiSetPassword } from "../api";
 
@@ -42,57 +44,107 @@ export function Login({ setup }: { setup?: boolean }) {
     }
   };
 
-  if (setup) {
-    return (
-      <div className="login-page">
-        <form className="login-card" onSubmit={handleSetup}>
-          <h1 className="login-title">Multi-Claude</h1>
-          <p className="login-subtitle">Create a password to protect your instance</p>
-          {error && <div className="login-error">{error}</div>}
-          <input
-            className="form-input login-input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Choose a password"
-            autoFocus
-            disabled={loading}
-          />
-          <input
-            className="form-input login-input"
-            type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Confirm password"
-            disabled={loading}
-          />
-          <button className="btn btn-primary login-btn" type="submit" disabled={loading || !password || !confirm}>
-            {loading ? "..." : "Set Password"}
-          </button>
-        </form>
-      </div>
-    );
-  }
-
   return (
     <div className="login-page">
-      <form className="login-card" onSubmit={handleLogin}>
-        <h1 className="login-title">Multi-Claude</h1>
-        <p className="login-subtitle">Enter password to continue</p>
-        {error && <div className="login-error">{error}</div>}
-        <input
-          className="form-input login-input"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          autoFocus
-          disabled={loading}
-        />
-        <button className="btn btn-primary login-btn" type="submit" disabled={loading || !password}>
-          {loading ? "..." : "Log in"}
+      <motion.form
+        className="login-card"
+        onSubmit={setup ? handleSetup : handleLogin}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+      >
+        {/* Logo block */}
+        <div className="flex flex-col items-center gap-3 mb-6">
+          <div
+            className="flex items-center justify-center rounded-xl"
+            style={{
+              width: 40,
+              height: 40,
+              background: "var(--accent)",
+            }}
+          >
+            <Sparkles size={22} color="var(--bg)" strokeWidth={2.5} />
+          </div>
+          <h1 className="login-title">AgentDock</h1>
+          <p className="login-subtitle">
+            {setup
+              ? "Set up your password to get started."
+              : "Welcome back! Log in to continue."}
+          </p>
+        </div>
+
+        {error && (
+          <motion.div
+            className="login-error"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            {error}
+          </motion.div>
+        )}
+
+        <div className="flex flex-col gap-3 w-full">
+          <div className="relative">
+            <Lock
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2"
+              style={{ color: "var(--text-dim)" }}
+            />
+            <input
+              className="form-input login-input"
+              style={{ paddingLeft: 36 }}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={setup ? "Choose a password" : "Password"}
+              autoFocus
+              disabled={loading}
+            />
+          </div>
+          {setup && (
+            <div className="relative">
+              <Lock
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2"
+                style={{ color: "var(--text-dim)" }}
+              />
+              <input
+                className="form-input login-input"
+                style={{ paddingLeft: 36 }}
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                placeholder="Confirm password"
+                disabled={loading}
+              />
+            </div>
+          )}
+        </div>
+
+        <button
+          className="btn btn-primary login-btn"
+          type="submit"
+          disabled={loading || !password || (setup ? !confirm : false)}
+        >
+          {loading ? (
+            "..."
+          ) : (
+            <span className="flex items-center justify-center gap-2">
+              {setup ? "Set Password" : "Log In"}
+              <ArrowRight size={16} />
+            </span>
+          )}
         </button>
-      </form>
+
+        {!setup && (
+          <p
+            className="text-[12px] mt-2 text-center"
+            style={{ color: "var(--text-dim)" }}
+          >
+            First time? Set up password in Settings.
+          </p>
+        )}
+      </motion.form>
     </div>
   );
 }

@@ -6,13 +6,17 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.2.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "framer-motion": "^12.35.2",
+    "lucide-react": "^0.577.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
