@@ -176,9 +176,9 @@ function SessionRow({
         <span className="session-row-path" title={session.path}>
           {session.path.replace(/^\/Users\/[^/]+\//, "~/")}
         </span>
-        {session.agentType && (
+        {session.agentType && session.agentType !== "claude" && (
           <span className="session-row-agent" title={`Agent: ${session.agentType}`}>
-            {session.agentType === "claude" ? "Claude" : "Cursor"}
+            {session.agentType === "cursor" ? "Cursor" : session.agentType}
           </span>
         )}
         <div className="session-row-menu-wrap" ref={menuRef}>
