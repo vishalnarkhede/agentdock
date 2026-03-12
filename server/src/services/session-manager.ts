@@ -1,4 +1,6 @@
 import { createHash, createHmac } from "crypto";
+import { readFileSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import {
   resolveAlias,
   saveWorktreeMeta,
@@ -52,51 +54,48 @@ const ALLOWED_TOOLS = [
 ];
 
 const PROMPT_DIR = "/tmp/agentdock-prompts";
-
-function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean): string {
-  if (agentType === "cursor") {
-    // Cursor CLI agent command with --yolo flag to skip permissions
-    return dangerouslySkipPermissions ? "agent --yolo" : "agent";
-  }
-  
-  // Claude agent command
-  if (dangerouslySkipPermissions) {
-    return "claude --dangerously-skip-permissions";
-  }
-  const tools = ALLOWED_TOOLS.map((t) => t.includes("(") ? `'${t}'` : t).join(" ");
-  return `claude --allowedTools ${tools}`;
-}
-
+const SYSTEM_PROMPT_DIR = "/tmp/agentdock-system-prompts";
 const PLANS_DIR = `${HOME_DIR}/.config/agentdock/plans`;
+const SYSTEM_PROMPT_TEMPLATE = join(__dirname, "..", "prompts", "system-prompt.md");
 
 function buildSystemInstructions(sessionName: string): string {
-  return [
-    `## AgentDock System Instructions`,
-    ``,
-    `### Plans`,
-    `Whenever you create a plan — whether entering plan mode, being asked to plan, or designing an implementation approach — ALWAYS save it as a markdown file:`,
-    `- Save the plan to: ${PLANS_DIR}/${sessionName}.md`,
-    `- Create the directory if it doesn't exist: mkdir -p ${PLANS_DIR}`,
-    `- Overwrite the file each time the plan is updated`,
-    `- Use clear markdown formatting with headings, checklists, and code blocks`,
-    `- Do this BEFORE presenting the plan to the user — save first, then discuss`,
-    ``,
-    `### After Creating a PR`,
-    `After creating a pull request:`,
-    `1. Update the plan file with the PR link`,
-    `2. Monitor CI with \`gh pr checks <number> --watch\``,
-    `3. If a check fails due to your changes, fix and push. If unrelated, restart the job.`,
-    ``,
-  ].join("\n");
+  const template = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
+  return template
+    .replace(/\{\{PLANS_DIR\}\}/g, PLANS_DIR)
+    .replace(/\{\{SESSION_NAME\}\}/g, sessionName);
+}
+
+export function writeSystemPromptFile(sessionName: string): string {
+  mkdirSync(SYSTEM_PROMPT_DIR, { recursive: true });
+  const filePath = `${SYSTEM_PROMPT_DIR}/${sessionName}.txt`;
+  writeFileSync(filePath, buildSystemInstructions(sessionName));
+  return filePath;
 }
 
 function writePromptFile(sessionName: string, prompt: string): string {
-  const { mkdirSync, writeFileSync } = require("fs");
   mkdirSync(PROMPT_DIR, { recursive: true });
   const promptFile = `${PROMPT_DIR}/${sessionName}.txt`;
-  const fullPrompt = buildSystemInstructions(sessionName) + "\n---\n\n" + prompt;
-  writeFileSync(promptFile, fullPrompt);
+  writeFileSync(promptFile, prompt);
   return promptFile;
+}
+
+function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string): string {
+  if (agentType === "cursor") {
+    return dangerouslySkipPermissions ? "agent --yolo" : "agent";
+  }
+
+  // Claude agent command
+  let cmd: string;
+  if (dangerouslySkipPermissions) {
+    cmd = "claude --dangerously-skip-permissions";
+  } else {
+    const tools = ALLOWED_TOOLS.map((t) => t.includes("(") ? `'${t}'` : t).join(" ");
+    cmd = `claude --allowedTools ${tools}`;
+  }
+  if (systemPromptFile) {
+    cmd += ` --append-system-prompt-file ${systemPromptFile}`;
+  }
+  return cmd;
 }
 
 function shortId(): string {
@@ -182,14 +181,18 @@ async function launchAgent(
   await tmux.createSession(sess, cwd, sessionEnv);
   await tmux.setOption(sess, "extended-keys", "on");
 
+  // Write system prompt file with agentdock instructions (plan saving, PR monitoring, etc.)
+  // For Claude, this is injected via --append-system-prompt-file so it's always present
+  const systemPromptFile = writeSystemPromptFile(sess);
+
   // Wait for shell init to complete before sending commands
   await sleep(2000);
-  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions));
-  
+  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile));
+
   // Save session metadata
   saveSessionAgentType(sess, agentType);
   saveSessionSkipPerms(sess, !!dangerouslySkipPermissions);
-  
+
   if (prompt) {
     const promptFile = writePromptFile(sess, prompt);
     console.log(`[launch] ${sess}: prompt written to ${promptFile} (${prompt.length} chars)`);
@@ -201,7 +204,6 @@ async function launchAgent(
     await sleep(3000);
 
     if (agentType === "cursor") {
-      // Cursor CLI uses different prompt format
       await tmux.sendKeysRaw(sess, `Follow the instructions in ${promptFile}`);
     } else {
       await tmux.sendKeysRaw(sess, `Read and follow the instructions in ${promptFile}`);
@@ -209,7 +211,7 @@ async function launchAgent(
     await tmux.sendSpecialKey(sess, "Enter");
     console.log(`[launch] ${sess}: prompt sent to agent`);
   } else {
-    console.log(`[launch] ${sess}: no prompt provided`);
+    console.log(`[launch] ${sess}: no prompt, system instructions via --append-system-prompt-file`);
   }
 }
 

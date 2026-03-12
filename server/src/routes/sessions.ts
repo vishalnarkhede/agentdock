@@ -282,13 +282,17 @@ app.post("/:name/switch-agent", async (c) => {
           const skipPerms = getSessionSkipPerms(name);
           send(`Starting ${body.agentType}${skipPerms ? " (yolo)" : ""}...`);
           
+          const { writeSystemPromptFile } = await import("../services/session-manager");
+          const sysPromptFile = writeSystemPromptFile(name);
+
           let agentCmd: string;
           if (body.agentType === "cursor") {
             agentCmd = skipPerms ? "agent --yolo" : "agent";
           } else {
-            agentCmd = skipPerms ? "claude --dangerously-skip-permissions" : "claude";
+            const base = skipPerms ? "claude --dangerously-skip-permissions" : "claude";
+            agentCmd = `${base} --append-system-prompt-file ${sysPromptFile}`;
           }
-          
+
           const contextPrompt = `Read ${contextFile} for context from the previous agent session, then continue the work.`;
           await sendKeysRaw(name, `${agentCmd} "${contextPrompt}"`);
           await sendSpecialKey(name, "Enter");
