@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
@@ -208,10 +208,30 @@ function SessionRow({
   );
 }
 
+interface PlanComment {
+  id: string;
+  selectedText: string;
+  comment: string;
+}
+
 function PlanView({ sessionName }: { sessionName: string }) {
   const [plan, setPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"rendered" | "raw">("rendered");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+
+  // Selection-based commenting
+  const [selectedText, setSelectedText] = useState("");
+  const [showCommentBtn, setShowCommentBtn] = useState<{ top: number; left: number } | null>(null);
+  const [commentBox, setCommentBox] = useState<{ top: number; text: string } | null>(null);
+  const [comment, setComment] = useState("");
+  const [pendingComments, setPendingComments] = useState<PlanComment[]>([]);
+  const [batchSending, setBatchSending] = useState(false);
+  const [batchExpanded, setBatchExpanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+  const savedRange = useRef<Range | null>(null);
 
   const loadPlan = useCallback(() => {
     fetchPlan(sessionName).then((p) => {
@@ -223,10 +243,89 @@ function PlanView({ sessionName }: { sessionName: string }) {
   useEffect(() => {
     setLoading(true);
     loadPlan();
-    // Poll for plan updates every 5s
     const interval = setInterval(loadPlan, 5000);
     return () => clearInterval(interval);
   }, [loadPlan]);
+
+  useEffect(() => {
+    if (commentBox && commentRef.current) commentRef.current.focus();
+  }, [commentBox]);
+
+  // On mouseup inside plan content, check if there's a text selection
+  const handleContentMouseUp = useCallback(() => {
+    // Small delay to let the browser finalize the selection
+    requestAnimationFrame(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !contentRef.current) return;
+      const text = sel.toString().trim();
+      if (!text) return;
+
+      const range = sel.getRangeAt(0);
+      if (!contentRef.current.contains(range.commonAncestorContainer)) return;
+
+      setSelectedText(text);
+      savedRange.current = range.cloneRange();
+      const rect = range.getBoundingClientRect();
+      const containerRect = contentRef.current.getBoundingClientRect();
+      setShowCommentBtn({
+        top: rect.bottom - containerRect.top + contentRef.current.scrollTop + 4,
+        left: rect.left - containerRect.left + rect.width / 2 - 50,
+      });
+    });
+  }, []);
+
+  // Clicking anywhere in content without a selection dismisses the button
+  const handleContentMouseDown = useCallback(() => {
+    if (showCommentBtn && !commentBox) {
+      setShowCommentBtn(null);
+      setSelectedText("");
+    }
+  }, [showCommentBtn, commentBox]);
+
+  const handleOpenCommentBox = () => {
+    if (!showCommentBtn || !selectedText) return;
+    setCommentBox({ top: showCommentBtn.top + 32, text: selectedText });
+    setShowCommentBtn(null);
+    setComment("");
+    // Apply CSS Custom Highlight to keep selection visible
+    if (savedRange.current && typeof Highlight !== "undefined" && CSS.highlights) {
+      const hl = new Highlight(savedRange.current);
+      CSS.highlights.set("plan-comment-selection", hl);
+    }
+  };
+
+  const clearHighlight = useCallback(() => {
+    if (typeof CSS !== "undefined" && CSS.highlights) {
+      CSS.highlights.delete("plan-comment-selection");
+    }
+    savedRange.current = null;
+  }, []);
+
+  const handleAddComment = () => {
+    if (!comment.trim() || !commentBox) return;
+    setPendingComments(prev => [...prev, {
+      id: crypto.randomUUID(),
+      selectedText: commentBox.text,
+      comment: comment.trim(),
+    }]);
+    setComment("");
+    setCommentBox(null);
+    setSelectedText("");
+    clearHighlight();
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const handleCommentKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleAddComment();
+    }
+    if (e.key === "Escape") {
+      setComment("");
+      setCommentBox(null);
+      clearHighlight();
+    }
+  };
 
   const handleDownload = () => {
     if (!plan) return;
@@ -241,45 +340,187 @@ function PlanView({ sessionName }: { sessionName: string }) {
     URL.revokeObjectURL(url);
   };
 
+  const handleSend = async () => {
+    if (!message.trim() || sending) return;
+    setSending(true);
+    try {
+      await sendSessionInput(sessionName, message.trim());
+      setMessage("");
+    } catch (err) {
+      console.error("Failed to send message:", err);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleSendAll = async () => {
+    if (pendingComments.length === 0) return;
+    setBatchSending(true);
+    try {
+      const msg = pendingComments.map(c =>
+        `Regarding this part of the plan:\n\`\`\`\n${c.selectedText}\n\`\`\`\n${c.comment}`
+      ).join("\n\n---\n\n");
+      await sendSessionInput(sessionName, msg);
+      setPendingComments([]);
+    } catch (err) {
+      console.error("Failed to send comments:", err);
+    } finally {
+      setBatchSending(false);
+    }
+  };
+
   if (loading) {
     return <div className="plan-view"><div className="plan-loading">loading plan...</div></div>;
   }
 
-  if (!plan) {
-    return (
-      <div className="plan-view">
-        <div className="plan-empty">no plan yet — ask the agent to create one</div>
-      </div>
-    );
-  }
-
   return (
     <div className="plan-view">
-      <div className="plan-toolbar">
-        <div className="plan-toolbar-toggles">
-          <button
-            className={`btn btn-sm changes-view-toggle${viewMode === "rendered" ? " changes-view-toggle-active" : ""}`}
-            onClick={() => setViewMode("rendered")}
+      {plan ? (
+        <>
+          <div className="plan-toolbar">
+            <div className="plan-toolbar-toggles">
+              <button
+                className={`btn btn-sm changes-view-toggle${viewMode === "rendered" ? " changes-view-toggle-active" : ""}`}
+                onClick={() => setViewMode("rendered")}
+              >
+                rendered
+              </button>
+              <button
+                className={`btn btn-sm changes-view-toggle${viewMode === "raw" ? " changes-view-toggle-active" : ""}`}
+                onClick={() => setViewMode("raw")}
+              >
+                raw
+              </button>
+            </div>
+            <button className="btn btn-sm" onClick={handleDownload}>
+              download
+            </button>
+          </div>
+          <div
+            className="plan-content"
+            ref={contentRef}
+            style={{ position: "relative" }}
+            onMouseUp={handleContentMouseUp}
+            onMouseDown={handleContentMouseDown}
           >
-            rendered
-          </button>
-          <button
-            className={`btn btn-sm changes-view-toggle${viewMode === "raw" ? " changes-view-toggle-active" : ""}`}
-            onClick={() => setViewMode("raw")}
-          >
-            raw
-          </button>
+            {viewMode === "rendered" ? (
+              <Markdown remarkPlugins={[remarkGfm]}>{plan}</Markdown>
+            ) : (
+              <pre className="plan-raw">{plan}</pre>
+            )}
+
+            {showCommentBtn && !commentBox && (
+              <button
+                className="plan-add-comment-btn"
+                style={{ top: showCommentBtn.top, left: showCommentBtn.left }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={handleOpenCommentBox}
+              >
+                + add comment
+              </button>
+            )}
+
+            {commentBox && (
+              <div
+                className="plan-comment-popover"
+                style={{ top: commentBox.top, left: 0, right: 0 }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="plan-comment-context">{commentBox.text}</div>
+                <textarea
+                  ref={commentRef}
+                  className="diff-comment-input"
+                  placeholder="Add a comment... (Enter to add, Esc to cancel)"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  onKeyDown={handleCommentKeyDown}
+                  rows={2}
+                />
+                <div className="diff-comment-actions">
+                  <button className="btn btn-sm" onClick={() => { setCommentBox(null); setComment(""); clearHighlight(); }}>
+                    cancel
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleAddComment}
+                    disabled={!comment.trim()}
+                  >
+                    add comment
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="plan-empty">no plan yet — ask the agent to create one</div>
+      )}
+
+      {pendingComments.length > 0 && (
+        <div className="comment-batch-bar">
+          <div className="comment-batch-summary" onClick={() => setBatchExpanded(!batchExpanded)}>
+            <span className="comment-batch-count">
+              {pendingComments.length} comment{pendingComments.length !== 1 ? "s" : ""}
+            </span>
+            <div className="comment-batch-actions">
+              <span className="comment-batch-expand">{batchExpanded ? "\u25BE" : "\u25B8"}</span>
+              <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setPendingComments([]); }}>
+                clear
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={(e) => { e.stopPropagation(); handleSendAll(); }}
+                disabled={batchSending}
+              >
+                {batchSending ? "sending..." : "send all to claude"}
+              </button>
+            </div>
+          </div>
+          {batchExpanded && (
+            <div className="comment-batch-list">
+              {pendingComments.map((c) => (
+                <div key={c.id} className="comment-batch-item">
+                  <div className="comment-batch-item-header">
+                    <span className="comment-batch-item-file">plan</span>
+                    <button
+                      className="comment-batch-item-remove"
+                      onClick={() => setPendingComments(prev => prev.filter(p => p.id !== c.id))}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                  <pre className="comment-batch-item-code">{c.selectedText}</pre>
+                  <div className="comment-batch-item-text">{c.comment}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <button className="btn btn-sm" onClick={handleDownload}>
-          download
+      )}
+
+      <div className="plan-input-bar">
+        <textarea
+          className="plan-input"
+          placeholder="Send a message to the agent..."
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleInputKeyDown}
+          rows={2}
+        />
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={handleSend}
+          disabled={!message.trim() || sending}
+        >
+          {sending ? "sending..." : "send"}
         </button>
-      </div>
-      <div className="plan-content">
-        {viewMode === "rendered" ? (
-          <Markdown remarkPlugins={[remarkGfm]}>{plan}</Markdown>
-        ) : (
-          <pre className="plan-raw">{plan}</pre>
-        )}
       </div>
     </div>
   );
