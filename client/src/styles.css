@@ -390,9 +390,14 @@ a:hover {
   text-transform: uppercase;
 }
 
+.header-logo {
+  vertical-align: middle;
+  margin-right: 6px;
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+
 .header-title::before {
-  content: "$ ";
-  color: var(--text-dim);
+  content: "";
 }
 
 .header-nav {
@@ -1739,11 +1744,58 @@ h1 {
   min-height: 0;
 }
 
+.main-content-split {
+  flex-direction: column;
+}
+
+.split-terminal-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.split-bottom-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.split-bottom-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+.split-resize-handle {
+  height: 3px;
+  cursor: row-resize;
+  background: transparent;
+}
+
+.split-bottom-bar-open .split-resize-handle:hover,
+.split-bottom-bar-open .split-resize-handle:active {
+  background: var(--accent);
+}
+
+.split-bottom-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  background: var(--bg);
+}
+
+.split-maximize-btn {
+  margin-left: auto;
+}
+
 /* ─── Plan view ─── */
 .plan-view {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px;
+  padding: 8px 16px;
   display: flex;
   flex-direction: column;
 }
@@ -1838,17 +1890,57 @@ h1 {
   box-sizing: border-box;
 }
 
-.plan-toolbar {
-  display: flex;
+.plan-tab-wrap {
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  gap: 8px;
+  gap: 0;
 }
 
-.plan-toolbar-toggles {
-  display: flex;
-  gap: 4px;
+.plan-tab-menu-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.plan-tab-menu-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.plan-tab-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.plan-tab-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 6px 12px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.plan-tab-menu-item:hover {
+  background: var(--bg-hover);
 }
 
 .plan-raw {
@@ -3146,6 +3238,13 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.login-logo {
+  display: block;
+  margin: 0 auto 8px;
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px var(--accent-glow));
 }
 
 .login-title {

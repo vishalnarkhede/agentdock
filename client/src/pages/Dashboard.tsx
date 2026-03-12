@@ -214,10 +214,9 @@ interface PlanComment {
   comment: string;
 }
 
-function PlanView({ sessionName }: { sessionName: string }) {
+function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "rendered" | "raw" }) {
   const [plan, setPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"rendered" | "raw">("rendered");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -246,6 +245,13 @@ function PlanView({ sessionName }: { sessionName: string }) {
     const interval = setInterval(loadPlan, 5000);
     return () => clearInterval(interval);
   }, [loadPlan]);
+
+  // Listen for plan-download event from parent dropdown menu
+  useEffect(() => {
+    const handler = () => handleDownload();
+    window.addEventListener("plan-download", handler);
+    return () => window.removeEventListener("plan-download", handler);
+  }, [plan, sessionName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (commentBox && commentRef.current) commentRef.current.focus();
@@ -344,7 +350,9 @@ function PlanView({ sessionName }: { sessionName: string }) {
     if (!message.trim() || sending) return;
     setSending(true);
     try {
-      await sendSessionInput(sessionName, message.trim());
+      const planFile = `~/.config/agentdock/plans/${sessionName}.md`;
+      const planRef = plan ? `First read the plan at ${planFile} for full context, then:\n\n` : "";
+      await sendSessionInput(sessionName, planRef + message.trim());
       setMessage("");
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -364,7 +372,9 @@ function PlanView({ sessionName }: { sessionName: string }) {
     if (pendingComments.length === 0) return;
     setBatchSending(true);
     try {
-      const msg = pendingComments.map(c =>
+      const planFile = `~/.config/agentdock/plans/${sessionName}.md`;
+      const planRef = plan ? `First read the plan at ${planFile} for full context, then address these comments:\n\n` : "";
+      const msg = planRef + pendingComments.map(c =>
         `Regarding this part of the plan:\n\`\`\`\n${c.selectedText}\n\`\`\`\n${c.comment}`
       ).join("\n\n---\n\n");
       await sendSessionInput(sessionName, msg);
@@ -384,25 +394,6 @@ function PlanView({ sessionName }: { sessionName: string }) {
     <div className="plan-view">
       {plan ? (
         <>
-          <div className="plan-toolbar">
-            <div className="plan-toolbar-toggles">
-              <button
-                className={`btn btn-sm changes-view-toggle${viewMode === "rendered" ? " changes-view-toggle-active" : ""}`}
-                onClick={() => setViewMode("rendered")}
-              >
-                rendered
-              </button>
-              <button
-                className={`btn btn-sm changes-view-toggle${viewMode === "raw" ? " changes-view-toggle-active" : ""}`}
-                onClick={() => setViewMode("raw")}
-              >
-                raw
-              </button>
-            </div>
-            <button className="btn btn-sm" onClick={handleDownload}>
-              download
-            </button>
-          </div>
           <div
             className="plan-content"
             ref={contentRef}
@@ -535,6 +526,62 @@ export function Dashboard() {
   const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
   const activeTab = mobileNav?.activeTab ?? "terminal";
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
+
+  // Bottom pane (plan/changes/sub-agents) split with terminal
+  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | null>(null);
+  const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
+  const [bottomMaximized, setBottomMaximized] = useState(false);
+  const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
+  const [planMenuOpen, setPlanMenuOpen] = useState(false);
+  const planMenuRef = useRef<HTMLDivElement>(null);
+  const splitDragging = useRef(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleSplitMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    splitDragging.current = true;
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!splitDragging.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const ratio = (e.clientY - rect.top) / rect.height;
+      setSplitRatio(Math.max(0.2, Math.min(0.8, ratio)));
+      // Tell terminal to refit during drag
+      window.dispatchEvent(new Event("resize"));
+    };
+    const onMouseUp = () => { splitDragging.current = false; };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  // Reset maximized when closing bottom pane
+  useEffect(() => {
+    if (!bottomTab) setBottomMaximized(false);
+  }, [bottomTab]);
+
+  // Close plan menu on click outside
+  useEffect(() => {
+    if (!planMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (planMenuRef.current && !planMenuRef.current.contains(e.target as Node)) {
+        setPlanMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [planMenuOpen]);
+
+  // Refit terminal when bottom pane opens/closes or maximize toggles
+  useEffect(() => {
+    const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+    return () => clearTimeout(t);
+  }, [bottomTab, bottomMaximized]);
 
   // First-run setup
   const [showSetup, setShowSetup] = useState(false);
@@ -864,38 +911,11 @@ export function Dashboard() {
                   <span className="breadcrumb-child">{activeSessionInfo?.displayName}</span>
                 </button>
               )}
-              <button
-                className={`main-tab ${activeTab === "terminal" ? "main-tab-active" : ""}`}
-                onClick={() => setActiveTab("terminal")}
-              >
-                terminal
-              </button>
-              <button
-                className={`main-tab ${activeTab === "plan" ? "main-tab-active" : ""}`}
-                onClick={() => setActiveTab("plan")}
-              >
-                plan
-              </button>
-              <button
-                className={`main-tab ${activeTab === "changes" ? "main-tab-active" : ""}`}
-                onClick={() => setActiveTab("changes")}
-              >
-                changes
-              </button>
-              {hasChildren && (
-                <button
-                  className={`main-tab main-tab-sub ${activeTab === "sub-agents" ? "main-tab-active" : ""}`}
-                  onClick={() => setActiveTab("sub-agents")}
-                >
-                  sub-agents
-                  <span className="tab-badge">{activeSessionInfo?.children?.length}</span>
-                </button>
-              )}
               <div className="main-tabs-toolbar" ref={toolbarRef} />
             </div>
-            <div className="main-content">
-              {activeTab === "terminal" ? (
-                !isMobile || mobileShowTerminal ? (
+            <div className="main-content main-content-split" ref={splitContainerRef}>
+              <div className="split-terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
+                {(!isMobile || mobileShowTerminal) && (
                   <TerminalView
                     key={activeSession}
                     sessionName={activeSession}
@@ -904,34 +924,110 @@ export function Dashboard() {
                     onAgentSwitched={refresh}
                     toolbarPortal={toolbarRef}
                   />
-                ) : null
-              ) : activeTab === "changes" ? (
-                <ChangesView
-                  key={activeSession}
-                  sessionName={activeSession}
-                  sessionPaths={(() => {
-                    const s = sessions.find((s) => s.name === activeSession);
-                    if (s?.worktrees && s.worktrees.length > 0) {
-                      return s.worktrees.map((wt) => wt.wtDir);
-                    }
-                    return s?.path ? [s.path] : [];
-                  })()}
-                  onCommentsSent={() => setActiveTab("terminal")}
+                )}
+              </div>
+              <div className={`split-bottom-bar${bottomTab ? " split-bottom-bar-open" : ""}`}>
+                <div
+                  className="split-resize-handle"
+                  onMouseDown={handleSplitMouseDown}
                 />
-              ) : activeTab === "sub-agents" && hasChildren ? (
-                <SubAgentsView
-                  key={activeSession}
-                  parentSession={activeSession}
-                  sessions={sessions}
-                  onSelectChild={(childName) => {
-                    setActiveSession(childName);
-                    setActiveTab("terminal");
-                    setMobileShowTerminal(true);
-                  }}
-                  onRefresh={refresh}
-                />
-              ) : (
-                <PlanView key={activeSession} sessionName={activeSession} />
+                <div className="split-bottom-tabs">
+                  <div className="plan-tab-wrap" ref={planMenuRef}>
+                    <button
+                      className={`main-tab ${bottomTab === "plan" ? "main-tab-active" : ""}`}
+                      onClick={() => setBottomTab(bottomTab === "plan" ? null : "plan")}
+                    >
+                      plan
+                    </button>
+                    {bottomTab === "plan" && (
+                      <button
+                        className="plan-tab-menu-btn"
+                        onClick={() => setPlanMenuOpen(!planMenuOpen)}
+                      >
+                        &#x22EE;
+                      </button>
+                    )}
+                    {planMenuOpen && (
+                      <div className="plan-tab-menu">
+                        <button
+                          className="plan-tab-menu-item"
+                          onClick={() => {
+                            setPlanViewMode(planViewMode === "rendered" ? "raw" : "rendered");
+                            setPlanMenuOpen(false);
+                          }}
+                        >
+                          {planViewMode === "rendered" ? "View raw" : "View rendered"}
+                        </button>
+                        <button
+                          className="plan-tab-menu-item"
+                          onClick={() => {
+                            // Trigger download via a custom event the PlanView listens to
+                            window.dispatchEvent(new Event("plan-download"));
+                            setPlanMenuOpen(false);
+                          }}
+                        >
+                          Download
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className={`main-tab ${bottomTab === "changes" ? "main-tab-active" : ""}`}
+                    onClick={() => setBottomTab(bottomTab === "changes" ? null : "changes")}
+                  >
+                    changes
+                  </button>
+                  {hasChildren && (
+                    <button
+                      className={`main-tab main-tab-sub ${bottomTab === "sub-agents" ? "main-tab-active" : ""}`}
+                      onClick={() => setBottomTab(bottomTab === "sub-agents" ? null : "sub-agents")}
+                    >
+                      sub-agents
+                      <span className="tab-badge">{activeSessionInfo?.children?.length}</span>
+                    </button>
+                  )}
+                  {bottomTab && (
+                    <button
+                      className="main-tab split-maximize-btn"
+                      onClick={() => setBottomMaximized(!bottomMaximized)}
+                      title={bottomMaximized ? "Restore split" : "Maximize"}
+                    >
+                      {bottomMaximized ? "\u25BD" : "\u25B3"}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {bottomTab && (
+                <div className="split-bottom-pane" style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
+                  {bottomTab === "changes" ? (
+                    <ChangesView
+                      key={activeSession}
+                      sessionName={activeSession}
+                      sessionPaths={(() => {
+                        const s = sessions.find((s) => s.name === activeSession);
+                        if (s?.worktrees && s.worktrees.length > 0) {
+                          return s.worktrees.map((wt) => wt.wtDir);
+                        }
+                        return s?.path ? [s.path] : [];
+                      })()}
+                      onCommentsSent={() => setBottomTab(null)}
+                    />
+                  ) : bottomTab === "sub-agents" && hasChildren ? (
+                    <SubAgentsView
+                      key={activeSession}
+                      parentSession={activeSession}
+                      sessions={sessions}
+                      onSelectChild={(childName) => {
+                        setActiveSession(childName);
+                        setBottomTab(null);
+                        setMobileShowTerminal(true);
+                      }}
+                      onRefresh={refresh}
+                    />
+                  ) : (
+                    <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+                  )}
+                </div>
               )}
             </div>
           </>

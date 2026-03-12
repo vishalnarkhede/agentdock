@@ -172,6 +172,7 @@ async function launchAgent(
     DISABLE_UPDATE_PROMPT: "true", // suppress oh-my-zsh update prompt
     NO_COLOR: "", // override NO_COLOR from tmux global env so agents render with colors
     COLORTERM: "truecolor", // enable 24-bit color support
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1", // enable team lead / agent teams
   };
   // Compute auth token so ad-agent can authenticate with the server
   const authPassword = getAuthPassword();

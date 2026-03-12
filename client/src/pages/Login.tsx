@@ -46,7 +46,15 @@ export function Login({ setup }: { setup?: boolean }) {
     return (
       <div className="login-page">
         <form className="login-card" onSubmit={handleSetup}>
-          <h1 className="login-title">Multi-Claude</h1>
+          <svg className="login-logo" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <polyline points="6 8 10 12 6 16" />
+            <line x1="14" y1="16" x2="18" y2="16" />
+            <circle cx="7" cy="21" r="1" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="21" r="1" fill="currentColor" stroke="none" />
+            <circle cx="17" cy="21" r="1" fill="currentColor" stroke="none" />
+          </svg>
+          <h1 className="login-title">AgentDock</h1>
           <p className="login-subtitle">Create a password to protect your instance</p>
           {error && <div className="login-error">{error}</div>}
           <input
@@ -77,7 +85,7 @@ export function Login({ setup }: { setup?: boolean }) {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleLogin}>
-        <h1 className="login-title">Multi-Claude</h1>
+        <h1 className="login-title">AgentDock</h1>
         <p className="login-subtitle">Enter password to continue</p>
         {error && <div className="login-error">{error}</div>}
         <input
