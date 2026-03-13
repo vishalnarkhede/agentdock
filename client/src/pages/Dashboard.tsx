@@ -172,6 +172,11 @@ function SessionRow({
           {session.statusLine.message}
         </div>
       )}
+      {displayStatus === "working" && (
+        <div className="session-row-runner">
+          <span className="session-row-runner-char">&#x1F40D;</span>
+        </div>
+      )}
       <div className="session-row-meta">
         <span className="session-row-path" title={session.path}>
           {session.path.replace(/^\/Users\/[^/]+\//, "~/")}

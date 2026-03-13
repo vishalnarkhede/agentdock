@@ -734,6 +734,38 @@ h1 {
   background: var(--text-dim);
 }
 
+/* ─── Working session runner animation ─── */
+.session-row-runner {
+  position: relative;
+  height: 16px;
+  overflow: hidden;
+  margin: 0 4px;
+}
+
+.session-row-runner-char {
+  position: absolute;
+  font-size: 12px;
+  line-height: 16px;
+  animation: runner-crawl 3s ease-in-out infinite alternate;
+}
+
+@keyframes runner-crawl {
+  0% {
+    left: 0%;
+    transform: scaleX(1);
+  }
+  49% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(-1);
+  }
+  100% {
+    left: calc(100% - 16px);
+    transform: scaleX(-1);
+  }
+}
+
 .session-row-age {
   font-size: calc(var(--fs-base) - 2px);
   color: var(--text-dim);
