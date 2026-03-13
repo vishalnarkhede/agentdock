@@ -710,29 +710,18 @@ h1 {
 }
 
 .session-row-dot.status-working {
-  background: var(--cyan);
-  box-shadow: 0 0 6px rgba(0, 255, 204, 0.4);
-  animation:
-    dot-spin 1s linear infinite,
-    dot-pulse 1.5s ease-in-out infinite,
-    dot-color-shift 3s ease-in-out infinite;
+  width: 14px;
+  height: 14px;
+  background: transparent;
+  border: 2.5px solid rgba(0, 255, 204, 0.2);
+  border-top-color: var(--cyan);
+  border-right-color: var(--cyan);
+  box-shadow: 0 0 8px rgba(0, 255, 204, 0.5);
+  animation: dot-spin 0.7s linear infinite;
 }
 
 @keyframes dot-spin {
-  0%   { transform: scale(1) rotate(0deg); }
-  50%  { transform: scale(1.6) rotate(180deg); }
-  100% { transform: scale(1) rotate(360deg); }
-}
-
-@keyframes dot-pulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(0, 255, 204, 0.3); }
-  50%      { box-shadow: 0 0 12px rgba(0, 255, 204, 0.8), 0 0 20px rgba(0, 255, 204, 0.3); }
-}
-
-@keyframes dot-color-shift {
-  0%, 100% { background: var(--cyan); }
-  33%      { background: #00e5ff; }
-  66%      { background: #76ff03; }
+  to { transform: rotate(360deg); }
 }
 
 .session-row-dot.status-waiting {
