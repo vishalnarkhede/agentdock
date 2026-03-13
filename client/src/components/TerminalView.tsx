@@ -328,7 +328,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const onDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    dragCountRef.current--;
+    dragCountRef.current = Math.max(0, dragCountRef.current - 1);
     if (dragCountRef.current === 0) setDragging(false);
   }, []);
 

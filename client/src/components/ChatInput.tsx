@@ -9,6 +9,7 @@ interface Props {
 export function ChatInput({ onSend, disabled }: Props) {
   const [value, setValue] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,16 +30,23 @@ export function ChatInput({ onSend, disabled }: Props) {
 
   const handleFiles = async (files: FileList | File[]) => {
     setUploading(true);
+    setUploadError(null);
     const paths: string[] = [];
+    let failed = 0;
     for (const file of Array.from(files)) {
       try {
         const path = await uploadFile(file);
         paths.push(path);
       } catch (err) {
+        failed++;
         console.error("Upload failed:", err);
       }
     }
     setUploading(false);
+    if (failed > 0 && paths.length === 0) {
+      setUploadError("Upload failed");
+      setTimeout(() => setUploadError(null), 3000);
+    }
     if (paths.length > 0) {
       // Append file paths to current input value
       const pathsText = paths.join(" ");
@@ -103,7 +111,7 @@ export function ChatInput({ onSend, disabled }: Props) {
       <textarea
         ref={inputRef}
         className="chat-input"
-        placeholder={uploading ? "Uploading..." : "Send a message to Claude..."}
+        placeholder={uploadError || (uploading ? "Uploading..." : "Send a message to Claude...")}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}

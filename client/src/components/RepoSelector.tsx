@@ -13,9 +13,12 @@ export function RepoSelector({ selected, onChange }: Props) {
   const [repos, setRepos] = useState<RepoConfig[]>([]);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    fetchRepos().then(setRepos).catch(() => {});
+    fetchRepos()
+      .then(setRepos)
+      .catch(() => setLoadError(true));
   }, []);
 
   const filtered = useMemo(() => {
@@ -77,6 +80,9 @@ export function RepoSelector({ selected, onChange }: Props) {
         ))}
         {visible.length === 0 && search.trim() && (
           <p className="form-hint" style={{ padding: "8px 12px" }}>No repos matching "{search}"</p>
+        )}
+        {loadError && repos.length === 0 && (
+          <p className="form-error" style={{ padding: "8px 12px" }}>Failed to load repos. Is the server running?</p>
         )}
       </div>
       {!isSearching && hiddenCount > 0 && !expanded && (

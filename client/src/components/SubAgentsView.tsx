@@ -51,13 +51,7 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
 
   const handleKillAll = async () => {
     if (!confirm(`Kill all ${children.length} sub-agents?`)) return;
-    for (const child of children) {
-      try {
-        await deleteSession(child.name);
-      } catch {
-        // best effort
-      }
-    }
+    await Promise.all(children.map((c) => deleteSession(c.name).catch(() => {})));
     onRefresh();
   };
 

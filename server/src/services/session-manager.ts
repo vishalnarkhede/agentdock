@@ -21,6 +21,8 @@ import {
   getAuthPassword,
   saveSessionType,
   deleteSessionType,
+  getSessionOrder,
+  saveSessionOrder,
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
@@ -405,6 +407,13 @@ export async function stopSession(sessionName: string): Promise<void> {
   deleteSessionParent(sessionName);
   deleteSessionSubAgents(sessionName);
   deleteSessionType(sessionName);
+
+  // Remove from session order
+  const order = getSessionOrder();
+  const filtered = order.filter((n) => n !== sessionName);
+  if (filtered.length !== order.length) {
+    saveSessionOrder(filtered);
+  }
 }
 
 export async function stopAllSessions(): Promise<void> {

@@ -106,8 +106,12 @@ function SessionRow({
     e.stopPropagation();
     if (!confirm(`Kill session "${session.displayName}"?`)) return;
     setMenuOpen(false);
-    await deleteSession(session.name);
-    onStopped();
+    try {
+      await deleteSession(session.name);
+      onStopped();
+    } catch (err: any) {
+      console.error("Failed to delete session:", err);
+    }
   };
 
   const displayStatus = getDisplayStatus(session);
@@ -235,6 +239,8 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   const loadPlan = useCallback(() => {
     fetchPlan(sessionName).then((p) => {
       setPlan(p);
+      setLoading(false);
+    }).catch(() => {
       setLoading(false);
     });
   }, [sessionName]);
@@ -588,6 +594,7 @@ export function Dashboard() {
   const [setupStep, setSetupStep] = useState<"path" | "repos">("path");
   const [setupPath, setSetupPath] = useState("~/projects");
   const [setupSaving, setSetupSaving] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<{ alias: string; path: string; remote?: string; selected: boolean }[]>([]);
 
   useEffect(() => {
@@ -601,6 +608,7 @@ export function Dashboard() {
 
   const handleSetupScanRepos = async () => {
     setSetupSaving(true);
+    setSetupError(null);
     try {
       await updateBasePath(setupPath);
       const repos = await scanRepos();
@@ -610,8 +618,8 @@ export function Dashboard() {
       } else {
         setShowSetup(false);
       }
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setSetupError(err?.message || "Failed to scan repos");
     } finally {
       setSetupSaving(false);
     }
@@ -619,12 +627,13 @@ export function Dashboard() {
 
   const handleSetupFinish = async () => {
     setSetupSaving(true);
+    setSetupError(null);
     try {
       const selected = discoveredRepos.filter((r) => r.selected);
       await Promise.all(selected.map((r) => addSettingsRepo({ alias: r.alias, path: r.path, remote: r.remote })));
       setShowSetup(false);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setSetupError(err?.message || "Failed to save repos");
     } finally {
       setSetupSaving(false);
     }
@@ -725,9 +734,13 @@ export function Dashboard() {
 
   const handleStopAll = async () => {
     if (!confirm("Stop all sessions?")) return;
-    await deleteAllSessions();
-    setActiveSession(null);
-    refresh();
+    try {
+      await deleteAllSessions();
+      setActiveSession(null);
+      refresh();
+    } catch (err: any) {
+      console.error("Failed to stop all sessions:", err);
+    }
   };
 
   const handleStopped = () => {
@@ -1046,6 +1059,7 @@ export function Dashboard() {
             </div>
             <div className="settings-body">
               <div className="setup-content">
+                {setupError && <div className="form-error" style={{ marginBottom: 12 }}>{setupError}</div>}
                 {setupStep === "path" ? (
                   <>
                     <p className="setup-description">

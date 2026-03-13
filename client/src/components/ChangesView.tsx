@@ -615,7 +615,17 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
         prDiffLoading ? (
           <div className="plan-loading">loading pr diff...</div>
         ) : prDiffError ? (
-          <div className="form-error">{prDiffError}</div>
+          <div className="form-error">
+            {prDiffError}
+            <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => {
+              setPrDiffLoading(true);
+              setPrDiffError("");
+              fetchPRDiff(sessionPath)
+                .then((data) => setPrDiff(data.diff))
+                .catch((err: any) => setPrDiffError(err.message))
+                .finally(() => setPrDiffLoading(false));
+            }}>retry</button>
+          </div>
         ) : prDiffFiles.length === 0 ? (
           <div className="plan-empty">no pr diff available</div>
         ) : (

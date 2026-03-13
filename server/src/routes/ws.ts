@@ -37,6 +37,9 @@ export async function handleWsOpen(ws: any, sessionName: string) {
     stopped = true;
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
+    if (ws.data?.heartbeatInterval) {
+      clearInterval(ws.data.heartbeatInterval);
+    }
   }
 
   async function poll() {
