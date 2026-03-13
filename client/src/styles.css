@@ -3298,8 +3298,8 @@ h1 {
 /* ─── Fix me button ─── */
 .header-fix-me-btn {
   background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  border: 1px solid var(--text-dim);
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   padding: 4px 10px;
@@ -3321,8 +3321,8 @@ h1 {
 /* ─── Settings gear button ─── */
 .settings-gear-btn {
   background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  border: 1px solid var(--text-dim);
+  color: var(--text);
   font-size: 16px;
   width: 32px;
   height: 32px;
@@ -3336,7 +3336,7 @@ h1 {
 
 .settings-gear-btn:hover {
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* ─── Login page ─── */
@@ -3407,8 +3407,8 @@ h1 {
 /* ─── Header logout button ─── */
 .header-logout-btn {
   background: none;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  border: 1px solid var(--text-dim);
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: calc(var(--fs-base) - 2px);
   padding: 4px 10px;
