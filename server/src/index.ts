@@ -11,7 +11,7 @@ import settingsRoutes from "./routes/settings";
 import dbRoutes from "./routes/db";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
 import { handleWsOpen, handleWsMessage, handleWsClose } from "./routes/ws";
-import { syncRepos } from "./services/config";
+import { syncRepos, syncHooksToClaudeSettings } from "./services/config";
 
 const app = new Hono();
 
@@ -77,3 +77,6 @@ console.log(`Server running at http://localhost:${PORT}`);
 // Periodically sync repos with base path
 syncRepos();
 setInterval(syncRepos, 10_000);
+
+// Install Claude Code hooks for deterministic status detection
+syncHooksToClaudeSettings();

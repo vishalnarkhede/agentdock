@@ -1,22 +1,14 @@
 /**
- * Detect agent session status by scanning recent terminal content.
+ * Detect agent session status.
  *
- * Supports both Claude Code and Cursor Agent CLI TUI patterns.
+ * Primary: Claude Code hooks (Stop, Notification, UserPromptSubmit) write status
+ * to /tmp/agentdock-status/<session>. This is deterministic and reliable.
  *
- * Claude Code's terminal layout (bottom of pane):
- *   [output / working indicator]
- *   ──────────────────────────── (divider)
- *   ❯ [user input]              (prompt)
- *   ──────────────────────────── (divider)
- *   ⏵⏵ accept edits on ...      (status bar)
- *
- * Cursor Agent CLI terminal layout (bottom of pane):
- *   [output / working indicator]
- *   > [user input]              (prompt)
- *
- * The prompt area is ALWAYS visible, even while the agent is working.
- * Working indicators appear above the prompt area.
+ * Fallback: Terminal output pattern matching for Cursor Agent or when hooks
+ * haven't reported yet. This is inherently fragile but covers non-Claude agents.
  */
+
+import { getHookStatus } from "./config";
 
 export type SessionStatus = "waiting" | "working" | "shell" | "unknown";
 
@@ -27,7 +19,7 @@ function stripAnsi(str: string): string {
 }
 
 function isDivider(line: string): boolean {
-  return /^[─━\-─=─]+$/.test(line) && line.length > 10;
+  return /^[─━\-=╌╍┄┅┈┉]+$/.test(line) && line.length > 10;
 }
 
 /**
@@ -49,9 +41,15 @@ export function extractStatusLine(content: string): { type: string; message: str
   return { type: parsed[1].trim(), message: parsed[2].trim() };
 }
 
-export function detectStatus(content: string, _cursorY: number, _scrollPosition: number, command: string): SessionStatus {
+export function detectStatus(content: string, _cursorY: number, _scrollPosition: number, command: string, sessionName?: string): SessionStatus {
   if (SHELLS.has(command)) {
     return "shell";
+  }
+
+  // Primary: use Claude Code hook-reported status (deterministic)
+  if (sessionName) {
+    const hookStatus = getHookStatus(sessionName);
+    if (hookStatus) return hookStatus;
   }
 
   const lines = content.split("\n");
@@ -91,6 +89,8 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
   const isPromptUI = (line: string) => /accept edits|shift.tab/.test(line);
   // Claude Code feedback prompt: "● How is Claude doing this session?"
   const isFeedbackPrompt = (line: string) => /how is claude doing/i.test(line) || /^\s*[0-9]+:\s*(Bad|Fine|Good|Dismiss)/i.test(line);
+  // Claude Code plan mode selection: "❯ 1. Yes, clear context..." or "ctrl-g to edit in VS Code"
+  const isPlanModeUI = (line: string) => /^❯\s+\d+\.\s/.test(line) || /^\d+\.\s+(Yes|No|Type here)/i.test(line) || /ctrl-g to edit/i.test(line);
   const lastLine = tail[tail.length - 1];
 
   if (isPromptLine(lastLine)) {
@@ -103,6 +103,11 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
 
   // Claude Code shows a feedback prompt after completing work — agent is idle
   if (tail.some(isFeedbackPrompt)) {
+    return "waiting";
+  }
+
+  // Claude Code plan mode: shows numbered options for how to proceed
+  if (tail.some(isPlanModeUI)) {
     return "waiting";
   }
 

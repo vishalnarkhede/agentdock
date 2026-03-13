@@ -30,7 +30,7 @@ app.get("/", async (c) => {
       let statusLine: SessionInfo["statusLine"] = undefined;
       const snap = await capturePaneSnapshot(s.name);
       if (snap.ok) {
-        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command);
+        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, s.name);
         // Only use statusLine when agent isn't actively working — otherwise it's stale from a previous task
         if (status !== "working") {
           statusLine = extractStatusLine(snap.data.content) ?? undefined;
@@ -112,7 +112,7 @@ app.get("/:name/output", async (c) => {
     .replace(/\x1b\][^\x07]*\x07/g, "");
   const allLines = content.split("\n");
   const output = allLines.slice(-lines).join("\n");
-  const status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command);
+  const status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, name);
   const statusLine = status !== "working" ? (extractStatusLine(snap.data.content) ?? undefined) : undefined;
   return c.json({ output, status, statusLine });
 });
@@ -132,7 +132,7 @@ app.get("/:name/children", async (c) => {
       let statusLine: SessionInfo["statusLine"] = undefined;
       const snap = await capturePaneSnapshot(s.name);
       if (snap.ok) {
-        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command);
+        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, s.name);
         if (status !== "working") {
           statusLine = extractStatusLine(snap.data.content) ?? undefined;
         }

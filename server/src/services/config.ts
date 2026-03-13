@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync } from "fs";
+import { join, resolve } from "path";
 import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
 
 import { homedir } from "os";
@@ -565,6 +565,112 @@ export function removeMcpServer(name: string): void {
   const servers = getMcpServers().filter((s) => s.name !== name);
   saveMcpServers(servers);
   syncMcpToAgents();
+}
+
+// ─── Claude Code Hooks (status detection) ───
+
+const CLAUDE_SETTINGS_FILE = join(HOME, ".claude", "settings.json");
+const HOOK_STATUS_DIR = "/tmp/agentdock-status";
+const HOOK_SCRIPT_SOURCE = resolve(__dirname, "..", "hooks", "status-hook.sh");
+const HOOK_SCRIPT_DEST = join(CONFIG_DIR, "hooks", "status-hook.sh");
+
+/**
+ * Install the agentdock status hook script and inject hooks into Claude's settings.json.
+ * This gives us reliable status detection via Claude's Stop and Notification lifecycle hooks
+ * instead of fragile terminal output pattern matching.
+ */
+export function syncHooksToClaudeSettings(): void {
+  // 1. Copy hook script to a stable location
+  const hooksDir = join(CONFIG_DIR, "hooks");
+  mkdirSync(hooksDir, { recursive: true });
+  writeFileSync(HOOK_SCRIPT_DEST, readFileSync(HOOK_SCRIPT_SOURCE, "utf-8"));
+  chmodSync(HOOK_SCRIPT_DEST, 0o755);
+
+  // 2. Ensure status directory exists
+  mkdirSync(HOOK_STATUS_DIR, { recursive: true });
+
+  // 3. Read current Claude settings
+  let settings: Record<string, any> = {};
+  if (existsSync(CLAUDE_SETTINGS_FILE)) {
+    try {
+      settings = JSON.parse(readFileSync(CLAUDE_SETTINGS_FILE, "utf-8"));
+    } catch { /* corrupt file */ }
+  }
+
+  if (!settings.hooks) settings.hooks = {};
+
+  // 4. Inject Stop hook (fires when Claude finishes responding → "waiting")
+  const stopHookCmd = `${HOOK_SCRIPT_DEST} waiting`;
+  const stopHooks = settings.hooks.Stop || [];
+  const hasStopHook = Array.isArray(stopHooks) && stopHooks.some(
+    (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
+  );
+  if (!hasStopHook) {
+    stopHooks.push({
+      hooks: [{ type: "command", command: stopHookCmd, async: true }],
+    });
+    settings.hooks.Stop = stopHooks;
+  }
+
+  // 5. Inject Notification hook for idle_prompt (fires when Claude is idle at prompt)
+  const notifHookCmd = `${HOOK_SCRIPT_DEST} waiting`;
+  const notifHooks = settings.hooks.Notification || [];
+  const hasNotifHook = Array.isArray(notifHooks) && notifHooks.some(
+    (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
+  );
+  if (!hasNotifHook) {
+    notifHooks.push({
+      matcher: "idle_prompt",
+      hooks: [{ type: "command", command: notifHookCmd, async: true }],
+    });
+    settings.hooks.Notification = notifHooks;
+  }
+
+  // 6. Inject UserPromptSubmit hook (fires when user sends prompt → "working")
+  const promptHookCmd = `${HOOK_SCRIPT_DEST} working`;
+  const promptHooks = settings.hooks.UserPromptSubmit || [];
+  const hasPromptHook = Array.isArray(promptHooks) && promptHooks.some(
+    (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
+  );
+  if (!hasPromptHook) {
+    promptHooks.push({
+      hooks: [{ type: "command", command: promptHookCmd, async: true }],
+    });
+    settings.hooks.UserPromptSubmit = promptHooks;
+  }
+
+  // 7. Write back
+  const settingsDir = join(HOME, ".claude");
+  mkdirSync(settingsDir, { recursive: true });
+  writeFileSync(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+}
+
+/**
+ * Read hook-reported status for a tmux session.
+ * Returns "waiting" or "working" if a recent hook status exists (within 60s),
+ * or null if no hook data is available (fall back to terminal parsing).
+ */
+export function getHookStatus(sessionName: string): "waiting" | "working" | null {
+  const statusFile = join(HOOK_STATUS_DIR, sessionName);
+  if (!existsSync(statusFile)) return null;
+  try {
+    const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+    // Only trust status if it's recent (within 60 seconds)
+    const age = Math.floor(Date.now() / 1000) - (data.ts || 0);
+    if (age > 60) return null;
+    if (data.status === "waiting" || data.status === "working") return data.status;
+  } catch { /* corrupt file */ }
+  return null;
+}
+
+/**
+ * Clear hook status for a session (called on session stop).
+ */
+export function deleteHookStatus(sessionName: string): void {
+  const statusFile = join(HOOK_STATUS_DIR, sessionName);
+  if (existsSync(statusFile)) {
+    try { unlinkSync(statusFile); } catch { /* ignore */ }
+  }
 }
 
 // ─── Exports ───

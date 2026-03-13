@@ -23,6 +23,7 @@ import {
   deleteSessionType,
   getSessionOrder,
   saveSessionOrder,
+  deleteHookStatus,
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
@@ -414,6 +415,9 @@ export async function stopSession(sessionName: string): Promise<void> {
   if (filtered.length !== order.length) {
     saveSessionOrder(filtered);
   }
+
+  // Remove hook status file
+  deleteHookStatus(sessionName);
 }
 
 export async function stopAllSessions(): Promise<void> {
