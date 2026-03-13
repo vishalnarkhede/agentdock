@@ -710,9 +710,15 @@ h1 {
 }
 
 .session-row-dot.status-working {
-  background: var(--cyan);
-  box-shadow: 0 0 4px rgba(0, 255, 204, 0.3);
-  animation: pulse-glow 2s ease-in-out infinite;
+  background: transparent;
+  border: 2px solid rgba(0, 255, 204, 0.3);
+  border-top-color: var(--cyan);
+  box-shadow: 0 0 6px rgba(0, 255, 204, 0.3);
+  animation: dot-spin 0.8s linear infinite;
+}
+
+@keyframes dot-spin {
+  to { transform: rotate(360deg); }
 }
 
 .session-row-dot.status-waiting {
@@ -732,38 +738,6 @@ h1 {
 
 .session-row-dot.status-unknown {
   background: var(--text-dim);
-}
-
-/* ─── Working session runner animation ─── */
-.session-row-runner {
-  position: relative;
-  height: 16px;
-  overflow: hidden;
-  margin: 0 4px;
-}
-
-.session-row-runner-char {
-  position: absolute;
-  font-size: 12px;
-  line-height: 16px;
-  animation: runner-crawl 3s ease-in-out infinite alternate;
-}
-
-@keyframes runner-crawl {
-  0% {
-    left: 0%;
-    transform: scaleX(1);
-  }
-  49% {
-    transform: scaleX(1);
-  }
-  50% {
-    transform: scaleX(-1);
-  }
-  100% {
-    left: calc(100% - 16px);
-    transform: scaleX(-1);
-  }
 }
 
 .session-row-age {
