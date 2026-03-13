@@ -14,7 +14,6 @@ Create sessions, watch live terminal output, type input, switch between agents m
 - **Git worktrees** — Isolate work with automatic worktree creation per session
 - **Multi-repo sessions** — Work across multiple repositories in grouped sessions
 - **Live terminal** — Stream agent output in real-time via WebSocket + xterm.js
-- **Voice input** — Dictate prompts using local Whisper transcription
 - **Prompt templates** — Save and reuse common prompts
 - **Session pinning** — Pin important sessions to the top of the list
 - **Collapsible sidebar** — Maximize terminal space with one click
@@ -40,7 +39,7 @@ cd agentdock
 ./setup.sh
 ```
 
-This installs dependencies, sets up the whisper server for voice input, and installs the `agentdock` CLI to `~/bin`.
+This installs dependencies and installs the `agentdock` CLI to `~/bin`.
 
 ### Run
 
@@ -51,14 +50,6 @@ agentdock web
 ```
 
 Opens http://localhost:5173 with the API server on port 4800.
-
-**Voice input (optional):**
-
-```bash
-.venv/bin/python bin/whisper-server.py
-```
-
-First run downloads ~1.6GB model from HuggingFace. Requires ffmpeg (`brew install ffmpeg` or `sudo apt install ffmpeg`).
 
 **CLI:**
 
