@@ -2974,8 +2974,8 @@ h1 {
   display: none;
 }
 
-/* Remove pulse animation from status dots */
-[data-theme]:not([data-theme="terminal"]) .session-row-dot {
+/* Remove pulse animation from status dots (except working spinner) */
+[data-theme]:not([data-theme="terminal"]) .session-row-dot:not(.status-working) {
   animation: none;
 }
 
