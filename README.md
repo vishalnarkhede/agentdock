@@ -58,6 +58,13 @@ agentdock web
 
 Opens http://localhost:5173 with the API server on port 4800.
 
+On first launch, the setup wizard will prompt you to:
+1. Set your **base path** (the directory where your repos live, e.g. `~/projects`)
+2. **Auto-discover** git repositories in that directory
+3. **Select** which repos to add
+
+You can also add, remove, or scan for repos later in **Settings > Repositories**.
+
 **CLI:**
 
 ```bash
@@ -75,7 +82,13 @@ All configuration lives in `~/.config/agentdock/`. No database required.
 
 ### Repos
 
-Add repositories through the web UI at **Settings > Repos**, or create `~/.config/agentdock/repos.json`:
+Repos are configured on first launch via the setup wizard, or anytime through the web UI at **Settings > Repositories**. From there you can:
+
+- **Scan** a directory to auto-discover git repos
+- **Add** repos manually by alias and path
+- **Remove** repos you no longer need
+
+Alternatively, create `~/.config/agentdock/repos.json` directly:
 
 ```json
 [
