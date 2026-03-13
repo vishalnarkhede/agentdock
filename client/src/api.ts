@@ -115,20 +115,7 @@ export async function fetchTicket(id: string): Promise<LinearTicket> {
   return res.json();
 }
 
-export async function transcribeAudio(blob: Blob): Promise<string> {
-  const form = new FormData();
-  form.append("audio", blob, "audio.webm");
-  const res = await fetch(`${BASE}/api/transcribe`, {
-    method: "POST",
-    body: form,
-  });
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Transcription failed");
-  }
-  const data = await res.json();
-  return data.text;
-}
+
 
 export async function fetchGitChanges(
   path: string,

@@ -46,6 +46,7 @@ const THEMES: { id: Settings["theme"]; label: string }[] = [
   { id: "glass", label: "Glass" },
   { id: "notion", label: "Notion" },
   { id: "macos", label: "macOS" },
+  { id: "win98", label: "Windows 98" },
 ];
 
 const FONT_SIZES: { id: Settings["fontSize"]; label: string }[] = [

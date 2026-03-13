@@ -260,6 +260,38 @@
   --term-bg: #f5f5f7;
 }
 
+/* ─── Windows 98 ─── */
+[data-theme="win98"] {
+  --bg: #c0c0c0;
+  --bg-card: #c0c0c0;
+  --bg-modal: #c0c0c0;
+  --bg-input: #ffffff;
+  --bg-hover: #000080;
+  --text: #000000;
+  --text-dim: #4a4a4a;
+  --text-bright: #000000;
+  --text-white: #ffffff;
+  --accent: #000080;
+  --accent-hover: #1084d0;
+  --accent-glow: rgba(0, 0, 128, 0.15);
+  --red: #ff0000;
+  --red-dim: rgba(255, 0, 0, 0.10);
+  --red-hover: #cc0000;
+  --green: #008000;
+  --green-dim: rgba(0, 128, 0, 0.10);
+  --yellow: #808000;
+  --yellow-dim: rgba(128, 128, 0, 0.10);
+  --amber: #ff8c00;
+  --cyan: #008080;
+  --border: #808080;
+  --border-bright: #000080;
+  --radius: 0px;
+  --font-mono: 'Courier New', 'Lucida Console', monospace;
+  --font-ui: 'Tahoma', 'MS Sans Serif', 'Arial', sans-serif;
+  --scanline: transparent;
+  --term-bg: #000000;
+}
+
 /* CRT Scanline overlay — uses --scanline var (transparent on non-terminal themes) */
 body::before {
   content: "";
@@ -2796,51 +2828,6 @@ h1 {
   pointer-events: none;
 }
 
-/* ─── Mic button ─── */
-.btn-mic {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: calc(var(--fs-base) - 3px);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  padding: 2px 10px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-mic:hover {
-  border-color: var(--text);
-  color: var(--text);
-}
-
-.btn-mic.recording {
-  border-color: var(--red);
-  color: var(--red);
-  animation: pulse-recording 1s ease-in-out infinite;
-}
-
-.btn-mic.transcribing {
-  border-color: var(--amber);
-  color: var(--amber);
-  opacity: 0.7;
-  cursor: wait;
-}
-
-.btn-mic:disabled {
-  pointer-events: none;
-}
-
-@keyframes pulse-recording {
-  0%, 100% {
-    box-shadow: 0 0 4px rgba(255, 51, 51, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 16px rgba(255, 51, 51, 0.6), 0 0 32px rgba(255, 51, 51, 0.2);
-  }
-}
 
 /* ─── Blinking cursor for headings ─── */
 @keyframes terminal-cursor {
@@ -2928,7 +2915,6 @@ h1 {
 [data-theme]:not([data-theme="terminal"]) .btn,
 [data-theme]:not([data-theme="terminal"]) .form-input,
 [data-theme]:not([data-theme="terminal"]) .form-textarea,
-[data-theme]:not([data-theme="terminal"]) .session-row,
 [data-theme]:not([data-theme="terminal"]) .create-form,
 [data-theme]:not([data-theme="terminal"]) .repo-selector,
 [data-theme]:not([data-theme="terminal"]) .changes-pr-form,
@@ -2984,32 +2970,36 @@ h1 {
   animation: none;
 }
 
-/* ─── Light-based theme overrides (light, minimal, notion, macos) ─── */
+/* ─── Light-based theme overrides (light, minimal, notion, macos, win98) ─── */
 [data-theme="light"] ::-webkit-scrollbar-track,
 [data-theme="minimal"] ::-webkit-scrollbar-track,
 [data-theme="notion"] ::-webkit-scrollbar-track,
-[data-theme="macos"] ::-webkit-scrollbar-track {
+[data-theme="macos"] ::-webkit-scrollbar-track,
+[data-theme="win98"] ::-webkit-scrollbar-track {
   background: var(--bg);
 }
 
 [data-theme="light"] ::-webkit-scrollbar-thumb,
 [data-theme="minimal"] ::-webkit-scrollbar-thumb,
 [data-theme="notion"] ::-webkit-scrollbar-thumb,
-[data-theme="macos"] ::-webkit-scrollbar-thumb {
+[data-theme="macos"] ::-webkit-scrollbar-thumb,
+[data-theme="win98"] ::-webkit-scrollbar-thumb {
   background: #d4d4d8;
 }
 
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover,
 [data-theme="minimal"] ::-webkit-scrollbar-thumb:hover,
 [data-theme="notion"] ::-webkit-scrollbar-thumb:hover,
-[data-theme="macos"] ::-webkit-scrollbar-thumb:hover {
+[data-theme="macos"] ::-webkit-scrollbar-thumb:hover,
+[data-theme="win98"] ::-webkit-scrollbar-thumb:hover {
   background: #a1a1aa;
 }
 
 [data-theme="light"] ::selection,
 [data-theme="minimal"] ::selection,
 [data-theme="notion"] ::selection,
-[data-theme="macos"] ::selection {
+[data-theme="macos"] ::selection,
+[data-theme="win98"] ::selection {
   background: var(--accent);
   color: white;
 }
@@ -3021,14 +3011,17 @@ h1 {
 [data-theme="notion"] .form-input::placeholder,
 [data-theme="notion"] .chat-input::placeholder,
 [data-theme="macos"] .form-input::placeholder,
-[data-theme="macos"] .chat-input::placeholder {
+[data-theme="macos"] .chat-input::placeholder,
+[data-theme="win98"] .form-input::placeholder,
+[data-theme="win98"] .chat-input::placeholder {
   color: #a1a1aa;
 }
 
 [data-theme="light"] .session-row-active,
 [data-theme="minimal"] .session-row-active,
 [data-theme="notion"] .session-row-active,
-[data-theme="macos"] .session-row-active {
+[data-theme="macos"] .session-row-active,
+[data-theme="win98"] .session-row-active {
   background: var(--accent-glow);
   border-left-color: var(--accent);
 }
@@ -3036,15 +3029,111 @@ h1 {
 [data-theme="light"] .session-row:hover,
 [data-theme="minimal"] .session-row:hover,
 [data-theme="notion"] .session-row:hover,
-[data-theme="macos"] .session-row:hover {
+[data-theme="macos"] .session-row:hover,
+[data-theme="win98"] .session-row:hover {
   background: var(--bg-hover);
 }
 
 [data-theme="light"] a,
 [data-theme="minimal"] a,
 [data-theme="notion"] a,
-[data-theme="macos"] a {
+[data-theme="macos"] a,
+[data-theme="win98"] a {
   color: var(--accent);
+}
+
+/* ─── Windows 98: beveled borders & classic look ─── */
+[data-theme="win98"] .btn,
+[data-theme="win98"] .settings-select,
+[data-theme="win98"] .settings-segmented-btn,
+[data-theme="win98"] .settings-test-btn {
+  border: 2px outset #dfdfdf;
+  background: #c0c0c0;
+  color: #000000;
+  box-shadow: none;
+  font-family: 'Tahoma', 'MS Sans Serif', 'Arial', sans-serif;
+}
+
+[data-theme="win98"] .btn:hover,
+[data-theme="win98"] .settings-select:hover {
+  background: #d4d4d4;
+}
+
+[data-theme="win98"] .btn:active {
+  border-style: inset;
+}
+
+[data-theme="win98"] .btn-primary {
+  background: #000080;
+  color: #ffffff;
+  border: 2px outset #4040c0;
+}
+
+[data-theme="win98"] .btn-primary:hover {
+  background: #0000a0;
+}
+
+[data-theme="win98"] .form-input,
+[data-theme="win98"] .form-textarea,
+[data-theme="win98"] .chat-input {
+  border: 2px inset #808080;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+[data-theme="win98"] .settings-modal,
+[data-theme="win98"] .create-form,
+[data-theme="win98"] .login-card {
+  border: 2px outset #dfdfdf;
+  box-shadow: none;
+}
+
+[data-theme="win98"] .header {
+  background: #000080;
+  border-bottom: 2px outset #dfdfdf;
+}
+
+[data-theme="win98"] .header-title,
+[data-theme="win98"] .header-nav a {
+  color: #ffffff;
+  font-weight: bold;
+}
+
+[data-theme="win98"] .split-sidebar {
+  border-right: 2px outset #dfdfdf;
+}
+
+[data-theme="win98"] .session-row {
+  border: 1px solid #808080;
+}
+
+[data-theme="win98"] .session-row:hover {
+  background: #000080;
+  color: #ffffff;
+}
+
+[data-theme="win98"] .main-tab-active {
+  background: #c0c0c0;
+  border: 2px outset #dfdfdf;
+  border-bottom: none;
+}
+
+[data-theme="win98"] .header-fix-me-btn,
+[data-theme="win98"] .header-logout-btn,
+[data-theme="win98"] .settings-gear-btn {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+[data-theme="win98"] .header-fix-me-btn:hover,
+[data-theme="win98"] .settings-gear-btn:hover {
+  color: #ffff00;
+  border-color: #ffff00;
+}
+
+[data-theme="win98"] .header-logout-btn:hover {
+  color: #ff6666;
+  border-color: #ff6666;
 }
 
 /* ─── Glass theme: backdrop blur & gradient effects ─── */
@@ -3195,6 +3284,29 @@ h1 {
 
 [data-theme="macos"] ::-webkit-scrollbar-thumb:hover {
   background: #a1a1a6;
+}
+
+/* ─── Fix me button ─── */
+.header-fix-me-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.header-fix-me-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.header-fix-me-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ─── Settings gear button ─── */
@@ -4165,48 +4277,6 @@ h1 {
     background: rgba(255, 255, 255, 0.5);
     border: 2px solid transparent;
     background-clip: padding-box;
-  }
-
-  /* Mic button: floating action button on mobile */
-  .btn-mic {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 1000;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    font-size: 13px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    background: var(--bg-card);
-    border: 2px solid var(--border);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
-  }
-
-  .btn-mic:hover {
-    border-color: var(--text);
-  }
-
-  .btn-mic.recording {
-    width: 80px;
-    height: 80px;
-    bottom: 20px;
-    right: 20px;
-    font-size: 15px;
-    border-color: var(--red);
-    background: rgba(255, 51, 51, 0.1);
-    box-shadow: 0 0 20px rgba(255, 51, 51, 0.4), 0 0 40px rgba(255, 51, 51, 0.15);
-  }
-
-  .btn-mic.transcribing {
-    width: 64px;
-    height: 64px;
-    border-color: var(--amber);
-    background: rgba(255, 153, 0, 0.1);
   }
 
   /* Chat input on mobile — visible */

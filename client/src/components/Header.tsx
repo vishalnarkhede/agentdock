@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsModal } from "./SettingsModal";
+import { createSession } from "../api";
 import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
 import type { Tab } from "../MobileNavContext";
@@ -13,11 +14,28 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [fixingMe, setFixingMe] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const mobileNav = useMobileNav();
   const { enabled: authEnabled, logout } = useAuth();
+
+  const handleFixMe = async () => {
+    if (fixingMe) return;
+    setFixingMe(true);
+    try {
+      const { sessions } = await createSession({ targets: ["agentdock"], dangerouslySkipPermissions: true });
+      if (sessions?.[0]) {
+        navigate(`/?session=${sessions[0]}`);
+      }
+    } catch (err) {
+      console.error("Failed to create fix-me session:", err);
+    } finally {
+      setFixingMe(false);
+    }
+  };
 
   // Close menu on outside click
   useEffect(() => {
@@ -55,6 +73,14 @@ export function Header() {
         AgentDock
       </Link>
       <nav className="header-nav header-nav-desktop">
+        <button
+          className="header-fix-me-btn"
+          onClick={handleFixMe}
+          disabled={fixingMe}
+          title="Create a session to fix AgentDock"
+        >
+          {fixingMe ? "..." : "fix me"}
+        </button>
         <button
           className="settings-gear-btn"
           onClick={() => setSettingsOpen(true)}

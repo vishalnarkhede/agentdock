@@ -8,7 +8,7 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
-import { MicButton } from "./MicButton";
+
 import type { AgentType } from "../types";
 
 interface PaneSnapshot {
@@ -265,13 +265,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
   useNotifications(sessionName, lastContent, settings.notificationsEnabled);
 
-  const handleTranscript = useCallback(
-    (text: string) => {
-      sendInput(text);
-      sendInput("\r");
-    },
-    [sendInput],
-  );
 
   const handleSwitchAgent = useCallback(async () => {
     if (!agentType) return;
@@ -374,7 +367,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             iTerm
           </button>
         )}
-        {connected && <MicButton onTranscript={handleTranscript} />}
         {agentType && connected && (
           <button
             className="terminal-copy-btn"
