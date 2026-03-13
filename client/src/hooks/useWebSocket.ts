@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { wsUrl } from "../api";
+import { isDemo, getDemoSnapshot } from "../demo";
 
 interface WsMessage {
   type: "snapshot" | "update" | "closed" | "error" | "pong";
@@ -30,6 +31,12 @@ export function useWebSocket(
   onClosedRef.current = onClosed;
 
   useEffect(() => {
+    if (isDemo()) {
+      setConnected(true);
+      setTimeout(() => onDataRef.current(getDemoSnapshot(sessionName)), 100);
+      return;
+    }
+
     let stopped = false;
 
     function connect() {

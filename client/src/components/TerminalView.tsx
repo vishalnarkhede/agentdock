@@ -179,9 +179,20 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     if (!isMobile) term.focus();
 
     // Track focus state via xterm's hidden textarea
+    // Re-focus terminal when focus moves to non-interactive elements (e.g. clicking
+    // session list, tabs, plan view) so keyboard input keeps going to the terminal.
     const textarea = term.textarea;
+    const INTERACTIVE = "input, textarea, select, button, [contenteditable]";
     const onFocus = () => setFocused(true);
-    const onBlur = () => setFocused(false);
+    const onBlur = () => {
+      setFocused(false);
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (active && !active.closest(INTERACTIVE) && textarea) {
+          textarea.focus();
+        }
+      });
+    };
     if (textarea) {
       textarea.addEventListener("focus", onFocus);
       textarea.addEventListener("blur", onBlur);

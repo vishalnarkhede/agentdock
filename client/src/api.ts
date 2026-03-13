@@ -5,10 +5,24 @@ import type {
   CreateSessionRequest,
   AgentType,
 } from "./types";
+import {
+  isDemo,
+  DEMO_SESSIONS,
+  DEMO_PLANS,
+  DEMO_CHANGES,
+  DEMO_AUTH,
+  DEMO_SETTINGS_STATUS,
+  DEMO_SETTINGS_HEALTH,
+  DEMO_INTEGRATIONS,
+  DEMO_REPOS,
+  DEMO_TEMPLATES,
+  getDemoOutput,
+} from "./demo";
 
 const BASE = "";
 
 export async function fetchSessions(): Promise<SessionInfo[]> {
+  if (isDemo()) return DEMO_SESSIONS.filter((s) => !s.parentSession);
   const res = await fetch(`${BASE}/api/sessions`);
   return res.json();
 }
@@ -16,6 +30,7 @@ export async function fetchSessions(): Promise<SessionInfo[]> {
 export async function createSession(
   req: CreateSessionRequest,
 ): Promise<{ sessions: string[] }> {
+  if (isDemo()) return { sessions: [] };
   const res = await fetch(`${BASE}/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -29,6 +44,7 @@ export async function createSession(
 }
 
 export async function reorderSessions(order: string[]): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/sessions/reorder`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -37,20 +53,24 @@ export async function reorderSessions(order: string[]): Promise<void> {
 }
 
 export async function deleteSession(name: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/sessions/${name}`, { method: "DELETE" });
 }
 
 export async function deleteAllSessions(): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/sessions`, { method: "DELETE" });
 }
 
 export async function fetchPlan(sessionName: string): Promise<string | null> {
+  if (isDemo()) return DEMO_PLANS[sessionName] || null;
   const res = await fetch(`${BASE}/api/sessions/${sessionName}/plan`);
   const data = await res.json();
   return data.plan || null;
 }
 
 export async function openInIterm(name: string): Promise<void> {
+  if (isDemo()) return;
   const res = await fetch(`${BASE}/api/sessions/${name}/open-iterm`, { method: "POST" });
   if (!res.ok) {
     const data = await res.json();
@@ -64,6 +84,7 @@ export async function switchAgent(
   contextMessage?: string,
   onStep?: (step: string) => void,
 ): Promise<void> {
+  if (isDemo()) return;
   const res = await fetch(`${BASE}/api/sessions/${sessionName}/switch-agent`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -102,11 +123,13 @@ export async function switchAgent(
 }
 
 export async function fetchRepos(): Promise<RepoConfig[]> {
+  if (isDemo()) return DEMO_REPOS;
   const res = await fetch(`${BASE}/api/repos`);
   return res.json();
 }
 
 export async function fetchTicket(id: string): Promise<LinearTicket> {
+  if (isDemo()) return { identifier: id, title: "Demo ticket" };
   const res = await fetch(`${BASE}/api/tickets/${id}`);
   if (!res.ok) {
     const data = await res.json();
@@ -120,11 +143,13 @@ export async function fetchTicket(id: string): Promise<LinearTicket> {
 export async function fetchGitChanges(
   path: string,
 ): Promise<{ status: string; diff: string; branch: string; prUrl: string | null }> {
+  if (isDemo()) return DEMO_CHANGES[path] || { status: "", diff: "", branch: "main", prUrl: null };
   const res = await fetch(`${BASE}/api/git/changes?path=${encodeURIComponent(path)}`);
   return res.json();
 }
 
 export async function fetchPRDiff(path: string): Promise<{ diff: string }> {
+  if (isDemo()) return { diff: "" };
   const res = await fetch(`${BASE}/api/git/pr-diff?path=${encodeURIComponent(path)}`);
   if (!res.ok) {
     const data = await res.json();
@@ -134,6 +159,7 @@ export async function fetchPRDiff(path: string): Promise<{ diff: string }> {
 }
 
 export async function pushChanges(path: string): Promise<{ ok: boolean; branch: string }> {
+  if (isDemo()) return { ok: true, branch: "demo" };
   const res = await fetch(`${BASE}/api/git/push`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -151,6 +177,7 @@ export async function createPR(
   title: string,
   body?: string,
 ): Promise<{ url: string }> {
+  if (isDemo()) return { url: "https://github.com/acme/api/pull/42" };
   const res = await fetch(`${BASE}/api/git/create-pr`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -173,6 +200,7 @@ export interface SessionTemplate {
 }
 
 export async function fetchTemplates(): Promise<SessionTemplate[]> {
+  if (isDemo()) return DEMO_TEMPLATES;
   const res = await fetch(`${BASE}/api/templates`);
   return res.json();
 }
@@ -180,6 +208,7 @@ export async function fetchTemplates(): Promise<SessionTemplate[]> {
 export async function saveTemplate(
   template: Omit<SessionTemplate, "id">,
 ): Promise<SessionTemplate> {
+  if (isDemo()) return { ...template, id: "demo" };
   const res = await fetch(`${BASE}/api/templates`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -189,6 +218,7 @@ export async function saveTemplate(
 }
 
 export async function deleteTemplate(id: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/templates/${id}`, { method: "DELETE" });
 }
 
@@ -196,6 +226,7 @@ export async function slackToFix(
   link: string,
   targets?: string[],
 ): Promise<{ ticket: { identifier: string; title: string; url?: string }; sessions: string[] }> {
+  if (isDemo()) return { ticket: { identifier: "DEMO-1", title: "Demo" }, sessions: [] };
   const res = await fetch(`${BASE}/api/quick/slack-to-fix`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -209,6 +240,7 @@ export async function slackToFix(
 }
 
 export async function sendSessionInput(sessionName: string, text: string): Promise<void> {
+  if (isDemo()) return;
   const res = await fetch(`${BASE}/api/sessions/${sessionName}/input`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -221,6 +253,7 @@ export async function sendSessionInput(sessionName: string, text: string): Promi
 }
 
 export async function uploadFile(file: File): Promise<string> {
+  if (isDemo()) return "/tmp/demo-upload";
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${BASE}/api/upload`, {
@@ -239,6 +272,7 @@ export async function fetchSessionOutput(
   sessionName: string,
   lines = 50,
 ): Promise<{ output: string; status: string; statusLine?: { type: string; message: string } }> {
+  if (isDemo()) return getDemoOutput(sessionName);
   const res = await fetch(`${BASE}/api/sessions/${sessionName}/output?lines=${lines}`);
   if (!res.ok) {
     const data = await res.json();
@@ -248,6 +282,7 @@ export async function fetchSessionOutput(
 }
 
 export async function fetchSessionChildren(sessionName: string): Promise<SessionInfo[]> {
+  if (isDemo()) return DEMO_SESSIONS.filter((s) => s.parentSession === sessionName);
   const res = await fetch(`${BASE}/api/sessions/${sessionName}/children`);
   return res.json();
 }
@@ -297,27 +332,32 @@ export interface CustomAction {
 }
 
 export async function fetchSettingsHealth(): Promise<SettingsHealth> {
+  if (isDemo()) return DEMO_SETTINGS_HEALTH;
   const res = await fetch(`${BASE}/api/settings/health`);
   return res.json();
 }
 
 export async function fetchIntegrations(): Promise<IntegrationStatus> {
+  if (isDemo()) return DEMO_INTEGRATIONS;
   const res = await fetch(`${BASE}/api/settings/integrations`);
   return res.json();
 }
 
 export async function fetchSettingsStatus(): Promise<SettingsStatus> {
+  if (isDemo()) return DEMO_SETTINGS_STATUS;
   const res = await fetch(`${BASE}/api/settings/status`);
   return res.json();
 }
 
 export async function fetchBasePath(): Promise<string> {
+  if (isDemo()) return "~/projects";
   const res = await fetch(`${BASE}/api/settings/base-path`);
   const data = await res.json();
   return data.path;
 }
 
 export async function updateBasePath(path: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/settings/base-path`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -326,11 +366,13 @@ export async function updateBasePath(path: string): Promise<void> {
 }
 
 export async function fetchSettingsRepos(): Promise<RepoConfig[]> {
+  if (isDemo()) return DEMO_REPOS;
   const res = await fetch(`${BASE}/api/settings/repos`);
   return res.json();
 }
 
 export async function addSettingsRepo(repo: RepoConfig): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/settings/repos`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -339,11 +381,13 @@ export async function addSettingsRepo(repo: RepoConfig): Promise<void> {
 }
 
 export async function scanRepos(): Promise<RepoConfig[]> {
+  if (isDemo()) return DEMO_REPOS;
   const res = await fetch(`${BASE}/api/settings/repos/scan`);
   return res.json();
 }
 
 export async function deleteSettingsRepo(alias: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/settings/repos/${encodeURIComponent(alias)}`, {
     method: "DELETE",
   });
@@ -353,6 +397,7 @@ export async function saveIntegrationKey(
   type: "linear-key" | "linear-team-id" | "slack-token",
   value: string,
 ): Promise<void> {
+  if (isDemo()) return;
   const keyMap = { "linear-key": "key", "linear-team-id": "id", "slack-token": "token" };
   await fetch(`${BASE}/api/settings/${type}`, {
     method: "PUT",
@@ -364,6 +409,7 @@ export async function saveIntegrationKey(
 export async function deleteIntegrationKey(
   type: "linear-key" | "linear-team-id" | "slack-token",
 ): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/settings/${type}`, { method: "DELETE" });
 }
 
@@ -375,11 +421,13 @@ export interface AuthStatus {
 }
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {
+  if (isDemo()) return DEMO_AUTH;
   const res = await fetch(`${BASE}/api/auth/status`);
   return res.json();
 }
 
 export async function login(password: string): Promise<{ ok?: boolean; error?: string }> {
+  if (isDemo()) return { ok: true };
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -389,10 +437,12 @@ export async function login(password: string): Promise<{ ok?: boolean; error?: s
 }
 
 export async function logout(): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/auth/logout`, { method: "POST" });
 }
 
 export async function setPassword(password: string): Promise<{ ok?: boolean; error?: string }> {
+  if (isDemo()) return { ok: true };
   const res = await fetch(`${BASE}/api/auth/password`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -414,6 +464,7 @@ export interface DbShardInfo {
 }
 
 export async function fetchDbShards(): Promise<DbShardInfo[]> {
+  if (isDemo()) return [];
   const res = await fetch(`${BASE}/api/db/shards`);
   return res.json();
 }
@@ -428,6 +479,7 @@ export async function addDbShardApi(shard: {
   engine?: string;
   sslmode?: string;
 }): Promise<void> {
+  if (isDemo()) return;
   const res = await fetch(`${BASE}/api/db/shards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -440,12 +492,14 @@ export async function addDbShardApi(shard: {
 }
 
 export async function deleteDbShard(name: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/db/shards/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
 }
 
 export async function testDbShard(name: string): Promise<{ ok: boolean; error?: string; duration?: number }> {
+  if (isDemo()) return { ok: true, duration: 12 };
   const res = await fetch(`${BASE}/api/db/test/${encodeURIComponent(name)}`);
   return res.json();
 }
@@ -453,11 +507,13 @@ export async function testDbShard(name: string): Promise<{ ok: boolean; error?: 
 // ─── Custom Quick Actions API ───
 
 export async function fetchCustomActions(): Promise<CustomAction[]> {
+  if (isDemo()) return [];
   const res = await fetch(`${BASE}/api/settings/quick-actions`);
   return res.json();
 }
 
 export async function createCustomAction(action: Omit<CustomAction, "id">): Promise<CustomAction> {
+  if (isDemo()) return { ...action, id: "demo" };
   const res = await fetch(`${BASE}/api/settings/quick-actions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -467,6 +523,7 @@ export async function createCustomAction(action: Omit<CustomAction, "id">): Prom
 }
 
 export async function deleteCustomAction(id: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/settings/quick-actions/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
@@ -482,11 +539,13 @@ export interface McpServerInfo {
 }
 
 export async function fetchMcpServers(): Promise<McpServerInfo[]> {
+  if (isDemo()) return [];
   const res = await fetch(`${BASE}/api/settings/mcp-servers`);
   return res.json();
 }
 
 export async function addMcpServerApi(server: McpServerInfo): Promise<void> {
+  if (isDemo()) return;
   const res = await fetch(`${BASE}/api/settings/mcp-servers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -499,6 +558,7 @@ export async function addMcpServerApi(server: McpServerInfo): Promise<void> {
 }
 
 export async function deleteMcpServer(name: string): Promise<void> {
+  if (isDemo()) return;
   await fetch(`${BASE}/api/settings/mcp-servers/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
