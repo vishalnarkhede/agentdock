@@ -89,6 +89,8 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
   const isCursorPrompt = (line: string) => /^>\s*$/.test(line) || /^> /.test(line);
   const isPromptLine = (line: string) => isClaudePrompt(line) || isCursorPrompt(line);
   const isPromptUI = (line: string) => /accept edits|shift.tab/.test(line);
+  // Claude Code feedback prompt: "● How is Claude doing this session?"
+  const isFeedbackPrompt = (line: string) => /how is claude doing/i.test(line) || /^\s*[0-9]+:\s*(Bad|Fine|Good|Dismiss)/i.test(line);
   const lastLine = tail[tail.length - 1];
 
   if (isPromptLine(lastLine)) {
@@ -96,6 +98,11 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
   }
 
   if (isPromptUI(lastLine) && tail.length >= 2 && isPromptLine(tail[tail.length - 2])) {
+    return "waiting";
+  }
+
+  // Claude Code shows a feedback prompt after completing work — agent is idle
+  if (tail.some(isFeedbackPrompt)) {
     return "waiting";
   }
 
