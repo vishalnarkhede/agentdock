@@ -8,7 +8,8 @@ interface Props {
   onSessionCreated: () => void;
 }
 
-const JACEK_SESSION = "jacek-overseer";
+const JACEK_NAME = "jacek-overseer";
+const JACEK_SESSION = `claude-${JACEK_NAME}`; // server prepends "claude-" prefix
 const JACEK_PROMPT = `You are Jacek, the project overseer for AgentDock. Your job is to help the user stay organized across all their Claude coding sessions.
 
 You have access to the agentdock MCP server. Use it to:
@@ -45,7 +46,7 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
     try {
       await createSession({
         targets: [],
-        name: JACEK_SESSION,
+        name: JACEK_NAME,
         prompt: JACEK_PROMPT,
         agentType: "claude",
         dangerouslySkipPermissions: true,
@@ -108,7 +109,7 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
 
       {jacekExists && (
         <div className="jacek-hint">
-          Switch to the "{JACEK_SESSION}" session in the sidebar to see Jacek's full output.
+          Switch to the "{JACEK_NAME}" session in the sidebar to see Jacek's full output.
         </div>
       )}
 
