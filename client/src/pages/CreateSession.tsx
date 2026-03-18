@@ -7,7 +7,7 @@ import {
   deleteTemplate,
   type SessionTemplate,
 } from "../api";
-import { RepoSelector } from "../components/RepoSelector";
+import { RepoSelector, saveRecentRepos } from "../components/RepoSelector";
 import type { AgentType } from "../types";
 
 export function CreateSession() {
@@ -40,6 +40,7 @@ export function CreateSession() {
         dangerouslySkipPermissions: dangerouslySkipPermissions || undefined,
         agentType,
       });
+      if (targets.length > 0) saveRecentRepos(targets);
       // Navigate to dashboard with first created session selected
       const firstSession = result.sessions[0];
       navigate(`/?session=${encodeURIComponent(firstSession)}`);

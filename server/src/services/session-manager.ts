@@ -82,7 +82,7 @@ function writePromptFile(sessionName: string, prompt: string): string {
   return promptFile;
 }
 
-function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string): string {
+function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string, addDirs?: string[]): string {
   if (agentType === "cursor") {
     return dangerouslySkipPermissions ? "agent --yolo" : "agent";
   }
@@ -97,6 +97,9 @@ function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolea
   }
   if (systemPromptFile) {
     cmd += ` --append-system-prompt-file ${systemPromptFile}`;
+  }
+  if (addDirs && addDirs.length > 0) {
+    cmd += ` --add-dir ${addDirs.join(" --add-dir ")}`;
   }
   return cmd;
 }
@@ -157,12 +160,13 @@ async function resolvePiece(
 }
 
 async function launchAgent(
-  sess: string, 
-  cwd: string, 
+  sess: string,
+  cwd: string,
   agentType: AgentType,
-  prompt?: string, 
+  prompt?: string,
   dangerouslySkipPermissions?: boolean,
   parentSession?: string,
+  addDirs?: string[],
 ): Promise<void> {
 
   // Pass env vars via tmux's -e flag so they are set BEFORE the shell starts.
@@ -191,7 +195,7 @@ async function launchAgent(
 
   // Wait for shell init to complete before sending commands
   await sleep(2000);
-  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile));
+  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile, addDirs));
 
   // Save session metadata
   saveSessionAgentType(sess, agentType);
@@ -331,22 +335,30 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
         }
       }
 
-      // For isolated sessions, use the session workspace dir so agent only sees worktrees
+      // For isolated sessions, use the first worktree as the primary working directory
+      // so the agent starts in an actual repo (not the parent workspace dir)
       const sessionDir = sessionSlug
-        ? worktree.sessionWorkspaceDir(sessionSlug)
+        ? workDirs[0]
         : workDirs.length === 1 ? workDirs[0] : `${HOME_DIR}/projects`;
 
-      // Build repo context
+      // For multi-repo sessions, pass additional dirs via --add-dir
+      const additionalDirs = workDirs.length > 1 ? workDirs.slice(1) : undefined;
+
+      // Build repo context with explicit directory paths
       let fullPrompt = prompt || undefined;
       if (workDirs.length > 1) {
-        let repoContext = "You are working across multiple repos:\n";
+        let repoContext = "You are working across multiple repositories. Each repo is in its own directory:\n";
         for (const wd of workDirs) {
-          repoContext += `  - ${wd}\n`;
+          const repoName = wd.split("/").pop() || wd;
+          repoContext += `  - ${repoName}: ${wd}\n`;
         }
+        repoContext += `\nYour current working directory is: ${workDirs[0]}\n`;
+        repoContext += `When you need to work on a different repo, cd into its directory.\n`;
         if (prompt) fullPrompt = repoContext + "\n" + prompt;
+        else fullPrompt = repoContext;
       }
 
-      await launchAgent(sess, sessionDir, agentType, fullPrompt, req.dangerouslySkipPermissions, req.parentSession);
+      await launchAgent(sess, sessionDir, agentType, fullPrompt, req.dangerouslySkipPermissions, req.parentSession, additionalDirs);
     } else {
       // Single repo
       const resolved = await resolvePiece(target, newBranch, sessionSlug);

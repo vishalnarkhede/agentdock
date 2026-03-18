@@ -113,7 +113,19 @@ export async function sendKeysRaw(
   name: string,
   keys: string,
 ): Promise<void> {
-  await run(["send-keys", "-l", "-t", name, keys]);
+  if (keys.length <= 400) {
+    await run(["send-keys", "-l", "-t", name, keys]);
+    return;
+  }
+  // Large text: use tmux load-buffer + paste-buffer (no length limit, atomic)
+  const tmp = `/tmp/agentdock-paste-${Date.now()}`;
+  await Bun.write(tmp, keys);
+  try {
+    await run(["load-buffer", tmp]);
+    await run(["paste-buffer", "-t", name, "-d"]);
+  } finally {
+    try { const { unlink } = require("fs/promises"); await unlink(tmp); } catch {}
+  }
 }
 
 export async function sendSpecialKey(

@@ -92,6 +92,12 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [focused, setFocused] = useState(true);
   const [switchingAgent, setSwitchingAgent] = useState(false);
   const [switchStep, setSwitchStep] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [showPasteInput, setShowPasteInput] = useState(false);
+  const [scrollPaused, setScrollPaused] = useState(false);
+  const pasteInputRef = useRef<HTMLTextAreaElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollPausedRef = useRef(false);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
@@ -213,6 +219,14 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const handleData = useCallback((snapshot: PaneSnapshot) => {
     const term = termRef.current;
     if (!term) return;
+
+    // Skip rendering when user has paused scrolling
+    if (scrollPausedRef.current) {
+      // Still update lastContent so copy works with latest data
+      setLastContent(snapshot.content);
+      return;
+    }
+
     // Reset terminal state (clears screen, scrollback, and importantly resets the
     // ANSI parser). Without this, a truncated escape sequence in captured content
     // can leave the parser stuck, causing all subsequent text to render unstyled.
@@ -427,7 +441,42 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         ref={containerRef}
         className="terminal-wrapper"
         onClick={() => { if (!focused) termRef.current?.focus(); }}
+        onWheel={(e) => {
+          if (e.deltaY < 0 && !scrollPausedRef.current) {
+            scrollPausedRef.current = true;
+            setScrollPaused(true);
+          }
+        }}
+        onTouchStart={(e) => {
+          const touch = e.touches[0];
+          longPressTimer.current = setTimeout(() => {
+            setContextMenu({ x: touch.clientX, y: touch.clientY });
+          }, 500);
+        }}
+        onTouchEnd={() => {
+          if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+          }
+        }}
+        onTouchMove={() => {
+          if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+          }
+        }}
       />
+      {scrollPaused && (
+        <button
+          className="terminal-scroll-resume"
+          onClick={() => {
+            scrollPausedRef.current = false;
+            setScrollPaused(false);
+          }}
+        >
+          scroll paused — tap to resume
+        </button>
+      )}
       {!focused && (
         <div
           className="terminal-unfocused-hint"
@@ -435,6 +484,82 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         >
           click to type
         </div>
+      )}
+      {contextMenu && (
+        <>
+          <div
+            className="terminal-context-backdrop"
+            onClick={() => setContextMenu(null)}
+          />
+          <div
+            className="terminal-context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+          >
+            <button
+              onClick={() => {
+                setContextMenu(null);
+                setShowPasteInput(true);
+                // Focus the paste input after it renders
+                requestAnimationFrame(() => pasteInputRef.current?.focus());
+              }}
+            >
+              Paste
+            </button>
+            <button
+              onClick={() => {
+                setContextMenu(null);
+                const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+                navigator.clipboard.writeText(clean.trim());
+              }}
+            >
+              Copy All
+            </button>
+            {termRef.current?.getSelection() && (
+              <button
+                onClick={() => {
+                  setContextMenu(null);
+                  const sel = termRef.current?.getSelection() || "";
+                  navigator.clipboard.writeText(sel);
+                }}
+              >
+                Copy Selection
+              </button>
+            )}
+          </div>
+        </>
+      )}
+      {showPasteInput && (
+        <>
+          <div
+            className="terminal-context-backdrop"
+            onClick={() => setShowPasteInput(false)}
+          />
+          <div className="terminal-paste-overlay">
+            <textarea
+              ref={pasteInputRef}
+              className="terminal-paste-input"
+              placeholder="Long-press here and paste"
+              rows={3}
+              onPaste={(e) => {
+                e.preventDefault();
+                const text = e.clipboardData.getData("text");
+                if (text) {
+                  sendInputRef.current(text);
+                  setShowPasteInput(false);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setShowPasteInput(false);
+              }}
+            />
+            <button
+              className="terminal-paste-cancel"
+              onClick={() => setShowPasteInput(false)}
+            >
+              cancel
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

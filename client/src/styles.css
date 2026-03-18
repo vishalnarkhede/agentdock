@@ -560,6 +560,31 @@ h1 {
   font-size: calc(var(--fs-base) - 2px);
 }
 
+.session-search-wrap {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.session-search {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 1px);
+  padding: 6px 10px;
+  outline: none;
+}
+
+.session-search:focus {
+  border-color: var(--accent);
+}
+
+.session-search::placeholder {
+  color: var(--text-dim);
+}
+
 .session-list {
   flex: 1;
   overflow-y: auto;
@@ -1735,6 +1760,18 @@ h1 {
   font-size: calc(var(--fs-base) - 2px);
 }
 
+.repo-recent-badge {
+  font-size: calc(var(--fs-base) - 3px);
+  color: var(--text-dim);
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.repo-recent-divider {
+  border-bottom: 1px solid var(--border);
+  margin: 4px 12px;
+}
+
 .repo-search {
   margin-bottom: 8px;
 }
@@ -2775,6 +2812,101 @@ h1 {
 .chat-attach-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* ─── Terminal long-press context menu ─── */
+.terminal-context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+.terminal-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  display: flex;
+  gap: 1px;
+  transform: translate(-50%, -100%) translateY(-8px);
+}
+
+.terminal-context-menu button {
+  background: var(--bg-card);
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  padding: 10px 18px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.terminal-context-menu button:active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.terminal-scroll-resume {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 2px);
+  padding: 6px 16px;
+  cursor: pointer;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.terminal-paste-overlay {
+  position: fixed;
+  z-index: 1000;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(90vw, 360px);
+}
+
+.terminal-paste-input {
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  padding: 14px;
+  outline: none;
+  resize: none;
+  caret-color: var(--accent);
+  min-height: 80px;
+}
+
+.terminal-paste-input::placeholder {
+  color: var(--text-dim);
+}
+
+.terminal-paste-cancel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  padding: 8px;
+  cursor: pointer;
+}
+
+.terminal-paste-cancel:active {
+  background: var(--border);
 }
 
 /* ─── Drop overlay ─── */

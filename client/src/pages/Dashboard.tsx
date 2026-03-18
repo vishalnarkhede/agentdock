@@ -675,6 +675,20 @@ export function Dashboard() {
   }, []);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const sessionSearchRef = useRef<HTMLInputElement>(null);
+
+  // Cmd+K to focus session search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        sessionSearchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Build ordered session list: pinned first, then parents, then their children indented below
   const orderedSessions = useMemo(() => {
@@ -724,6 +738,25 @@ export function Dashboard() {
     }
     return result;
   }, [sessions, collapsedParents, pinnedSessions]);
+
+  const filteredSessions = useMemo(() => {
+    if (!sessionSearch.trim()) return orderedSessions;
+    const q = sessionSearch.toLowerCase();
+    // Collect matching parent names so we include their children too
+    const matchingParents = new Set<string>();
+    for (const entry of orderedSessions) {
+      const s = entry.session;
+      if (s.name.toLowerCase().includes(q)) {
+        if (entry.isChild && s.parentSession) matchingParents.add(s.parentSession);
+        else matchingParents.add(s.name);
+      }
+    }
+    return orderedSessions.filter((entry) => {
+      if (matchingParents.has(entry.session.name)) return true;
+      if (entry.isChild && entry.session.parentSession && matchingParents.has(entry.session.parentSession)) return true;
+      return false;
+    });
+  }, [orderedSessions, sessionSearch]);
 
   // Check if active session has children or is a child (for sub-agents tab & breadcrumb)
   const activeSessionInfo = sessions.find((s) => s.name === activeSession);
@@ -849,6 +882,24 @@ export function Dashboard() {
           </div>
         </div>
 
+        {sessions.length > 0 && (
+          <div className="session-search-wrap">
+            <input
+              ref={sessionSearchRef}
+              type="text"
+              className="session-search"
+              placeholder="Search sessions... (⌘K)"
+              value={sessionSearch}
+              onChange={(e) => setSessionSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setSessionSearch("");
+                  sessionSearchRef.current?.blur();
+                }
+              }}
+            />
+          </div>
+        )}
         <div className="session-list">
           {loading ? (
             <div className="loading">LOADING...</div>
@@ -861,7 +912,7 @@ export function Dashboard() {
               </button>
             </div>
           ) : (
-            orderedSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
+            filteredSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
               <SessionRow
                 key={session.name}
                 session={session}
