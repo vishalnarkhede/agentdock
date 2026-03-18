@@ -74,7 +74,7 @@ export function RepoSelector({ selected, onChange }: Props) {
       });
     }
     return list;
-  }, [repos, search, recentRepos]);
+  }, [repos, search, recentRepos, selected]);
 
   const isSearching = search.trim().length > 0;
   const showAll = expanded || isSearching;
