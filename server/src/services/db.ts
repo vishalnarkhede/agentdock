@@ -36,6 +36,16 @@ export function getDb(): Database {
       session_name TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_session TEXT NOT NULL,
+      to_session TEXT NOT NULL,
+      content TEXT NOT NULL,
+      reply TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   return _db;
@@ -141,4 +151,40 @@ export function listNotes(key?: string): Note[] {
     return db.prepare("SELECT * FROM notes WHERE key = ? ORDER BY created_at DESC").all(key) as Note[];
   }
   return db.prepare("SELECT * FROM notes ORDER BY created_at DESC LIMIT 100").all() as Note[];
+}
+
+// ─── Messages operations ───
+
+export interface Message {
+  id?: number;
+  from_session: string;
+  to_session: string;
+  content: string;
+  reply?: string;
+  status?: string;
+  created_at?: string;
+}
+
+export function postMessage(msg: { from_session: string; to_session: string; content: string }): Message {
+  const db = getDb();
+  const result = db.prepare("INSERT INTO messages (from_session, to_session, content) VALUES (?, ?, ?)").run(
+    msg.from_session, msg.to_session, msg.content,
+  );
+  return db.prepare("SELECT * FROM messages WHERE id = ?").get(result.lastInsertRowid) as Message;
+}
+
+export function checkMessages(session_name: string): Message[] {
+  const db = getDb();
+  return db.prepare("SELECT * FROM messages WHERE to_session = ? AND status = 'pending' ORDER BY created_at ASC").all(session_name) as Message[];
+}
+
+export function replyMessage(id: number, reply: string): Message | null {
+  const db = getDb();
+  db.prepare("UPDATE messages SET reply = ?, status = 'replied' WHERE id = ?").run(reply, id);
+  return db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as Message | null;
+}
+
+export function getMessageReplies(from_session: string): Message[] {
+  const db = getDb();
+  return db.prepare("SELECT * FROM messages WHERE from_session = ? AND status = 'replied' ORDER BY created_at DESC LIMIT 20").all(from_session) as Message[];
 }

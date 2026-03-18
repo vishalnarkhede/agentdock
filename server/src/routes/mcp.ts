@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { upsertPr, updatePr, listPrs, addNote, listNotes } from "../services/db";
+import { upsertPr, updatePr, listPrs, addNote, listNotes, postMessage, checkMessages, replyMessage, getMessageReplies } from "../services/db";
 import { listSessions, capturePaneSnapshot } from "../services/tmux";
 import { detectStatus } from "../services/status";
 
@@ -94,6 +94,53 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "send_message",
+    description: "Send a message to another session. The session will see it next time it checks messages. Use this for behind-the-curtain communication between sessions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from_session: { type: "string", description: "Your session name" },
+        to_session: { type: "string", description: "Target session name" },
+        content: { type: "string", description: "Message content" },
+      },
+      required: ["from_session", "to_session", "content"],
+    },
+  },
+  {
+    name: "check_messages",
+    description: "Check for pending messages sent to your session from other sessions. Call this periodically or after completing a task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        session_name: { type: "string", description: "Your session name" },
+      },
+      required: ["session_name"],
+    },
+  },
+  {
+    name: "reply_message",
+    description: "Reply to a pending message by its ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message_id: { type: "number", description: "ID of the message to reply to" },
+        reply: { type: "string", description: "Your reply" },
+      },
+      required: ["message_id", "reply"],
+    },
+  },
+  {
+    name: "get_replies",
+    description: "Get replies to messages you sent. Use this to check if other sessions responded.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from_session: { type: "string", description: "Your session name (the sender)" },
+      },
+      required: ["from_session"],
+    },
+  },
 ];
 
 // ─── Tool Handlers ───
@@ -159,6 +206,22 @@ async function handleToolCall(name: string, args: Record<string, any>): Promise<
 
     case "list_notes":
       return listNotes(args.key);
+
+    case "send_message":
+      return postMessage({
+        from_session: args.from_session,
+        to_session: args.to_session,
+        content: args.content,
+      });
+
+    case "check_messages":
+      return checkMessages(args.session_name);
+
+    case "reply_message":
+      return replyMessage(args.message_id, args.reply);
+
+    case "get_replies":
+      return getMessageReplies(args.from_session);
 
     default:
       throw new Error(`Unknown tool: ${name}`);

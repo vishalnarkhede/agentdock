@@ -38,3 +38,8 @@ You have access to the `agentdock` MCP server with these tools:
 - `list_notes` — Read shared notes
 - `list_sessions` — See all active AgentDock sessions
 - `get_session_output` — Read another session's terminal output
+- `check_messages` — Check for messages from other sessions (call after completing tasks)
+- `reply_message` — Reply to a message from another session
+- `send_message` — Send a message to another session
+
+IMPORTANT: After completing each task, call `check_messages` with your session name ({{SESSION_NAME}}) to see if other sessions have questions for you. If there are pending messages, reply to them using `reply_message`.
