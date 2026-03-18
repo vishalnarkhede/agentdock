@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { createSession, sendSessionInput, fetchSessionOutput } from "../api";
 
 interface Props {
@@ -36,7 +38,32 @@ const QUICK_ACTIONS = [
 
 // Strip ANSI escape codes
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+    .replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+// Check if a line is terminal chrome that should be skipped
+function isChrome(line: string): boolean {
+  if (!line.trim()) return true;
+  // Box-drawing separator lines
+  if (/^[\s─━═┌┐└┘├┤┬┴┼│╭╮╰╯╶╴╵╷┄┅┈┉┆┇┊┋╌╍╎╏]+$/.test(line.trim())) return true;
+  // Status bar
+  if (/^⏵⏵/.test(line.trim())) return true;
+  // Bare prompt
+  if (line.trim() === "❯") return true;
+  // "hold Space to speak", "bypass permissions", "shift+tab" lines
+  if (/hold Space|bypass permissions|shift\+tab|ctrl\+o to expand/i.test(line)) return true;
+  // "+N lines" collapsed indicator
+  if (/^\s*…\s*\+\d+ lines/.test(line)) return true;
+  return false;
+}
+
+// Check if text looks like MCP tool call noise
+function isMcpNoise(text: string): boolean {
+  // "agentdock - tool_name (MCP)" header
+  if (/^agentdock\s*-\s*\w+.*\(MCP\)$/.test(text.trim())) return true;
+  return false;
 }
 
 // Parse terminal output into chat messages
@@ -56,16 +83,11 @@ function parseOutput(raw: string): ChatMessage[] {
       else continue;
     }
 
-    // Skip empty lines, separator lines, prompt chrome
-    if (!trimmed) continue;
-    if (/^[─━═┌┐└┘├┤┬┴┼│╭╮╰╯]+$/.test(trimmed)) continue;
-    if (/^⏵⏵/.test(trimmed)) continue;
-    if (trimmed === "❯") continue;
+    if (isChrome(line)) continue;
 
     // User message
     if (trimmed.startsWith("❯ ")) {
       const text = trimmed.slice(2).trim();
-      // Skip the initial prompt file read command
       if (text.startsWith("Read and follow")) continue;
       if (current) messages.push(current);
       current = { role: "user", text };
@@ -75,11 +97,11 @@ function parseOutput(raw: string): ChatMessage[] {
     // Jacek response (⏺ prefix)
     if (trimmed.startsWith("⏺")) {
       const text = trimmed.slice(1).trim();
-      // Skip "Read 1 file" lines
+      // Skip file read lines and MCP tool call headers
       if (text.startsWith("Read ") && text.includes("file")) continue;
+      if (isMcpNoise(text)) continue;
 
       if (current?.role === "jacek") {
-        // Append to existing jacek message
         current.text += "\n" + text;
       } else {
         if (current) messages.push(current);
@@ -88,28 +110,29 @@ function parseOutput(raw: string): ChatMessage[] {
       continue;
     }
 
-    // Continuation line — append to current message
+    // ⎿ lines — MCP results / tool output — skip all of them
+    if (trimmed.startsWith("⎿")) continue;
+
+    // Continuation line — append to current message if it's not junk
     if (current) {
-      // Skip MCP tool call detail lines (⎿ lines)
-      if (trimmed.startsWith("⎿")) {
-        // Include short results but skip long JSON
-        const content = trimmed.slice(1).trim();
-        if (content.startsWith("[") || content.startsWith("{") || content.includes("+") && content.includes("lines")) continue;
-        if (content.length < 100) {
-          current.text += "\n  " + content;
-        }
-        continue;
-      }
+      // Skip JSON fragments
+      if (/^\s*[\[{"]/.test(trimmed) && trimmed.length < 5) continue;
+      // Skip broken table borders
+      if (/^[│┌┐└┘├┤┬┴┼─]+/.test(trimmed) && trimmed.includes("─")) continue;
+
       current.text += "\n" + trimmed;
     }
   }
 
   if (current) messages.push(current);
 
-  // Clean up [STATUS: ...] lines from messages — keep the content before them
+  // Clean up messages
   return messages.map((m) => ({
     ...m,
-    text: m.text.replace(/\[STATUS:.*?\]/g, "").trim(),
+    text: m.text
+      .replace(/\[STATUS:.*?\]/g, "")  // remove status lines
+      .replace(/\n{3,}/g, "\n\n")       // collapse multiple blank lines
+      .trim(),
   })).filter((m) => m.text.length > 0);
 }
 
@@ -223,7 +246,13 @@ export function JacekPanel({ visible, onClose }: Props) {
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`jacek-bubble jacek-bubble-${msg.role}`}>
-            <div className="jacek-bubble-text">{msg.text}</div>
+            {msg.role === "jacek" ? (
+              <div className="jacek-bubble-text jacek-markdown">
+                <Markdown remarkPlugins={[remarkGfm]}>{msg.text}</Markdown>
+              </div>
+            ) : (
+              <div className="jacek-bubble-text">{msg.text}</div>
+            )}
           </div>
         ))}
         {sending && messages.length > 0 && (
