@@ -766,16 +766,29 @@ export function Dashboard() {
     : null;
 
   // Resolve session paths — use worktree metadata if available, otherwise discover git repos
-  const [activeSessionPaths, setActiveSessionPaths] = useState<string[]>([]);
-  useEffect(() => {
-    if (!activeSessionInfo) { setActiveSessionPaths([]); return; }
+  const [discoveredPaths, setDiscoveredPaths] = useState<Record<string, string[]>>({});
+  const activeSessionPaths = useMemo(() => {
+    if (!activeSessionInfo) return [];
     if (activeSessionInfo.worktrees && activeSessionInfo.worktrees.length > 0) {
-      setActiveSessionPaths(activeSessionInfo.worktrees.map((wt) => wt.wtDir));
-    } else if (activeSessionInfo.path) {
-      // Check if path is a git repo or a parent dir with sub-repos
-      fetchGitRepos(activeSessionInfo.path).then(setActiveSessionPaths);
+      return activeSessionInfo.worktrees.map((wt) => wt.wtDir);
     }
-  }, [activeSessionInfo?.name, activeSessionInfo?.path, activeSessionInfo?.worktrees]);
+    if (activeSessionInfo.path && discoveredPaths[activeSessionInfo.name]) {
+      return discoveredPaths[activeSessionInfo.name];
+    }
+    return activeSessionInfo.path ? [activeSessionInfo.path] : [];
+  }, [activeSessionInfo, discoveredPaths]);
+
+  // Async discovery for sessions without worktree metadata
+  useEffect(() => {
+    if (!activeSessionInfo?.path) return;
+    if (activeSessionInfo.worktrees && activeSessionInfo.worktrees.length > 0) return;
+    if (discoveredPaths[activeSessionInfo.name]) return;
+    fetchGitRepos(activeSessionInfo.path).then((repos) => {
+      if (repos.length > 0) {
+        setDiscoveredPaths((prev) => ({ ...prev, [activeSessionInfo.name]: repos }));
+      }
+    });
+  }, [activeSessionInfo?.name]);
 
   const handleStopAll = async () => {
     if (!confirm("Stop all sessions?")) return;

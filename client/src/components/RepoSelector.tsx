@@ -55,10 +55,14 @@ export function RepoSelector({ selected, onChange }: Props) {
         const bStarts = b.alias.toLowerCase().startsWith(q) ? 0 : 1;
         return aStarts - bStarts;
       });
-    } else if (recentRepos.length > 0) {
-      // Sort recent repos to the top
+    } else {
+      // Sort: selected first, then recent, then the rest
+      const selectedSet = new Set(selected);
       const recentSet = new Set(recentRepos);
       list = [...list].sort((a, b) => {
+        const aSelected = selectedSet.has(a.alias) ? 0 : 1;
+        const bSelected = selectedSet.has(b.alias) ? 0 : 1;
+        if (aSelected !== bSelected) return aSelected - bSelected;
         const aRecent = recentSet.has(a.alias) ? 0 : 1;
         const bRecent = recentSet.has(b.alias) ? 0 : 1;
         if (aRecent !== bRecent) return aRecent - bRecent;

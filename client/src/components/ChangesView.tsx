@@ -693,11 +693,12 @@ export function ChangesView({ sessionPaths, sessionName, onCommentsSent }: Props
     );
   }
 
-  const multiRepo = sessionPaths.length > 1;
+  const limitedPaths = sessionPaths.slice(0, 4);
+  const multiRepo = limitedPaths.length > 1;
 
   return (
     <div className="changes-view">
-      {sessionPaths.map((p) => (
+      {limitedPaths.map((p) => (
         <RepoChanges
           key={p}
           sessionPath={p}
