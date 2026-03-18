@@ -27,6 +27,36 @@ async function runGh(cwd: string, args: string[]): Promise<{ stdout: string; std
   return { stdout, stderr, exitCode };
 }
 
+// GET /api/git/repos?path=/Users/.../workspace
+// Returns list of git repo paths under the given path (for multi-repo worktrees without metadata)
+app.get("/repos", async (c) => {
+  const cwd = c.req.query("path");
+  if (!cwd) return c.json({ error: "path is required" }, 400);
+
+  // Check if path itself is a git repo
+  const check = await runGit(cwd, ["rev-parse", "--git-dir"]);
+  if (check.exitCode === 0) {
+    return c.json({ repos: [cwd] });
+  }
+
+  // Scan immediate subdirectories for git repos
+  const { readdirSync, statSync } = await import("fs");
+  const { join } = await import("path");
+  const repos: string[] = [];
+  try {
+    for (const entry of readdirSync(cwd)) {
+      const full = join(cwd, entry);
+      try {
+        if (statSync(full).isDirectory()) {
+          const sub = await runGit(full, ["rev-parse", "--git-dir"]);
+          if (sub.exitCode === 0) repos.push(full);
+        }
+      } catch {}
+    }
+  } catch {}
+  return c.json({ repos });
+});
+
 // GET /api/git/changes?path=/Users/.../repo
 app.get("/changes", async (c) => {
   const cwd = c.req.query("path");
@@ -58,7 +88,7 @@ app.get("/changes", async (c) => {
   const branchName = branch.stdout.trim();
   let prUrl: string | null = null;
   if (branchName && branchName !== "main" && branchName !== "master") {
-    const pr = await runGh(cwd, ["pr", "view", branchName, "--json", "url", "--jq", ".url"]);
+    const pr = await runGh(cwd, ["pr", "view", branchName, "--json", "url,state", "--jq", 'select(.state == "OPEN") | .url']);
     if (pr.exitCode === 0 && pr.stdout.trim()) {
       prUrl = pr.stdout.trim();
     }

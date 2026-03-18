@@ -148,6 +148,12 @@ export async function fetchGitChanges(
   return res.json();
 }
 
+export async function fetchGitRepos(path: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/git/repos?path=${encodeURIComponent(path)}`);
+  const data = await res.json();
+  return data.repos || [];
+}
+
 export async function fetchPRDiff(path: string): Promise<{ diff: string }> {
   if (isDemo()) return { diff: "" };
   const res = await fetch(`${BASE}/api/git/pr-diff?path=${encodeURIComponent(path)}`);

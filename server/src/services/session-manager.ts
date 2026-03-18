@@ -251,9 +251,9 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
     let wtBranch: string;
     if (req.ticket) {
       wtBranch = req.ticket;
-    } else if (req.name) {
-      wtBranch = req.name.replace(/[^a-zA-Z0-9_-]/g, "-");
     } else {
+      // Use a short ID for the worktree branch — Claude can rename/create
+      // the real branch as part of its workflow (e.g., based on Linear ticket)
       wtBranch = `wt-${shortId()}`;
     }
 

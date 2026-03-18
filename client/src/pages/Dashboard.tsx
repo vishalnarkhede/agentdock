@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
@@ -765,6 +765,18 @@ export function Dashboard() {
     ? sessions.find((s) => s.name === activeSessionInfo.parentSession)
     : null;
 
+  // Resolve session paths — use worktree metadata if available, otherwise discover git repos
+  const [activeSessionPaths, setActiveSessionPaths] = useState<string[]>([]);
+  useEffect(() => {
+    if (!activeSessionInfo) { setActiveSessionPaths([]); return; }
+    if (activeSessionInfo.worktrees && activeSessionInfo.worktrees.length > 0) {
+      setActiveSessionPaths(activeSessionInfo.worktrees.map((wt) => wt.wtDir));
+    } else if (activeSessionInfo.path) {
+      // Check if path is a git repo or a parent dir with sub-repos
+      fetchGitRepos(activeSessionInfo.path).then(setActiveSessionPaths);
+    }
+  }, [activeSessionInfo?.name, activeSessionInfo?.path, activeSessionInfo?.worktrees]);
+
   const handleStopAll = async () => {
     if (!confirm("Stop all sessions?")) return;
     try {
@@ -1067,13 +1079,7 @@ export function Dashboard() {
                     <ChangesView
                       key={activeSession}
                       sessionName={activeSession}
-                      sessionPaths={(() => {
-                        const s = sessions.find((s) => s.name === activeSession);
-                        if (s?.worktrees && s.worktrees.length > 0) {
-                          return s.worktrees.map((wt) => wt.wtDir);
-                        }
-                        return s?.path ? [s.path] : [];
-                      })()}
+                      sessionPaths={activeSessionPaths}
                       onCommentsSent={() => setBottomTab(null)}
                     />
                   ) : bottomTab === "sub-agents" && hasChildren ? (
