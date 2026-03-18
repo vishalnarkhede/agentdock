@@ -445,6 +445,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           if (e.deltaY < 0 && !scrollPausedRef.current) {
             scrollPausedRef.current = true;
             setScrollPaused(true);
+          } else if (e.deltaY > 0 && scrollPausedRef.current) {
+            // Check if scrolled to bottom
+            const viewport = containerRef.current?.querySelector('.xterm-viewport');
+            if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 10) {
+              scrollPausedRef.current = false;
+              setScrollPaused(false);
+            }
           }
         }}
         onTouchStart={(e) => {

@@ -18,6 +18,7 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
+  const [talkingToMe, setTalkingToMe] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const mobileNav = useMobileNav();
   const { enabled: authEnabled, logout } = useAuth();
@@ -34,6 +35,21 @@ export function Header() {
       console.error("Failed to create fix-me session:", err);
     } finally {
       setFixingMe(false);
+    }
+  };
+
+  const handleTalkToMe = async () => {
+    if (talkingToMe) return;
+    setTalkingToMe(true);
+    try {
+      const { sessions } = await createSession({ targets: [], name: "talk", dangerouslySkipPermissions: true });
+      if (sessions?.[0]) {
+        navigate(`/?session=${sessions[0]}`);
+      }
+    } catch (err) {
+      console.error("Failed to create talk session:", err);
+    } finally {
+      setTalkingToMe(false);
     }
   };
 
@@ -82,6 +98,14 @@ export function Header() {
           {fixingMe ? "..." : "fix me"}
         </button>
         <button
+          className="header-fix-me-btn"
+          onClick={handleTalkToMe}
+          disabled={talkingToMe}
+          title="Open a general discussion session"
+        >
+          {talkingToMe ? "..." : "talk to me"}
+        </button>
+        <button
           className="settings-gear-btn"
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
@@ -120,6 +144,20 @@ export function Header() {
                 ))}
               </div>
             )}
+            <button
+              className="header-fix-me-btn"
+              onClick={() => { handleFixMe(); setMenuOpen(false); }}
+              disabled={fixingMe}
+            >
+              {fixingMe ? "..." : "fix me"}
+            </button>
+            <button
+              className="header-fix-me-btn"
+              onClick={() => { handleTalkToMe(); setMenuOpen(false); }}
+              disabled={talkingToMe}
+            >
+              {talkingToMe ? "..." : "talk to me"}
+            </button>
             <button
               className="settings-gear-btn"
               onClick={() => {
