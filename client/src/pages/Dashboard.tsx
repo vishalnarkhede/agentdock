@@ -1188,8 +1188,6 @@ export function Dashboard() {
       <JacekPanel
         visible={jacekOpen}
         onClose={() => setJacekOpen(false)}
-        sessions={sessions}
-        onSessionCreated={refresh}
       />
     </div>
   );

@@ -1,24 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { createSession, sendSessionInput } from "../api";
+// Uses relative URLs — same origin as the app
 
-interface Props {
-  visible: boolean;
-  onClose: () => void;
-  sessions: { name: string }[];
-  onSessionCreated: () => void;
+interface ChatMessage {
+  role: "user" | "assistant";
+  text: string;
 }
-
-const JACEK_NAME = "jacek-overseer";
-const JACEK_SESSION = `claude-${JACEK_NAME}`; // server prepends "claude-" prefix
-const JACEK_PROMPT = `You are Jacek, the project overseer for AgentDock. Your job is to help the user stay organized across all their Claude coding sessions.
-
-You have access to the agentdock MCP server. Use it to:
-- Track and summarize PRs across all sessions (register_pr, list_prs)
-- Check what each session is working on (list_sessions, get_session_output)
-- Read and write shared notes for coordination (add_note, list_notes)
-
-When asked to summarize, group PRs by feature/epic and show their status.
-Be concise and use tables when helpful.`;
 
 const QUICK_ACTIONS = [
   { label: "Show all PRs", message: "List all tracked PRs grouped by feature, show their status" },
@@ -26,57 +12,127 @@ const QUICK_ACTIONS = [
   { label: "What's blocked?", message: "Check all sessions for any errors or things that need my input" },
 ];
 
-export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Props) {
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+}
+
+export function JacekPanel({ visible, onClose }: Props) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [toolCall, setToolCall] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const jacekExists = sessions.some((s) => s.name === JACEK_SESSION);
-
+  // Load history on open
   useEffect(() => {
-    if (visible && inputRef.current) {
-      inputRef.current.focus();
+    if (visible && messages.length === 0) {
+      fetch("/api/jacek/history", { credentials: "include" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.messages?.length > 0) {
+            setMessages(data.messages);
+          }
+        })
+        .catch(() => {});
     }
   }, [visible]);
 
-  const ensureJacek = useCallback(async () => {
-    if (jacekExists) return;
-    setCreating(true);
-    try {
-      await createSession({
-        targets: [],
-        name: JACEK_NAME,
-        prompt: JACEK_PROMPT,
-        agentType: "claude",
-        dangerouslySkipPermissions: true,
-      });
-      onSessionCreated();
-    } catch (err: any) {
-      console.error("Failed to create Jacek session:", err);
-    } finally {
-      setCreating(false);
-    }
-  }, [jacekExists, onSessionCreated]);
+  useEffect(() => {
+    if (visible) inputRef.current?.focus();
+  }, [visible]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
   const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim()) return;
-    setSending(true);
+    if (!text.trim() || loading) return;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setLoading(true);
+    setToolCall(null);
+
     try {
-      const needsCreation = !jacekExists;
-      if (needsCreation) {
-        await ensureJacek();
-        // Wait for the Claude session to fully boot (trust prompt + agent ready)
-        await new Promise((r) => setTimeout(r, 10000));
+      const res = await fetch("/api/jacek/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ message: text }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        setMessages((prev) => [...prev, { role: "assistant", text: `Error: ${err.error}` }]);
+        setLoading(false);
+        return;
       }
-      await sendSessionInput(JACEK_SESSION, text);
-      setInput("");
+
+      // Read SSE stream
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let assistantText = "";
+
+      if (reader) {
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE lines
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === "text") {
+                assistantText += parsed.text;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last?.role === "assistant") {
+                    updated[updated.length - 1] = { ...last, text: assistantText };
+                  } else {
+                    updated.push({ role: "assistant", text: assistantText });
+                  }
+                  return updated;
+                });
+              } else if (parsed.type === "tool_call") {
+                setToolCall(parsed.name);
+              } else if (parsed.type === "done") {
+                setToolCall(null);
+              }
+            } catch {}
+          }
+        }
+      }
+
+      if (!assistantText) {
+        setMessages((prev) => [...prev, { role: "assistant", text: "(no response)" }]);
+      }
     } catch (err: any) {
-      console.error("Failed to send to Jacek:", err);
+      setMessages((prev) => [...prev, { role: "assistant", text: `Error: ${err.message}` }]);
     } finally {
-      setSending(false);
+      setLoading(false);
+      setToolCall(null);
     }
-  }, [ensureJacek, jacekExists]);
+  }, [loading]);
+
+  const handleReset = async () => {
+    await fetch("/api/jacek/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ reset: true }),
+    }).catch(() => {});
+    setMessages([]);
+  };
 
   if (!visible) return null;
 
@@ -85,6 +141,9 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
       <div className="jacek-header">
         <span className="jacek-title">Jacek</span>
         <span className="jacek-subtitle">project overseer</span>
+        <button className="jacek-close" onClick={handleReset} title="Clear conversation">
+          clear
+        </button>
         <button className="jacek-close" onClick={onClose}>x</button>
       </div>
 
@@ -94,24 +153,33 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
             key={action.label}
             className="jacek-quick-btn"
             onClick={() => sendMessage(action.message)}
-            disabled={sending || creating}
+            disabled={loading}
           >
             {action.label}
           </button>
         ))}
       </div>
 
-      <div className="jacek-status">
-        {creating || sending ? (jacekExists ? "Sending to Jacek..." : "Creating Jacek session & sending...") :
-         !jacekExists ? "Jacek session will start on first message" :
-         "Connected to Jacek — see output in sidebar"}
+      <div className="jacek-messages">
+        {messages.length === 0 && !loading && (
+          <div className="jacek-empty">Ask Jacek anything about your sessions and PRs.</div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={`jacek-msg jacek-msg-${msg.role}`}>
+            <div className="jacek-msg-role">{msg.role === "user" ? "you" : "jacek"}</div>
+            <div className="jacek-msg-text">{msg.text}</div>
+          </div>
+        ))}
+        {loading && (
+          <div className="jacek-msg jacek-msg-assistant">
+            <div className="jacek-msg-role">jacek</div>
+            <div className="jacek-msg-text jacek-thinking">
+              {toolCall ? `calling ${toolCall}...` : "thinking..."}
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
       </div>
-
-      {jacekExists && (
-        <div className="jacek-hint">
-          Switch to the "{JACEK_NAME}" session in the sidebar to see Jacek's full output.
-        </div>
-      )}
 
       <div className="jacek-input-area">
         <textarea
@@ -127,14 +195,14 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
             }
           }}
           rows={2}
-          disabled={sending || creating}
+          disabled={loading}
         />
         <button
           className="jacek-send"
           onClick={() => sendMessage(input)}
-          disabled={sending || creating || !input.trim()}
+          disabled={loading || !input.trim()}
         >
-          {sending ? "..." : "send"}
+          {loading ? "..." : "send"}
         </button>
       </div>
     </div>

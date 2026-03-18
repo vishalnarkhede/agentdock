@@ -12,6 +12,7 @@ import dbRoutes from "./routes/db";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
 import { handleWsOpen, handleWsMessage, handleWsClose } from "./routes/ws";
 import mcpRoutes from "./routes/mcp";
+import jacekRoutes from "./routes/jacek";
 import { syncRepos, syncHooksToClaudeSettings, addMcpServer } from "./services/config";
 
 const app = new Hono();
@@ -31,6 +32,7 @@ app.route("/api/quick", quickRoutes);
 app.route("/api/upload", uploadRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/db", dbRoutes);
+app.route("/api/jacek", jacekRoutes);
 
 // MCP endpoint — no auth (local only, used by Claude sessions)
 app.route("/mcp", mcpRoutes);

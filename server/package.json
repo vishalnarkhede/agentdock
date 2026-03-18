@@ -5,6 +5,7 @@
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
     "hono": "^4.7.0"
   },
   "devDependencies": {
