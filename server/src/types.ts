@@ -50,9 +50,13 @@ export interface DbShard {
 
 export interface McpServer {
   name: string;
-  command: string;
-  args: string[];
+  // stdio transport
+  command?: string;
+  args?: string[];
   env?: Record<string, string>;
+  // http transport
+  type?: "stdio" | "http";
+  url?: string;
 }
 
 export interface CreateSessionRequest {

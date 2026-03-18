@@ -11,7 +11,8 @@ import settingsRoutes from "./routes/settings";
 import dbRoutes from "./routes/db";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
 import { handleWsOpen, handleWsMessage, handleWsClose } from "./routes/ws";
-import { syncRepos, syncHooksToClaudeSettings } from "./services/config";
+import mcpRoutes from "./routes/mcp";
+import { syncRepos, syncHooksToClaudeSettings, addMcpServer } from "./services/config";
 
 const app = new Hono();
 
@@ -30,6 +31,9 @@ app.route("/api/quick", quickRoutes);
 app.route("/api/upload", uploadRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/db", dbRoutes);
+
+// MCP endpoint — no auth (local only, used by Claude sessions)
+app.route("/mcp", mcpRoutes);
 
 // Health check
 app.get("/api/health", (c) => c.json({ ok: true }));
@@ -80,3 +84,6 @@ setInterval(syncRepos, 10_000);
 
 // Install Claude Code hooks for deterministic status detection
 syncHooksToClaudeSettings();
+
+// Register AgentDock MCP server so all Claude sessions can use it
+addMcpServer({ name: "agentdock", type: "http", url: `http://localhost:${PORT}/mcp` });

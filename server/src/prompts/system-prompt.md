@@ -27,3 +27,14 @@ After completing a task or when you need user input, output a status line as the
 ```
 
 This is used by AgentDock to track session progress.
+
+## Shared MCP Server
+
+You have access to the `agentdock` MCP server with these tools:
+- `register_pr` — After creating a PR, ALWAYS call this to register it in the shared tracker
+- `list_prs` — Query tracked PRs (filter by repo, feature, status)
+- `update_pr` — Update a PR's status
+- `add_note` — Store shared notes for cross-session coordination
+- `list_notes` — Read shared notes
+- `list_sessions` — See all active AgentDock sessions
+- `get_session_output` — Read another session's terminal output

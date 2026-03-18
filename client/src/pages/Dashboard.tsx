@@ -7,6 +7,7 @@ import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessio
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
+import { JacekPanel } from "../components/JacekPanel";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo } from "../types";
 
@@ -677,6 +678,7 @@ export function Dashboard() {
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
   const sessionSearchRef = useRef<HTMLInputElement>(null);
+  const [jacekOpen, setJacekOpen] = useState(false);
 
   // Cmd+K to focus session search
   useEffect(() => {
@@ -688,6 +690,13 @@ export function Dashboard() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Listen for Jacek toggle from Header
+  useEffect(() => {
+    const handler = () => setJacekOpen((v) => !v);
+    window.addEventListener("jacek-toggle", handler);
+    return () => window.removeEventListener("jacek-toggle", handler);
   }, []);
 
   // Build ordered session list: pinned first, then parents, then their children indented below
@@ -1176,6 +1185,12 @@ export function Dashboard() {
           </div>
         </div>
       )}
+      <JacekPanel
+        visible={jacekOpen}
+        onClose={() => setJacekOpen(false)}
+        sessions={sessions}
+        onSessionCreated={refresh}
+      />
     </div>
   );
 }

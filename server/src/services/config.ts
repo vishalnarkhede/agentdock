@@ -521,13 +521,18 @@ function syncAgentConfigFile(filePath: string, servers: McpServer[], previousNam
 
   // Add/update current servers
   for (const server of servers) {
-    const entry: Record<string, any> = {
-      type: "stdio",
-      command: server.command,
-      args: server.args,
-    };
-    if (server.env && Object.keys(server.env).length > 0) {
-      entry.env = server.env;
+    let entry: Record<string, any>;
+    if (server.type === "http" && server.url) {
+      entry = { type: "http", url: server.url };
+    } else {
+      entry = {
+        type: "stdio",
+        command: server.command,
+        args: server.args || [],
+      };
+      if (server.env && Object.keys(server.env).length > 0) {
+        entry.env = server.env;
+      }
     }
     config.mcpServers[server.name] = entry;
   }

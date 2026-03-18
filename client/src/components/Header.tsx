@@ -82,6 +82,13 @@ export function Header() {
           {fixingMe ? "..." : "fix me"}
         </button>
         <button
+          className="header-fix-me-btn"
+          onClick={() => window.dispatchEvent(new CustomEvent("jacek-toggle"))}
+          title="Jacek — project overseer"
+        >
+          jacek
+        </button>
+        <button
           className="settings-gear-btn"
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
