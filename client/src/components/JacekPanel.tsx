@@ -6,6 +6,11 @@ interface Props {
   onClose: () => void;
 }
 
+interface ChatMessage {
+  role: "user" | "jacek";
+  text: string;
+}
+
 const JACEK_NAME = "jacek-overseer";
 const JACEK_SESSION = `claude-${JACEK_NAME}`;
 
@@ -18,33 +23,111 @@ You have access to the agentdock MCP server. Use it to:
 
 IMPORTANT formatting rules:
 - Keep responses SHORT and scannable
-- Use markdown tables for lists of PRs or sessions
 - Use bullet points, not paragraphs
 - Bold the important parts (status, blockers, action items)
-- Never apologize or add filler text`;
+- Never apologize or add filler text
+- Do NOT use wide ASCII tables — use compact lists or short markdown instead`;
 
 const QUICK_ACTIONS = [
-  { label: "Show all PRs", message: "List all tracked PRs grouped by feature, show their status in a table" },
-  { label: "Session status", message: "List all active sessions and what each one is doing right now" },
+  { label: "Show all PRs", message: "List all tracked PRs grouped by feature. Use a compact list format, not a wide table." },
+  { label: "Session status", message: "List all active sessions and what each one is doing right now. Keep it compact." },
   { label: "What's blocked?", message: "Check all sessions for any errors or things that need my input" },
 ];
 
+// Strip ANSI escape codes
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+}
+
+// Parse terminal output into chat messages
+function parseOutput(raw: string): ChatMessage[] {
+  const clean = stripAnsi(raw);
+  const lines = clean.split("\n");
+  const messages: ChatMessage[] = [];
+  let current: ChatMessage | null = null;
+  let skipWelcome = true;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Skip welcome banner (everything before first ❯)
+    if (skipWelcome) {
+      if (trimmed.startsWith("❯")) skipWelcome = false;
+      else continue;
+    }
+
+    // Skip empty lines, separator lines, prompt chrome
+    if (!trimmed) continue;
+    if (/^[─━═┌┐└┘├┤┬┴┼│╭╮╰╯]+$/.test(trimmed)) continue;
+    if (/^⏵⏵/.test(trimmed)) continue;
+    if (trimmed === "❯") continue;
+
+    // User message
+    if (trimmed.startsWith("❯ ")) {
+      const text = trimmed.slice(2).trim();
+      // Skip the initial prompt file read command
+      if (text.startsWith("Read and follow")) continue;
+      if (current) messages.push(current);
+      current = { role: "user", text };
+      continue;
+    }
+
+    // Jacek response (⏺ prefix)
+    if (trimmed.startsWith("⏺")) {
+      const text = trimmed.slice(1).trim();
+      // Skip "Read 1 file" lines
+      if (text.startsWith("Read ") && text.includes("file")) continue;
+
+      if (current?.role === "jacek") {
+        // Append to existing jacek message
+        current.text += "\n" + text;
+      } else {
+        if (current) messages.push(current);
+        current = { role: "jacek", text };
+      }
+      continue;
+    }
+
+    // Continuation line — append to current message
+    if (current) {
+      // Skip MCP tool call detail lines (⎿ lines)
+      if (trimmed.startsWith("⎿")) {
+        // Include short results but skip long JSON
+        const content = trimmed.slice(1).trim();
+        if (content.startsWith("[") || content.startsWith("{") || content.includes("+") && content.includes("lines")) continue;
+        if (content.length < 100) {
+          current.text += "\n  " + content;
+        }
+        continue;
+      }
+      current.text += "\n" + trimmed;
+    }
+  }
+
+  if (current) messages.push(current);
+
+  // Clean up [STATUS: ...] lines from messages — keep the content before them
+  return messages.map((m) => ({
+    ...m,
+    text: m.text.replace(/\[STATUS:.*?\]/g, "").trim(),
+  })).filter((m) => m.text.length > 0);
+}
+
 export function JacekPanel({ visible, onClose }: Props) {
   const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [ready, setReady] = useState(false);
   const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const outputRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Check if session exists and poll output
   const pollOutput = useCallback(async () => {
     try {
-      const data = await fetchSessionOutput(JACEK_SESSION);
+      const data = await fetchSessionOutput(JACEK_SESSION, 200);
       if (data?.output) {
-        setOutput(data.output);
+        setMessages(parseOutput(data.output));
         setReady(true);
       }
     } catch {
@@ -52,7 +135,6 @@ export function JacekPanel({ visible, onClose }: Props) {
     }
   }, []);
 
-  // Start/stop polling when panel is visible
   useEffect(() => {
     if (visible) {
       pollOutput();
@@ -63,12 +145,11 @@ export function JacekPanel({ visible, onClose }: Props) {
     };
   }, [visible, pollOutput]);
 
-  // Auto-scroll output
   useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    if (messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
-  }, [output]);
+  }, [messages]);
 
   useEffect(() => {
     if (visible) inputRef.current?.focus();
@@ -85,11 +166,9 @@ export function JacekPanel({ visible, onClose }: Props) {
         agentType: "claude",
         dangerouslySkipPermissions: true,
       });
-      // Wait for boot
       await new Promise((r) => setTimeout(r, 10000));
       setReady(true);
     } catch (err: any) {
-      // Session might already exist
       if (err.message?.includes("already exists")) {
         setReady(true);
       } else {
@@ -137,14 +216,21 @@ export function JacekPanel({ visible, onClose }: Props) {
         ))}
       </div>
 
-      <div className="jacek-output" ref={outputRef}>
-        {creating && <div className="jacek-creating">Starting Jacek session...</div>}
-        {!ready && !creating && <div className="jacek-creating">Click a button or send a message to start Jacek.</div>}
-        {output ? (
-          <pre className="jacek-terminal">{output}</pre>
-        ) : ready ? (
-          <div className="jacek-creating">Waiting for output...</div>
-        ) : null}
+      <div className="jacek-messages" ref={messagesRef}>
+        {creating && <div className="jacek-system-msg">Starting Jacek session...</div>}
+        {!ready && !creating && (
+          <div className="jacek-system-msg">Click a button or send a message to start.</div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={`jacek-bubble jacek-bubble-${msg.role}`}>
+            <div className="jacek-bubble-text">{msg.text}</div>
+          </div>
+        ))}
+        {sending && messages.length > 0 && (
+          <div className="jacek-bubble jacek-bubble-jacek">
+            <div className="jacek-bubble-text jacek-typing">thinking...</div>
+          </div>
+        )}
       </div>
 
       <div className="jacek-input-area">
@@ -168,7 +254,7 @@ export function JacekPanel({ visible, onClose }: Props) {
           onClick={() => sendMessage(input)}
           disabled={sending || creating || !input.trim()}
         >
-          {creating ? "..." : sending ? "..." : "send"}
+          {creating || sending ? "..." : "send"}
         </button>
       </div>
     </div>
