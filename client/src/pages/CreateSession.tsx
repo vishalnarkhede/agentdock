@@ -51,10 +51,29 @@ export function CreateSession() {
     }
   };
 
-  const handleLoadTemplate = (t: SessionTemplate) => {
-    setTargets(t.targets);
-    setIsolated(t.isolated || false);
-    setSessionName("");
+  const handleLoadTemplate = async (t: SessionTemplate) => {
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await createSession({
+        targets: t.targets,
+        grouped,
+        isolated: t.isolated || false,
+        dangerouslySkipPermissions: dangerouslySkipPermissions || undefined,
+        agentType,
+      });
+      if (t.targets.length > 0) saveRecentRepos(t.targets);
+      const firstSession = result.sessions[0];
+      navigate(`/?session=${encodeURIComponent(firstSession)}`);
+    } catch (err: any) {
+      // Fallback: load template into form so user can adjust
+      setTargets(t.targets);
+      setIsolated(t.isolated || false);
+      setSessionName("");
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSaveTemplate = async () => {
