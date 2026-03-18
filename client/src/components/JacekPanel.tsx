@@ -8,75 +8,56 @@ interface Props {
   onClose: () => void;
 }
 
-interface ChatMessage {
-  role: "user" | "jacek";
-  text: string;
-}
-
 const JACEK_NAME = "jacek-overseer";
 const JACEK_SESSION = `claude-${JACEK_NAME}`;
 
+// Quick actions — each has a label (shown as button) and a message (sent to Jacek).
+// To add a new quick action, add an entry here and Jacek will handle it.
+// See CLAUDE.md "Adding Jacek Quick Actions" for instructions.
 const QUICK_ACTIONS = [
-  { label: "Show all PRs", message: "List all tracked PRs grouped by feature with their status and links" },
-  { label: "Session status", message: "Show all active sessions, what repo they're in, and their current status" },
-  { label: "What's blocked?", message: "Check all sessions for errors or things waiting for my input" },
+  { label: "Show all PRs", message: "Find all my open PRs across all repos using gh pr list. Group by feature/ticket." },
+  { label: "Session status", message: "Show all active sessions, what repo they're in, and their current status." },
+  { label: "What's blocked?", message: "Check all sessions for errors or things waiting for my input. Only show sessions that need attention." },
+  { label: "Summary", message: "Give me a brief summary of everything happening: active sessions, open PRs, any blockers." },
 ];
 
 export function JacekPanel({ visible, onClose }: Props) {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sending, setSending] = useState(false);
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [response, setResponse] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
   const [creating, setCreating] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const messagesRef = useRef<HTMLDivElement>(null);
+  const responseRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastResponseRef = useRef<string>("");
 
-  // Poll the response file for new content
+  // Poll response file when loading
   const pollResponse = useCallback(async () => {
     try {
-      const res = await fetch(`/api/jacek/response`);
+      const res = await fetch("/api/jacek/response", { credentials: "include" });
       if (!res.ok) return;
       const data = await res.json();
       if (data.content && data.content !== lastResponseRef.current) {
         lastResponseRef.current = data.content;
-        setMessages((prev) => {
-          // Replace last jacek message or add new one
-          const last = prev[prev.length - 1];
-          if (last?.role === "jacek") {
-            return [...prev.slice(0, -1), { role: "jacek", text: data.content }];
-          }
-          return [...prev, { role: "jacek", text: data.content }];
-        });
-        setSending(false);
+        setResponse(data.content);
+        setLoading(false);
+        // Stop polling once we get a response
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
       }
-    } catch {
-      // Endpoint not available yet
-    }
+    } catch {}
   }, []);
 
+  // Clean up polling on unmount
   useEffect(() => {
-    if (visible) {
-      pollResponse();
-      pollRef.current = setInterval(pollResponse, 1500);
-    }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [visible, pollResponse]);
+  }, []);
 
-  useEffect(() => {
-    if (messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    if (visible) inputRef.current?.focus();
-  }, [visible]);
-
-  // Check if Jacek session exists on mount
+  // Check if session exists on open
   useEffect(() => {
     if (!visible) return;
     fetch(`/api/sessions/${JACEK_SESSION}/output?lines=1`, { credentials: "include" })
@@ -88,10 +69,8 @@ export function JacekPanel({ visible, onClose }: Props) {
     if (ready) return;
     setCreating(true);
     try {
-      // Fetch dynamic prompt from server (includes repo list)
       const promptRes = await fetch("/api/jacek/prompt", { credentials: "include" });
       const { prompt } = await promptRes.json();
-
       await createSession({
         targets: [],
         name: JACEK_NAME,
@@ -112,19 +91,24 @@ export function JacekPanel({ visible, onClose }: Props) {
     }
   }, [ready]);
 
-  const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || sending) return;
-    setInput("");
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setSending(true);
+  const runAction = useCallback(async (label: string, message: string) => {
+    if (loading) return;
+    setActiveAction(label);
+    setResponse(null);
+    setLoading(true);
+    lastResponseRef.current = "";
+
     try {
       if (!ready) await ensureSession();
-      await sendSessionInput(JACEK_SESSION, text);
+      await sendSessionInput(JACEK_SESSION, message);
+      // Start polling for response
+      pollRef.current = setInterval(pollResponse, 1500);
     } catch (err: any) {
       console.error("Failed to send to Jacek:", err);
-      setSending(false);
+      setResponse("Failed to reach Jacek. Is the server running?");
+      setLoading(false);
     }
-  }, [sending, ready, ensureSession]);
+  }, [loading, ready, ensureSession, pollResponse]);
 
   if (!visible) return null;
 
@@ -136,65 +120,37 @@ export function JacekPanel({ visible, onClose }: Props) {
         <button className="jacek-close" onClick={onClose}>x</button>
       </div>
 
-      <div className="jacek-quick-actions">
+      <div className="jacek-actions-grid">
         {QUICK_ACTIONS.map((action) => (
           <button
             key={action.label}
-            className="jacek-quick-btn"
-            onClick={() => sendMessage(action.message)}
-            disabled={sending || creating}
+            className={`jacek-action-btn ${activeAction === action.label ? "jacek-action-active" : ""}`}
+            onClick={() => runAction(action.label, action.message)}
+            disabled={loading || creating}
           >
             {action.label}
           </button>
         ))}
       </div>
 
-      <div className="jacek-messages" ref={messagesRef}>
-        {creating && <div className="jacek-system-msg">Starting Jacek session...</div>}
-        {!ready && !creating && messages.length === 0 && (
-          <div className="jacek-system-msg">Click a button or type a message to start.</div>
+      <div className="jacek-response" ref={responseRef}>
+        {creating && (
+          <div className="jacek-system-msg">Starting Jacek session...</div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`jacek-bubble jacek-bubble-${msg.role}`}>
-            {msg.role === "jacek" ? (
-              <div className="jacek-bubble-text jacek-markdown">
-                <Markdown remarkPlugins={[remarkGfm]}>{msg.text}</Markdown>
-              </div>
-            ) : (
-              <div className="jacek-bubble-text">{msg.text}</div>
-            )}
-          </div>
-        ))}
-        {sending && (
-          <div className="jacek-bubble jacek-bubble-jacek">
-            <div className="jacek-bubble-text jacek-typing">thinking...</div>
+        {!creating && !loading && !response && (
+          <div className="jacek-system-msg">Click an action above to get started.</div>
+        )}
+        {loading && (
+          <div className="jacek-loading">
+            <span className="jacek-loading-dot" />
+            Jacek is working on "{activeAction}"...
           </div>
         )}
-      </div>
-
-      <div className="jacek-input-area">
-        <textarea
-          ref={inputRef}
-          className="jacek-input"
-          placeholder="Ask Jacek anything..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              sendMessage(input);
-            }
-          }}
-          rows={2}
-          disabled={sending || creating}
-        />
-        <button
-          className="jacek-send"
-          onClick={() => sendMessage(input)}
-          disabled={sending || creating || !input.trim()}
-        >
-          {creating || sending ? "..." : "send"}
-        </button>
+        {response && (
+          <div className="jacek-markdown">
+            <Markdown remarkPlugins={[remarkGfm]}>{response}</Markdown>
+          </div>
+        )}
       </div>
     </div>
   );
