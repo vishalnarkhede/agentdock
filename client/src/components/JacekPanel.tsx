@@ -62,9 +62,12 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
     if (!text.trim()) return;
     setSending(true);
     try {
-      await ensureJacek();
-      // Small delay to let session boot if just created
-      if (!jacekExists) await new Promise((r) => setTimeout(r, 8000));
+      const needsCreation = !jacekExists;
+      if (needsCreation) {
+        await ensureJacek();
+        // Wait for the Claude session to fully boot (trust prompt + agent ready)
+        await new Promise((r) => setTimeout(r, 10000));
+      }
       await sendSessionInput(JACEK_SESSION, text);
       setInput("");
     } catch (err: any) {
@@ -98,9 +101,9 @@ export function JacekPanel({ visible, onClose, sessions, onSessionCreated }: Pro
       </div>
 
       <div className="jacek-status">
-        {creating ? "Creating Jacek session..." :
-         !jacekExists ? "Jacek session will be created on first message" :
-         "Connected to Jacek session"}
+        {creating || sending ? (jacekExists ? "Sending to Jacek..." : "Creating Jacek session & sending...") :
+         !jacekExists ? "Jacek session will start on first message" :
+         "Connected to Jacek — see output in sidebar"}
       </div>
 
       {jacekExists && (
