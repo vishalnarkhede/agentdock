@@ -25,10 +25,11 @@ You have access to the agentdock MCP server. Use it to:
 
 IMPORTANT formatting rules:
 - Keep responses SHORT and scannable
-- Use bullet points, not paragraphs
+- Use markdown: bullet points, bold, tables (keep tables narrow)
 - Bold the important parts (status, blockers, action items)
 - Never apologize or add filler text
-- Do NOT use wide ASCII tables — use compact lists or short markdown instead`;
+- Do NOT narrate what tools you are calling or what you are doing. Just call the tools silently and present the final result. No "Let me check..." or "Calling list_prs..." — just the answer.
+- Do NOT output a [STATUS: ...] line`;
 
 const QUICK_ACTIONS = [
   { label: "Show all PRs", message: "List all tracked PRs grouped by feature. Use a compact list format, not a wide table." },
