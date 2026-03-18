@@ -103,7 +103,7 @@ export function JacekPanel({ visible, onClose }: Props) {
       // Clear old response before sending new action
       await fetch("/api/jacek/response", { method: "DELETE", credentials: "include" });
       lastResponseRef.current = "";
-      await sendSessionInput(JACEK_SESSION, message);
+      await sendSessionInput(JACEK_SESSION, message + " (response.md was cleared — you MUST write a fresh response to the file)");
       // Start polling for response
       pollRef.current = setInterval(pollResponse, 1500);
     } catch (err: any) {
