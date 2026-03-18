@@ -37,11 +37,16 @@ const QUICK_ACTIONS = [
   { label: "What's blocked?", message: "Check all sessions for any errors or things that need my input" },
 ];
 
-// Strip ANSI escape codes
+// Strip ANSI escape codes including OSC hyperlinks (]8;;url\text]8;;\)
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
-    .replace(/\x1b\][^\x07]*\x07/g, "")
-    .replace(/\x1b\[[0-9;]*m/g, "");
+  return str
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")       // CSI sequences
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC sequences (BEL or ST terminated)
+    .replace(/\]8;;[^\s]*\s*/g, "")                // Plaintext OSC 8 hyperlink starts (]8;;url)
+    .replace(/\]8;;\\/g, "")                        // Plaintext OSC 8 hyperlink ends (]8;;\)
+    .replace(/\]8;;\s*/g, "")                       // Any remaining ]8;; fragments
+    .replace(/\\#\d+/g, "")                         // \#12147 style fragments
+    .replace(/\x1b/g, "");                          // Any remaining escape chars
 }
 
 // Check if a line is terminal chrome that should be skipped
@@ -86,12 +91,15 @@ function parseOutput(raw: string): ChatMessage[] {
 
     if (isChrome(line)) continue;
 
-    // User message
+    // User message — always single line, don't append continuations
     if (trimmed.startsWith("❯ ")) {
       const text = trimmed.slice(2).trim();
       if (text.startsWith("Read and follow")) continue;
+      if (text === "/clear") continue;
       if (current) messages.push(current);
-      current = { role: "user", text };
+      // Push immediately — user messages are always one line
+      messages.push({ role: "user", text });
+      current = null;
       continue;
     }
 
@@ -116,10 +124,13 @@ function parseOutput(raw: string): ChatMessage[] {
 
     // Continuation line — append to current message if it's not junk
     if (current) {
-      // Skip JSON fragments
-      if (/^\s*[\[{"]/.test(trimmed) && trimmed.length < 5) continue;
+      // Skip JSON fragments and lines that look like JSON data
+      if (/^\s*[{[\]}"']/.test(trimmed) && /[{}\[\],:]/.test(trimmed) && trimmed.length < 80) continue;
+      if (/^\s*"[\w_]+":\s/.test(trimmed)) continue;
       // Skip broken table borders
       if (/^[│┌┐└┘├┤┬┴┼─]+/.test(trimmed) && trimmed.includes("─")) continue;
+      // Skip "(ctrl+o to expand)" hints
+      if (/ctrl\+o to expand/.test(trimmed)) continue;
 
       current.text += "\n" + trimmed;
     }
