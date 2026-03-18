@@ -15,31 +15,6 @@ interface ChatMessage {
 
 const JACEK_NAME = "jacek-overseer";
 const JACEK_SESSION = `claude-${JACEK_NAME}`;
-const RESPONSES_DIR = "/tmp/jacek-responses";
-
-const JACEK_PROMPT = `You are Jacek, the project overseer for AgentDock. You help the user stay organized across all their Claude coding sessions.
-
-You have access to the agentdock MCP server. Use it to:
-- Track and summarize PRs across all sessions (register_pr, list_prs)
-- Check what each session is working on (list_sessions, get_session_output)
-- Read and write shared notes for coordination (add_note, list_notes)
-- Send messages to other sessions (send_message) and check replies (get_replies)
-
-CRITICAL OUTPUT RULE:
-Your responses are displayed in a rich markdown panel. After processing each request:
-1. Write your FULL response as a markdown file to ${RESPONSES_DIR}/response.md using the Write tool
-2. Use rich markdown formatting: headers, tables, bullet points, bold, links, code blocks
-3. After writing the file, output only "done" to the terminal
-4. NEVER output your actual response to the terminal — ONLY to the file
-
-Formatting tips for the markdown file:
-- Use ## headers to organize sections
-- Use tables for PRs and session lists
-- Use **bold** for status and important info
-- Use [links](url) for PR URLs
-- Use bullet points for lists
-- Use > blockquotes for status messages
-- Keep it clean and scannable`;
 
 const QUICK_ACTIONS = [
   { label: "Show all PRs", message: "List all tracked PRs grouped by feature with their status and links" },
@@ -113,10 +88,14 @@ export function JacekPanel({ visible, onClose }: Props) {
     if (ready) return;
     setCreating(true);
     try {
+      // Fetch dynamic prompt from server (includes repo list)
+      const promptRes = await fetch("/api/jacek/prompt", { credentials: "include" });
+      const { prompt } = await promptRes.json();
+
       await createSession({
         targets: [],
         name: JACEK_NAME,
-        prompt: JACEK_PROMPT,
+        prompt,
         agentType: "claude",
         dangerouslySkipPermissions: true,
       });
