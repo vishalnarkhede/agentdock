@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { existsSync, readFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
 import { getRepos } from "../services/config";
 
 const app = new Hono();
@@ -20,6 +20,13 @@ app.get("/response", (c) => {
   } catch {
     return c.json({ content: null });
   }
+});
+
+// Clear the response file (called before sending a new action)
+app.delete("/response", (c) => {
+  const filePath = `${RESPONSES_DIR}/response.md`;
+  writeFileSync(filePath, "");
+  return c.json({ ok: true });
 });
 
 // Get the dynamic Jacek prompt (built with current repo list)

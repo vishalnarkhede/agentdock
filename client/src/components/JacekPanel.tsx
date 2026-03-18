@@ -37,7 +37,7 @@ export function JacekPanel({ visible, onClose }: Props) {
       const res = await fetch("/api/jacek/response", { credentials: "include" });
       if (!res.ok) return;
       const data = await res.json();
-      if (data.content && data.content !== lastResponseRef.current) {
+      if (data.content && data.content.trim() && data.content !== lastResponseRef.current) {
         lastResponseRef.current = data.content;
         setResponse(data.content);
         setLoading(false);
@@ -100,6 +100,9 @@ export function JacekPanel({ visible, onClose }: Props) {
 
     try {
       if (!ready) await ensureSession();
+      // Clear old response before sending new action
+      await fetch("/api/jacek/response", { method: "DELETE", credentials: "include" });
+      lastResponseRef.current = "";
       await sendSessionInput(JACEK_SESSION, message);
       // Start polling for response
       pollRef.current = setInterval(pollResponse, 1500);
