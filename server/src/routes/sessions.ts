@@ -22,10 +22,12 @@ import type { CreateSessionRequest, SessionInfo, AgentType } from "../types";
 
 const app = new Hono();
 
+const JACEK_SESSION = `${PREFIX}-jacek-overseer`;
+
 app.get("/", async (c) => {
   const sessions = await listSessions(PREFIX);
   const enriched: SessionInfo[] = await Promise.all(
-    sessions.map(async (s) => {
+    sessions.filter((s) => s.name !== JACEK_SESSION).map(async (s) => {
       let status: SessionInfo["status"] = "unknown";
       let statusLine: SessionInfo["statusLine"] = undefined;
       const snap = await capturePaneSnapshot(s.name);

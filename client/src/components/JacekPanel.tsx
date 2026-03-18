@@ -1,138 +1,118 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-// Uses relative URLs — same origin as the app
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  text: string;
-}
-
-const QUICK_ACTIONS = [
-  { label: "Show all PRs", message: "List all tracked PRs grouped by feature, show their status" },
-  { label: "Session status", message: "List all active sessions and what each one is doing right now" },
-  { label: "What's blocked?", message: "Check all sessions for any errors or things that need my input" },
-];
+import { createSession, sendSessionInput, fetchSessionOutput } from "../api";
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
-export function JacekPanel({ visible, onClose }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [toolCall, setToolCall] = useState<string | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+const JACEK_NAME = "jacek-overseer";
+const JACEK_SESSION = `claude-${JACEK_NAME}`;
 
-  // Load history on open
-  useEffect(() => {
-    if (visible && messages.length === 0) {
-      fetch("/api/jacek/history", { credentials: "include" })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.messages?.length > 0) {
-            setMessages(data.messages);
-          }
-        })
-        .catch(() => {});
+const JACEK_PROMPT = `You are Jacek, the project overseer for AgentDock. Your job is to help the user stay organized across all their Claude coding sessions.
+
+You have access to the agentdock MCP server. Use it to:
+- Track and summarize PRs across all sessions (register_pr, list_prs)
+- Check what each session is working on (list_sessions, get_session_output)
+- Read and write shared notes for coordination (add_note, list_notes)
+
+IMPORTANT formatting rules:
+- Keep responses SHORT and scannable
+- Use markdown tables for lists of PRs or sessions
+- Use bullet points, not paragraphs
+- Bold the important parts (status, blockers, action items)
+- Never apologize or add filler text`;
+
+const QUICK_ACTIONS = [
+  { label: "Show all PRs", message: "List all tracked PRs grouped by feature, show their status in a table" },
+  { label: "Session status", message: "List all active sessions and what each one is doing right now" },
+  { label: "What's blocked?", message: "Check all sessions for any errors or things that need my input" },
+];
+
+export function JacekPanel({ visible, onClose }: Props) {
+  const [input, setInput] = useState("");
+  const [output, setOutput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Check if session exists and poll output
+  const pollOutput = useCallback(async () => {
+    try {
+      const data = await fetchSessionOutput(JACEK_SESSION);
+      if (data?.output) {
+        setOutput(data.output);
+        setReady(true);
+      }
+    } catch {
+      // Session doesn't exist yet
     }
-  }, [visible]);
+  }, []);
+
+  // Start/stop polling when panel is visible
+  useEffect(() => {
+    if (visible) {
+      pollOutput();
+      pollRef.current = setInterval(pollOutput, 1500);
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [visible, pollOutput]);
+
+  // Auto-scroll output
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [output]);
 
   useEffect(() => {
     if (visible) inputRef.current?.focus();
   }, [visible]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  const ensureSession = useCallback(async () => {
+    if (ready) return;
+    setCreating(true);
+    try {
+      await createSession({
+        targets: [],
+        name: JACEK_NAME,
+        prompt: JACEK_PROMPT,
+        agentType: "claude",
+        dangerouslySkipPermissions: true,
+      });
+      // Wait for boot
+      await new Promise((r) => setTimeout(r, 10000));
+      setReady(true);
+    } catch (err: any) {
+      // Session might already exist
+      if (err.message?.includes("already exists")) {
+        setReady(true);
+      } else {
+        console.error("Failed to create Jacek:", err);
+      }
+    } finally {
+      setCreating(false);
+    }
+  }, [ready]);
 
   const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || loading) return;
+    if (!text.trim() || sending) return;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setLoading(true);
-    setToolCall(null);
-
+    setSending(true);
     try {
-      const res = await fetch("/api/jacek/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ message: text }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Request failed" }));
-        setMessages((prev) => [...prev, { role: "assistant", text: `Error: ${err.error}` }]);
-        setLoading(false);
-        return;
-      }
-
-      // Read SSE stream
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = "";
-
-      if (reader) {
-        let buffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE lines
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (!data) continue;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.type === "text") {
-                assistantText += parsed.text;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const last = updated[updated.length - 1];
-                  if (last?.role === "assistant") {
-                    updated[updated.length - 1] = { ...last, text: assistantText };
-                  } else {
-                    updated.push({ role: "assistant", text: assistantText });
-                  }
-                  return updated;
-                });
-              } else if (parsed.type === "tool_call") {
-                setToolCall(parsed.name);
-              } else if (parsed.type === "done") {
-                setToolCall(null);
-              }
-            } catch {}
-          }
-        }
-      }
-
-      if (!assistantText) {
-        setMessages((prev) => [...prev, { role: "assistant", text: "(no response)" }]);
-      }
+      if (!ready) await ensureSession();
+      await sendSessionInput(JACEK_SESSION, text);
     } catch (err: any) {
-      setMessages((prev) => [...prev, { role: "assistant", text: `Error: ${err.message}` }]);
+      console.error("Failed to send to Jacek:", err);
     } finally {
-      setLoading(false);
-      setToolCall(null);
+      setSending(false);
     }
-  }, [loading]);
-
-  const handleReset = async () => {
-    await fetch("/api/jacek/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ reset: true }),
-    }).catch(() => {});
-    setMessages([]);
-  };
+  }, [sending, ready, ensureSession]);
 
   if (!visible) return null;
 
@@ -141,9 +121,6 @@ export function JacekPanel({ visible, onClose }: Props) {
       <div className="jacek-header">
         <span className="jacek-title">Jacek</span>
         <span className="jacek-subtitle">project overseer</span>
-        <button className="jacek-close" onClick={handleReset} title="Clear conversation">
-          clear
-        </button>
         <button className="jacek-close" onClick={onClose}>x</button>
       </div>
 
@@ -153,32 +130,21 @@ export function JacekPanel({ visible, onClose }: Props) {
             key={action.label}
             className="jacek-quick-btn"
             onClick={() => sendMessage(action.message)}
-            disabled={loading}
+            disabled={sending || creating}
           >
             {action.label}
           </button>
         ))}
       </div>
 
-      <div className="jacek-messages">
-        {messages.length === 0 && !loading && (
-          <div className="jacek-empty">Ask Jacek anything about your sessions and PRs.</div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`jacek-msg jacek-msg-${msg.role}`}>
-            <div className="jacek-msg-role">{msg.role === "user" ? "you" : "jacek"}</div>
-            <div className="jacek-msg-text">{msg.text}</div>
-          </div>
-        ))}
-        {loading && (
-          <div className="jacek-msg jacek-msg-assistant">
-            <div className="jacek-msg-role">jacek</div>
-            <div className="jacek-msg-text jacek-thinking">
-              {toolCall ? `calling ${toolCall}...` : "thinking..."}
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+      <div className="jacek-output" ref={outputRef}>
+        {creating && <div className="jacek-creating">Starting Jacek session...</div>}
+        {!ready && !creating && <div className="jacek-creating">Click a button or send a message to start Jacek.</div>}
+        {output ? (
+          <pre className="jacek-terminal">{output}</pre>
+        ) : ready ? (
+          <div className="jacek-creating">Waiting for output...</div>
+        ) : null}
       </div>
 
       <div className="jacek-input-area">
@@ -195,14 +161,14 @@ export function JacekPanel({ visible, onClose }: Props) {
             }
           }}
           rows={2}
-          disabled={loading}
+          disabled={sending || creating}
         />
         <button
           className="jacek-send"
           onClick={() => sendMessage(input)}
-          disabled={loading || !input.trim()}
+          disabled={sending || creating || !input.trim()}
         >
-          {loading ? "..." : "send"}
+          {creating ? "..." : sending ? "..." : "send"}
         </button>
       </div>
     </div>
