@@ -4,7 +4,7 @@ export interface RepoConfig {
   remote?: string;
 }
 
-export type SessionStatus = "waiting" | "working" | "shell" | "unknown";
+export type SessionStatus = "waiting" | "working" | "background" | "shell" | "unknown";
 
 export type AgentType = "claude" | "cursor";
 
@@ -22,6 +22,13 @@ export interface SessionInfo {
   parentSession?: string;
   children?: string[];
   sessionType?: string;
+  meta?: Record<string, string>;
+}
+
+export interface MetaPropertyPreset {
+  key: string;
+  label: string;
+  values: string[];
 }
 
 export interface LinearTicket {
@@ -52,4 +59,5 @@ export interface CreateSessionRequest {
   parentSession?: string;
   enableSubAgents?: boolean;
   sessionType?: string;
+  meta?: Record<string, string>;
 }

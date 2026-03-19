@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import React from "react";
+import { fetchPreferences, updatePreferences } from "../api";
 
 export interface Settings {
   // Appearance
@@ -67,6 +68,26 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [serverLoaded, setServerLoaded] = useState(false);
+
+  // On mount, fetch from server and merge (server wins for persisted values)
+  useEffect(() => {
+    fetchPreferences().then((serverPrefs) => {
+      if (serverPrefs && Object.keys(serverPrefs).length > 0) {
+        setSettings((prev) => {
+          const merged = { ...prev };
+          if (serverPrefs.theme) merged.theme = serverPrefs.theme;
+          if (serverPrefs.fontSize) merged.fontSize = serverPrefs.fontSize;
+          if (serverPrefs.cursorBlink !== undefined) merged.cursorBlink = serverPrefs.cursorBlink;
+          if (serverPrefs.scrollback !== undefined) merged.scrollback = serverPrefs.scrollback;
+          if (serverPrefs.terminalFontSize !== undefined) merged.terminalFontSize = serverPrefs.terminalFontSize;
+          if (serverPrefs.notificationsEnabled !== undefined) merged.notificationsEnabled = serverPrefs.notificationsEnabled;
+          return merged;
+        });
+      }
+      setServerLoaded(true);
+    }).catch(() => setServerLoaded(true));
+  }, []);
 
   // Apply DOM attributes whenever settings change
   useEffect(() => {
@@ -76,6 +97,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const updateSetting = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+    // Sync to server
+    updatePreferences({ [key]: value }).catch(() => {});
   }, []);
 
   return React.createElement(

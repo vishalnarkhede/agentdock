@@ -5,10 +5,13 @@ import {
   fetchTemplates,
   saveTemplate,
   deleteTemplate,
+  fetchMetaPropertyPresets,
+  fetchPreferences,
+  updatePreferences,
   type SessionTemplate,
 } from "../api";
 import { RepoSelector, saveRecentRepos } from "../components/RepoSelector";
-import type { AgentType } from "../types";
+import type { AgentType, MetaPropertyPreset } from "../types";
 
 export function CreateSession() {
   const navigate = useNavigate();
@@ -22,9 +25,16 @@ export function CreateSession() {
   const [error, setError] = useState("");
   const [templates, setTemplates] = useState<SessionTemplate[]>([]);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [metaPresets, setMetaPresets] = useState<MetaPropertyPreset[]>([]);
+  const [metaValues, setMetaValues] = useState<Record<string, string>>({});
+  const [recentRepos, setRecentRepos] = useState<string[]>([]);
 
   useEffect(() => {
     fetchTemplates().then(setTemplates);
+    fetchMetaPropertyPresets().then(setMetaPresets);
+    fetchPreferences().then((p) => {
+      if (p.recentRepos) setRecentRepos(p.recentRepos);
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -39,8 +49,13 @@ export function CreateSession() {
         isolated,
         dangerouslySkipPermissions: dangerouslySkipPermissions || undefined,
         agentType,
+        meta: Object.keys(metaValues).length > 0 ? metaValues : undefined,
       });
-      if (targets.length > 0) saveRecentRepos(targets);
+      if (targets.length > 0) {
+        const updated = saveRecentRepos(targets, recentRepos);
+        setRecentRepos(updated);
+        updatePreferences({ recentRepos: updated });
+      }
       // Navigate to dashboard with first created session selected
       const firstSession = result.sessions[0];
       navigate(`/?session=${encodeURIComponent(firstSession)}`);
@@ -62,13 +77,18 @@ export function CreateSession() {
         dangerouslySkipPermissions: dangerouslySkipPermissions || undefined,
         agentType,
       });
-      if (t.targets.length > 0) saveRecentRepos(t.targets);
+      if (t.targets.length > 0) {
+        const updated = saveRecentRepos(t.targets, recentRepos);
+        setRecentRepos(updated);
+        updatePreferences({ recentRepos: updated });
+      }
       const firstSession = result.sessions[0];
       navigate(`/?session=${encodeURIComponent(firstSession)}`);
     } catch (err: any) {
       // Fallback: load template into form so user can adjust
       setTargets(t.targets);
       setIsolated(t.isolated || false);
+      if (t.meta) setMetaValues(t.meta);
       setSessionName("");
       setError(err.message);
     } finally {
@@ -85,6 +105,7 @@ export function CreateSession() {
       targets,
       isolated,
       grouped,
+      meta: Object.keys(metaValues).length > 0 ? metaValues : undefined,
     });
     setTemplates((prev) => [...prev, t]);
     setSavingTemplate(false);
@@ -137,7 +158,7 @@ export function CreateSession() {
           />
         </div>
 
-        <RepoSelector selected={targets} onChange={setTargets} />
+        <RepoSelector selected={targets} onChange={setTargets} recentRepos={recentRepos} />
 
         <div className="form-row">
           <label className="form-label">Agent Type</label>
@@ -188,6 +209,39 @@ export function CreateSession() {
             <span className="toggle-hint">--dangerously-skip-permissions</span>
           </label>
         </div>
+
+        {metaPresets.length > 0 && (
+          <div className="form-row">
+            <label className="form-label">Properties</label>
+            <div className="meta-fields">
+              {metaPresets.map((preset) => (
+                <div key={preset.key} className="meta-field">
+                  <label className="meta-field-label">{preset.label}</label>
+                  {preset.values.length > 0 ? (
+                    <select
+                      className="form-input"
+                      value={metaValues[preset.key] || ""}
+                      onChange={(e) => setMetaValues(prev => ({ ...prev, [preset.key]: e.target.value }))}
+                    >
+                      <option value="">—</option>
+                      {preset.values.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder={preset.label}
+                      value={metaValues[preset.key] || ""}
+                      onChange={(e) => setMetaValues(prev => ({ ...prev, [preset.key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && <div className="form-error">{error}</div>}
 

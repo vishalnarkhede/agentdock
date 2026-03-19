@@ -3,30 +3,21 @@ import { fetchRepos } from "../api";
 import type { RepoConfig } from "../types";
 
 const INITIAL_LIMIT = 10;
-const RECENT_REPOS_KEY = "agentdock-recent-repos";
 const MAX_RECENT = 5;
 
-function getRecentRepos(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_REPOS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-export function saveRecentRepos(aliases: string[]) {
-  const current = getRecentRepos();
-  // Prepend new ones, dedupe, cap at MAX_RECENT
-  const updated = [...new Set([...aliases, ...current])].slice(0, MAX_RECENT);
-  localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(updated));
+export function saveRecentRepos(aliases: string[], currentRecent: string[] = []): string[] {
+  const updated = [...new Set([...aliases, ...currentRecent])].slice(0, MAX_RECENT);
+  // Fire-and-forget — caller handles persistence
+  return updated;
 }
 
 interface Props {
   selected: string[];
   onChange: (selected: string[]) => void;
+  recentRepos?: string[];
 }
 
-export function RepoSelector({ selected, onChange }: Props) {
+export function RepoSelector({ selected, onChange, recentRepos = [] }: Props) {
   const [repos, setRepos] = useState<RepoConfig[]>([]);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -37,8 +28,6 @@ export function RepoSelector({ selected, onChange }: Props) {
       .then(setRepos)
       .catch(() => setLoadError(true));
   }, []);
-
-  const recentRepos = useMemo(() => getRecentRepos(), []);
 
   const filtered = useMemo(() => {
     let list = repos;
@@ -91,16 +80,22 @@ export function RepoSelector({ selected, onChange }: Props) {
 
   return (
     <div className="repo-selector">
-      <label className="form-label">Repositories</label>
-      <p className="form-hint">Select which repos the agent will work in. Multiple repos create one session with access to all of them.</p>
-      {repos.length > INITIAL_LIMIT && (
-        <input
-          type="text"
-          className="form-input repo-search"
-          placeholder="Search repos..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="repo-selector-header">
+        <label className="form-label">Repositories</label>
+        {repos.length > INITIAL_LIMIT && (
+          <input
+            type="text"
+            className="repo-search-inline"
+            placeholder="Filter..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div className="repo-selected-summary">
+          {selected.length} selected: {selected.join(", ")}
+        </div>
       )}
       <div className="repo-list">
         {visible.map((repo, i) => {
@@ -108,7 +103,7 @@ export function RepoSelector({ selected, onChange }: Props) {
           const isLastRecent = isRecent && (i + 1 >= visible.length || !recentRepos.includes(visible[i + 1]?.alias));
           return (
             <div key={repo.alias}>
-              <label className="repo-item">
+              <label className={`repo-item ${selected.includes(repo.alias) ? "repo-item-selected" : ""}`}>
                 <input
                   type="checkbox"
                   checked={selected.includes(repo.alias)}

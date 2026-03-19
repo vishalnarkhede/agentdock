@@ -684,6 +684,11 @@ h1 {
   border-color: rgba(51, 255, 51, 0.3);
 }
 
+.session-row-status.status-background {
+  color: #f5a623;
+  border-color: rgba(245, 166, 35, 0.3);
+}
+
 .session-row-status.status-error {
   color: var(--red);
   border-color: rgba(255, 51, 51, 0.3);
@@ -752,6 +757,17 @@ h1 {
 .session-row-dot.status-waiting {
   background: var(--green);
   box-shadow: 0 0 4px var(--accent-glow);
+}
+
+.session-row-dot.status-background {
+  background: #f5a623;
+  box-shadow: 0 0 6px rgba(245, 166, 35, 0.4);
+  animation: pulse-bg 2s ease-in-out infinite;
+}
+
+@keyframes pulse-bg {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(245, 166, 35, 0.4); }
+  50% { opacity: 0.5; box-shadow: 0 0 2px rgba(245, 166, 35, 0.2); }
 }
 
 .session-row-dot.status-error {
@@ -918,6 +934,182 @@ h1 {
   background: rgba(255, 51, 51, 0.1);
 }
 
+/* ─── Session meta tags ─── */
+.session-row-meta-tags {
+  display: flex;
+  gap: 4px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.session-row-meta-tag {
+  font-size: calc(var(--fs-base) - 3px);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+/* ─── Session edit modal ─── */
+.session-edit-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  width: 400px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-edit-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.session-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-edit-label {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.session-edit-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ─── Session group-by ─── */
+.session-group-by-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 8px;
+  flex-shrink: 0;
+}
+
+.session-group-by-icon {
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-dim);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.session-group-by-select {
+  flex: 1;
+  font-size: calc(var(--fs-base) - 2px);
+  font-family: var(--font-mono);
+  padding: 4px 8px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23666'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+  transition: border-color 0.15s;
+}
+
+.session-group-by-select:hover {
+  border-color: var(--text-dim);
+}
+
+.session-group-by-select:focus {
+  border-color: var(--accent);
+}
+
+.session-group {
+  margin-bottom: 4px;
+  transition: outline 0.1s;
+}
+
+.session-group-drop-target:hover {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.session-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover, rgba(255,255,255,0.03));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.session-group-header:hover {
+  background: var(--bg-input, rgba(255,255,255,0.05));
+}
+
+.session-group-header.session-group-ungrouped {
+  color: var(--text-dim);
+}
+
+.session-group-chevron {
+  font-size: calc(var(--fs-base) - 3px);
+  color: var(--text-dim);
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.session-group-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.session-group-count {
+  font-size: calc(var(--fs-base) - 3px);
+  color: var(--text-dim);
+  background: var(--border);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+/* ─── Meta fields in create session ─── */
+.meta-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.meta-field {
+  flex: 1;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-field-label {
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-dim);
+}
+
 /* ─── Split main (terminal area) ─── */
 .split-main {
   flex: 1;
@@ -1074,21 +1266,11 @@ h1 {
   max-width: 640px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  border: 1px solid var(--border);
-  padding: 20px;
-  position: relative;
+  gap: 16px;
 }
 
-.create-form::before {
-  content: "┌─ NEW SESSION ─────────────────────────────────────────┐";
-  position: absolute;
-  top: -10px;
-  left: 10px;
-  font-size: calc(var(--fs-base) - 2px);
-  color: var(--text-dim);
-  background: var(--bg);
-  padding: 0 8px;
+.create-form > .form-row:first-child {
+  /* Session name sits flush at top */
 }
 
 .form-label {
@@ -1711,29 +1893,79 @@ h1 {
 
 /* ─── Repo selector ─── */
 .repo-selector {
-  border: 1px dashed var(--border);
-  padding: 12px;
+  /* No border — flows directly inside the form */
+}
+
+.repo-selector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.repo-selector-header .form-label {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.repo-search-inline {
+  font-size: calc(var(--fs-base) - 1px);
+  padding: 3px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  outline: none;
+  width: 140px;
+  transition: all 0.15s;
+}
+
+.repo-search-inline:focus {
+  border-color: var(--accent);
+  width: 200px;
+}
+
+.repo-search-inline::placeholder {
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.repo-selected-summary {
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--accent);
+  padding: 4px 0;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .repo-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
 }
 
 .repo-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   cursor: pointer;
-  transition: all 0.15s;
-  border: 1px solid transparent;
+  transition: all 0.1s;
 }
 
 .repo-item:hover {
   background: var(--green-dim);
-  border-color: var(--border);
+}
+
+.repo-item-selected {
+  background: rgba(0, 255, 65, 0.04);
 }
 
 .repo-item input[type="checkbox"] {
@@ -1741,6 +1973,7 @@ h1 {
   height: 14px;
   accent-color: var(--accent);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .repo-alias {
@@ -1758,6 +1991,9 @@ h1 {
 .repo-path {
   color: var(--text-dim);
   font-size: calc(var(--fs-base) - 2px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .repo-recent-badge {
@@ -1769,11 +2005,7 @@ h1 {
 
 .repo-recent-divider {
   border-bottom: 1px solid var(--border);
-  margin: 4px 12px;
-}
-
-.repo-search {
-  margin-bottom: 8px;
+  margin: 2px 12px;
 }
 
 .repo-show-more {
@@ -3047,7 +3279,6 @@ h1 {
 [data-theme]:not([data-theme="terminal"]) .plan-content h2::before,
 [data-theme]:not([data-theme="terminal"]) .plan-content h3::before,
 [data-theme]:not([data-theme="terminal"]) .header::before,
-[data-theme]:not([data-theme="terminal"]) .create-form::before,
 [data-theme]:not([data-theme="terminal"]) .btn-back::before {
   content: none;
 }
@@ -3057,7 +3288,8 @@ h1 {
 [data-theme]:not([data-theme="terminal"]) .form-input,
 [data-theme]:not([data-theme="terminal"]) .form-textarea,
 [data-theme]:not([data-theme="terminal"]) .create-form,
-[data-theme]:not([data-theme="terminal"]) .repo-selector,
+[data-theme]:not([data-theme="terminal"]) .repo-list,
+[data-theme]:not([data-theme="terminal"]) .repo-search-inline,
 [data-theme]:not([data-theme="terminal"]) .changes-pr-form,
 [data-theme]:not([data-theme="terminal"]) .changes-pr-success,
 [data-theme]:not([data-theme="terminal"]) .changes-pr-link,
@@ -4495,11 +4727,7 @@ h1 {
 
   /* Create form */
   .create-form {
-    padding: 12px;
-  }
-
-  .create-form::before {
-    font-size: 9px;
+    gap: 12px;
   }
 
   .page {

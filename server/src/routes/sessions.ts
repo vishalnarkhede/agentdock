@@ -11,6 +11,9 @@ import {
   getSessionType,
   getSessionOrder,
   saveSessionOrder,
+  getSessionProperties,
+  saveSessionProperties,
+  deleteSessionProperties,
 } from "../services/config";
 import { detectStatus, extractStatusLine } from "../services/status";
 import {
@@ -40,6 +43,7 @@ app.get("/", async (c) => {
       const parentSession = getSessionParent(s.name) ?? undefined;
       const children = getSessionChildren(s.name);
       const sessionType = getSessionType(s.name) ?? undefined;
+      const meta = getSessionProperties(s.name);
       return {
         name: s.name,
         displayName: s.name.replace(`${PREFIX}-`, ""),
@@ -54,6 +58,7 @@ app.get("/", async (c) => {
         parentSession,
         children: children.length > 0 ? children : undefined,
         sessionType,
+        meta: Object.keys(meta).length > 0 ? meta : undefined,
       };
     }),
   );
@@ -87,6 +92,11 @@ app.post("/", async (c) => {
   }
   try {
     const created = await startSession(body);
+    if (body.meta && Object.keys(body.meta).length > 0) {
+      for (const sess of created) {
+        saveSessionProperties(sess, body.meta);
+      }
+    }
     return c.json({ sessions: created }, 201);
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
@@ -317,6 +327,19 @@ app.post("/:name/switch-agent", async (c) => {
       },
     }
   );
+});
+
+app.patch("/:name/meta", async (c) => {
+  const name = c.req.param("name");
+  const body = await c.req.json() as Record<string, string>;
+  const current = getSessionProperties(name);
+  const merged = { ...current, ...body };
+  // Remove keys with empty values
+  for (const k of Object.keys(merged)) {
+    if (!merged[k]) delete merged[k];
+  }
+  saveSessionProperties(name, merged);
+  return c.json(merged);
 });
 
 app.delete("/:name", async (c) => {

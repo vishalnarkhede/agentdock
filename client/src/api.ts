@@ -4,6 +4,7 @@ import type {
   LinearTicket,
   CreateSessionRequest,
   AgentType,
+  MetaPropertyPreset,
 } from "./types";
 import {
   isDemo,
@@ -203,6 +204,7 @@ export interface SessionTemplate {
   prompt?: string;
   isolated?: boolean;
   grouped?: boolean;
+  meta?: Record<string, string>;
 }
 
 export async function fetchTemplates(): Promise<SessionTemplate[]> {
@@ -568,4 +570,54 @@ export async function deleteMcpServer(name: string): Promise<void> {
   await fetch(`${BASE}/api/settings/mcp-servers/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
+}
+
+// ─── Preferences API ───
+
+export async function fetchPreferences(): Promise<Record<string, any>> {
+  if (isDemo()) return {};
+  const res = await fetch(`${BASE}/api/settings/preferences`);
+  return res.json();
+}
+
+export async function updatePreferences(partial: Record<string, any>): Promise<Record<string, any>> {
+  if (isDemo()) return partial;
+  const res = await fetch(`${BASE}/api/settings/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(partial),
+  });
+  return res.json();
+}
+
+// ─── Meta Property Presets API ───
+
+export async function fetchMetaPropertyPresets(): Promise<MetaPropertyPreset[]> {
+  if (isDemo()) return [];
+  const res = await fetch(`${BASE}/api/settings/meta-properties`);
+  return res.json();
+}
+
+export async function saveMetaPropertyPresets(presets: MetaPropertyPreset[]): Promise<void> {
+  if (isDemo()) return;
+  await fetch(`${BASE}/api/settings/meta-properties`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(presets),
+  });
+}
+
+// ─── Session Meta API ───
+
+export async function updateSessionMeta(
+  sessionName: string,
+  meta: Record<string, string>,
+): Promise<Record<string, string>> {
+  if (isDemo()) return meta;
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/meta`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(meta),
+  });
+  return res.json();
 }

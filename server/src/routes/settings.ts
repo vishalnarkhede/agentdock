@@ -23,6 +23,10 @@ import {
   getMcpServers,
   addMcpServer,
   removeMcpServer,
+  getPreferences,
+  savePreferences,
+  getMetaPropertyPresets,
+  saveMetaPropertyPresets,
 } from "../services/config";
 import type { RepoConfig } from "../types";
 
@@ -206,6 +210,35 @@ app.post("/mcp-servers", async (c) => {
 app.delete("/mcp-servers/:name", (c) => {
   const name = c.req.param("name");
   removeMcpServer(name);
+  return c.json({ ok: true });
+});
+
+// ─── Preferences ───
+
+app.get("/preferences", (c) => {
+  return c.json(getPreferences());
+});
+
+app.patch("/preferences", async (c) => {
+  const body = await c.req.json();
+  const current = getPreferences();
+  const merged = { ...current, ...body };
+  savePreferences(merged);
+  return c.json(merged);
+});
+
+// ─── Meta property presets ───
+
+app.get("/meta-properties", (c) => {
+  return c.json(getMetaPropertyPresets());
+});
+
+app.put("/meta-properties", async (c) => {
+  const body = await c.req.json();
+  if (!Array.isArray(body)) {
+    return c.json({ error: "body must be an array" }, 400);
+  }
+  saveMetaPropertyPresets(body);
   return c.json({ ok: true });
 });
 

@@ -15,6 +15,7 @@ export interface SessionTemplate {
   prompt?: string;
   isolated?: boolean;
   grouped?: boolean;
+  meta?: Record<string, string>;
 }
 
 function loadTemplates(): SessionTemplate[] {

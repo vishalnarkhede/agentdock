@@ -10,7 +10,7 @@
 
 import { getHookStatus } from "./config";
 
-export type SessionStatus = "waiting" | "working" | "shell" | "unknown";
+export type SessionStatus = "waiting" | "working" | "background" | "shell" | "unknown";
 
 const SHELLS = new Set(["bash", "zsh", "fish", "sh"]);
 
@@ -47,8 +47,17 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
   }
 
   // Primary: use Claude Code hook-reported status (deterministic)
+  // But still check terminal for background tasks — hooks don't distinguish idle vs background
   if (sessionName) {
     const hookStatus = getHookStatus(sessionName);
+    if (hookStatus === "waiting") {
+      // Check if there's a background task running in the status bar
+      const rawLines = content.split("\n");
+      for (let i = rawLines.length - 1; i >= Math.max(0, rawLines.length - 5); i--) {
+        if (/\(running\)/.test(stripAnsi(rawLines[i]))) return "background";
+      }
+      return "waiting";
+    }
     if (hookStatus) return hookStatus;
   }
 
@@ -86,18 +95,27 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
   const isClaudePrompt = (line: string) => /^❯/.test(line);
   const isCursorPrompt = (line: string) => /^>\s*$/.test(line) || /^> /.test(line);
   const isPromptLine = (line: string) => isClaudePrompt(line) || isCursorPrompt(line);
-  const isPromptUI = (line: string) => /accept edits|shift.tab/.test(line);
+  const isPromptUI = (line: string) => /accept edits|shift.tab|⏵⏵|auto-compact|hold Space/.test(line);
+  // Claude Code status bar with background task: "⏵⏵ ... (running) ..."
+  const hasBackgroundTask = (line: string) => /\(running\)/.test(line);
   // Claude Code feedback prompt: "● How is Claude doing this session?"
   const isFeedbackPrompt = (line: string) => /how is claude doing/i.test(line) || /^\s*[0-9]+:\s*(Bad|Fine|Good|Dismiss)/i.test(line);
   // Claude Code plan mode selection: "❯ 1. Yes, clear context..." or "ctrl-g to edit in VS Code"
   const isPlanModeUI = (line: string) => /^❯\s+\d+\.\s/.test(line) || /^\d+\.\s+(Yes|No|Type here)/i.test(line) || /ctrl-g to edit/i.test(line);
   const lastLine = tail[tail.length - 1];
 
-  if (isPromptLine(lastLine)) {
+  // Check for prompt with background task running — agent is idle but has background work
+  if (isPromptLine(lastLine) && tail.some(hasBackgroundTask)) {
+    return "background";
+  }
+
+  // Status bar is last line (⏵⏵ ...) — prompt may be further up due to multi-line user input
+  if (isPromptUI(lastLine) && tail.some(isClaudePrompt)) {
+    if (tail.some(hasBackgroundTask)) return "background";
     return "waiting";
   }
 
-  if (isPromptUI(lastLine) && tail.length >= 2 && isPromptLine(tail[tail.length - 2])) {
+  if (isPromptLine(lastLine)) {
     return "waiting";
   }
 

@@ -13,16 +13,19 @@ import {
   fetchMcpServers,
   addMcpServerApi,
   deleteMcpServer,
+  fetchMetaPropertyPresets,
+  saveMetaPropertyPresets,
   type SettingsHealth,
   type McpServerInfo,
 } from "../api";
-import type { RepoConfig } from "../types";
+import type { RepoConfig, MetaPropertyPreset } from "../types";
 
 type Category =
   | "appearance"
   | "terminal"
   | "notifications"
   | "repos"
+  | "meta"
   | "mcp"
   | "security"
   | "health";
@@ -32,6 +35,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "notifications", label: "Notifications" },
   { id: "repos", label: "Repositories" },
+  { id: "meta", label: "Meta Properties" },
   { id: "mcp", label: "MCP Servers" },
   { id: "security", label: "Security" },
   { id: "health", label: "Health" },
@@ -228,6 +232,7 @@ export function SettingsModal({ open, onClose }: Props) {
               </>
             )}
             {category === "repos" && <ReposPanel />}
+            {category === "meta" && <MetaPropertiesPanel />}
             {category === "mcp" && <McpServersPanel />}
             {category === "security" && <SecurityPanel />}
             {category === "health" && <HealthPanel />}
@@ -506,6 +511,103 @@ function McpServersPanel() {
               )}
             </div>
             <button className="btn btn-danger-sm" onClick={() => handleDelete(server.name)}>
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ─── Meta Properties Panel ───
+
+function MetaPropertiesPanel() {
+  const [presets, setPresets] = useState<MetaPropertyPreset[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [newValues, setNewValues] = useState("");
+
+  const load = useCallback(() => {
+    fetchMetaPropertyPresets().then(setPresets);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!newKey || !newLabel) return;
+    const values = newValues.trim()
+      ? newValues.split(",").map(v => v.trim()).filter(Boolean)
+      : [];
+    const updated = [...presets, { key: newKey.trim().toLowerCase().replace(/\s+/g, "_"), label: newLabel.trim(), values }];
+    await saveMetaPropertyPresets(updated);
+    setNewKey("");
+    setNewLabel("");
+    setNewValues("");
+    setShowAdd(false);
+    load();
+  };
+
+  const handleDelete = async (key: string) => {
+    const updated = presets.filter(p => p.key !== key);
+    await saveMetaPropertyPresets(updated);
+    load();
+  };
+
+  return (
+    <>
+      <p className="settings-security-desc">
+        Define meta properties that can be assigned to sessions (e.g., customer, org ID, priority).
+        Properties with preset values show as dropdowns; empty values allow free-text input.
+      </p>
+      <div className="settings-row">
+        <label className="settings-label">Properties</label>
+        <button className="btn btn-primary settings-add-btn" onClick={() => setShowAdd(!showAdd)}>
+          {showAdd ? "Cancel" : "+ Add"}
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="settings-add-form">
+          <input
+            className="form-input"
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            placeholder="Key (e.g. customer)"
+          />
+          <input
+            className="form-input"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder="Label (e.g. Customer)"
+          />
+          <input
+            className="form-input"
+            value={newValues}
+            onChange={(e) => setNewValues(e.target.value)}
+            placeholder="Preset values, comma-separated (leave empty for free-text)"
+          />
+          <button className="btn btn-primary" onClick={handleAdd} disabled={!newKey || !newLabel} style={{ marginTop: 8 }}>
+            Add Property
+          </button>
+        </div>
+      )}
+
+      <div className="settings-repo-list">
+        {presets.length === 0 && (
+          <div className="settings-empty">No meta properties configured.</div>
+        )}
+        {presets.map((preset) => (
+          <div key={preset.key} className="settings-repo-row">
+            <div className="settings-repo-info">
+              <span className="settings-repo-alias">{preset.label}</span>
+              <span className="settings-repo-path">
+                {preset.values.length > 0 ? preset.values.join(", ") : "(free text)"}
+              </span>
+              <span className="settings-repo-remote">key: {preset.key}</span>
+            </div>
+            <button className="btn btn-danger-sm" onClick={() => handleDelete(preset.key)}>
               Remove
             </button>
           </div>

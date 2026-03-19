@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
 import { useMobileNav } from "../MobileNavContext";
-import type { SessionInfo } from "../types";
+import type { SessionInfo, MetaPropertyPreset } from "../types";
 
 function timeAgo(unixSeconds: number): string {
   const diff = Math.floor(Date.now() / 1000) - unixSeconds;
@@ -48,6 +49,7 @@ function SessionRow({
   onDrop,
   isDragging,
   isDragOver,
+  onEditProps,
 }: {
   session: SessionInfo;
   active: boolean;
@@ -67,6 +69,7 @@ function SessionRow({
   onDrop?: (e: React.DragEvent) => void;
   isDragging?: boolean;
   isDragOver?: boolean;
+  onEditProps?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -100,6 +103,12 @@ function SessionRow({
     e.stopPropagation();
     openInIterm(session.name);
     setMenuOpen(false);
+  };
+
+  const handleEditProps = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    onEditProps?.();
   };
 
   const handleKill = async (e: React.MouseEvent) => {
@@ -185,6 +194,13 @@ function SessionRow({
             {session.agentType === "cursor" ? "Cursor" : session.agentType}
           </span>
         )}
+        {session.meta && Object.keys(session.meta).length > 0 && (
+          <span className="session-row-meta-tags">
+            {Object.entries(session.meta).map(([k, v]) => (
+              <span key={k} className="session-row-meta-tag" title={k}>{v}</span>
+            ))}
+          </span>
+        )}
         <div className="session-row-menu-wrap" ref={menuRef}>
           <button
             className="session-row-menu-btn"
@@ -200,6 +216,9 @@ function SessionRow({
                   {pinned ? "Unpin" : "Pin to top"}
                 </button>
               )}
+              {onEditProps && (
+                <button className="session-row-menu-item" onClick={handleEditProps}>Edit properties</button>
+              )}
               <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
               <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
               <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
@@ -209,6 +228,71 @@ function SessionRow({
         </div>
       </div>
     </div>
+  );
+}
+
+function SessionEditModal({
+  session,
+  presets,
+  onSave,
+  onClose,
+}: {
+  session: SessionInfo;
+  presets: MetaPropertyPreset[];
+  onSave: (meta: Record<string, string>) => void;
+  onClose: () => void;
+}) {
+  const [meta, setMeta] = useState<Record<string, string>>(session.meta || {});
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="session-edit-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-header">
+          <span className="settings-title">{session.displayName}</span>
+          <button className="settings-close-btn" onClick={onClose}>&times;</button>
+        </div>
+        <div className="session-edit-body">
+          {presets.map((preset) => (
+            <div key={preset.key} className="session-edit-field">
+              <label className="session-edit-label">{preset.label}</label>
+              {preset.values.length > 0 ? (
+                <select
+                  className="form-input"
+                  value={meta[preset.key] || ""}
+                  onChange={(e) => setMeta(prev => ({ ...prev, [preset.key]: e.target.value }))}
+                >
+                  <option value="">—</option>
+                  {preset.values.map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder={preset.label}
+                  value={meta[preset.key] || ""}
+                  onChange={(e) => setMeta(prev => ({ ...prev, [preset.key]: e.target.value }))}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="session-edit-footer">
+          <button className="btn btn-primary" onClick={() => onSave(meta)}>Save</button>
+          <button className="btn" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -658,18 +742,34 @@ export function Dashboard() {
 
   // Drag-and-drop state for reordering parent sessions
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem("agentdock-pinned-sessions");
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
-  });
+  const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(new Set());
+  const [groupBy, setGroupBy] = useState<string>("");
+  const [metaPresets, setMetaPresets] = useState<MetaPropertyPreset[]>([]);
+  const [editingSession, setEditingSession] = useState<SessionInfo | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = useCallback((group: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchPreferences().then((p) => {
+      if (p.pinnedSessions) setPinnedSessions(new Set(p.pinnedSessions));
+      if (p.groupBy) setGroupBy(p.groupBy);
+    });
+    fetchMetaPropertyPresets().then(setMetaPresets);
+  }, []);
+
   const togglePin = useCallback((name: string) => {
     setPinnedSessions((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
-      localStorage.setItem("agentdock-pinned-sessions", JSON.stringify([...next]));
+      updatePreferences({ pinnedSessions: [...next] });
       return next;
     });
   }, []);
@@ -757,6 +857,31 @@ export function Dashboard() {
       return false;
     });
   }, [orderedSessions, sessionSearch]);
+
+  const groupedSessions = useMemo(() => {
+    if (!groupBy) return null;
+    const groups: Record<string, typeof filteredSessions> = {};
+    const ungrouped: typeof filteredSessions = [];
+    for (const entry of filteredSessions) {
+      if (entry.isChild) continue; // children follow their parent
+      const value = entry.session.meta?.[groupBy] || "";
+      if (value) {
+        if (!groups[value]) groups[value] = [];
+        groups[value].push(entry);
+      } else {
+        ungrouped.push(entry);
+      }
+      // Also add children after their parent
+      if (!entry.isChild) {
+        const childEntries = filteredSessions.filter(
+          (e) => e.isChild && e.session.parentSession === entry.session.name
+        );
+        const target = value ? groups[value] : ungrouped;
+        target!.push(...childEntries);
+      }
+    }
+    return { groups, ungrouped };
+  }, [filteredSessions, groupBy]);
 
   // Check if active session has children or is a child (for sub-agents tab & breadcrumb)
   const activeSessionInfo = sessions.find((s) => s.name === activeSession);
@@ -925,6 +1050,24 @@ export function Dashboard() {
             />
           </div>
         )}
+        {metaPresets.length > 0 && (
+          <div className="session-group-by-wrap">
+            <span className="session-group-by-icon">&#x25A4;</span>
+            <select
+              className="session-group-by-select"
+              value={groupBy}
+              onChange={(e) => {
+                setGroupBy(e.target.value);
+                updatePreferences({ groupBy: e.target.value });
+              }}
+            >
+              <option value="">No grouping</option>
+              {metaPresets.map((p) => (
+                <option key={p.key} value={p.key}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="session-list">
           {loading ? (
             <div className="loading">LOADING...</div>
@@ -936,6 +1079,104 @@ export function Dashboard() {
                 ./create-session
               </button>
             </div>
+          ) : groupBy && groupedSessions ? (
+            <>
+              {Object.entries(groupedSessions.groups).map(([value, entries]) => (
+                <div
+                  key={value}
+                  className={`session-group ${dragIdx !== null ? "session-group-drop-target" : ""}`}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const sessionName = e.dataTransfer.getData("text/plain");
+                    if (sessionName) {
+                      updateSessionMeta(sessionName, { [groupBy]: value });
+                      refresh();
+                    }
+                  }}
+                >
+                  <div
+                    className="session-group-header"
+                    onClick={() => toggleGroup(value)}
+                  >
+                    <span className="session-group-chevron">{collapsedGroups.has(value) ? "\u25B8" : "\u25BE"}</span>
+                    <span className="session-group-label">{value}</span>
+                    <span className="session-group-count">{entries.filter(e => !e.isChild).length}</span>
+                  </div>
+                  {!collapsedGroups.has(value) && entries.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
+                    <SessionRow
+                      key={session.name}
+                      session={session}
+                      active={session.name === activeSession}
+                      isChild={isChild}
+                      isLastChild={isLastChild}
+                      childrenSummary={childrenSummary}
+                      childrenExpanded={childrenExpanded}
+                      onToggleChildren={() => toggleParentCollapse(session.name)}
+                      pinned={pinnedSessions.has(session.name)}
+                      onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
+                      onSelect={() => {
+                        setActiveSession(session.name);
+                        setMobileShowTerminal(true);
+                      }}
+                      onStopped={handleStopped}
+                      draggable={!isChild}
+                      onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
+                      onDragEnd={!isChild ? handleDragEnd : undefined}
+                      isDragging={!isChild && dragIdx === parentIdx}
+                      onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                    />
+                  ))}
+                </div>
+              ))}
+              {groupedSessions.ungrouped.length > 0 && (
+                <div
+                  className={`session-group ${dragIdx !== null ? "session-group-drop-target" : ""}`}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const sessionName = e.dataTransfer.getData("text/plain");
+                    if (sessionName) {
+                      updateSessionMeta(sessionName, { [groupBy]: "" });
+                      refresh();
+                    }
+                  }}
+                >
+                  <div
+                    className="session-group-header session-group-ungrouped"
+                    onClick={() => toggleGroup("__ungrouped__")}
+                  >
+                    <span className="session-group-chevron">{collapsedGroups.has("__ungrouped__") ? "\u25B8" : "\u25BE"}</span>
+                    <span className="session-group-label">Ungrouped</span>
+                    <span className="session-group-count">{groupedSessions.ungrouped.filter(e => !e.isChild).length}</span>
+                  </div>
+                  {!collapsedGroups.has("__ungrouped__") && groupedSessions.ungrouped.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
+                    <SessionRow
+                      key={session.name}
+                      session={session}
+                      active={session.name === activeSession}
+                      isChild={isChild}
+                      isLastChild={isLastChild}
+                      childrenSummary={childrenSummary}
+                      childrenExpanded={childrenExpanded}
+                      onToggleChildren={() => toggleParentCollapse(session.name)}
+                      pinned={pinnedSessions.has(session.name)}
+                      onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
+                      onSelect={() => {
+                        setActiveSession(session.name);
+                        setMobileShowTerminal(true);
+                      }}
+                      onStopped={handleStopped}
+                      draggable={!isChild}
+                      onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
+                      onDragEnd={!isChild ? handleDragEnd : undefined}
+                      isDragging={!isChild && dragIdx === parentIdx}
+                      onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             filteredSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
               <SessionRow
@@ -961,6 +1202,7 @@ export function Dashboard() {
                 onDrop={!isChild ? handleDrop(parentIdx) : undefined}
                 isDragging={!isChild && dragIdx === parentIdx}
                 isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
+                onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
               />
             ))
           )}
@@ -1194,6 +1436,18 @@ export function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+      {editingSession && metaPresets.length > 0 && (
+        <SessionEditModal
+          session={editingSession}
+          presets={metaPresets}
+          onClose={() => setEditingSession(null)}
+          onSave={async (meta) => {
+            await updateSessionMeta(editingSession.name, meta);
+            setEditingSession(null);
+            refresh();
+          }}
+        />
       )}
     </div>
   );

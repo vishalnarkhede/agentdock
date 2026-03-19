@@ -5,7 +5,7 @@ import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
 import { homedir } from "os";
 
 const HOME = process.env.HOME || homedir();
-const CONFIG_DIR = join(HOME, ".config", "agentdock");
+const CONFIG_DIR = process.env.AGENTDOCK_CONFIG_DIR || join(HOME, ".config", "agentdock");
 const REPOS_FILE = join(CONFIG_DIR, "repos.json");
 const BASE_PATH_FILE = join(CONFIG_DIR, "base-path");
 const LINEAR_KEY_FILE = join(CONFIG_DIR, "linear-api-key");
@@ -671,6 +671,78 @@ export function deleteHookStatus(sessionName: string): void {
   if (existsSync(statusFile)) {
     try { unlinkSync(statusFile); } catch { /* ignore */ }
   }
+}
+
+// ─── Preferences ───
+
+const PREFERENCES_FILE = join(CONFIG_DIR, "preferences.json");
+
+export interface Preferences {
+  recentRepos?: string[];
+  pinnedSessions?: string[];
+  theme?: string;
+  fontSize?: string;
+  cursorBlink?: boolean;
+  scrollback?: number;
+  terminalFontSize?: number;
+  notificationsEnabled?: boolean;
+  groupBy?: string;
+}
+
+export function getPreferences(): Preferences {
+  if (!existsSync(PREFERENCES_FILE)) return {};
+  try {
+    return JSON.parse(readFileSync(PREFERENCES_FILE, "utf-8"));
+  } catch { return {}; }
+}
+
+export function savePreferences(prefs: Preferences): void {
+  ensureConfigDir();
+  writeFileSync(PREFERENCES_FILE, JSON.stringify(prefs, null, 2));
+}
+
+// ─── Meta property presets ───
+
+const META_PROPERTIES_FILE = join(CONFIG_DIR, "meta-properties.json");
+
+export interface MetaPropertyPreset {
+  key: string;
+  label: string;
+  values: string[];
+}
+
+export function getMetaPropertyPresets(): MetaPropertyPreset[] {
+  if (!existsSync(META_PROPERTIES_FILE)) return [];
+  try {
+    const data = JSON.parse(readFileSync(META_PROPERTIES_FILE, "utf-8"));
+    if (Array.isArray(data)) return data;
+  } catch { /* corrupt file */ }
+  return [];
+}
+
+export function saveMetaPropertyPresets(presets: MetaPropertyPreset[]): void {
+  ensureConfigDir();
+  writeFileSync(META_PROPERTIES_FILE, JSON.stringify(presets, null, 2));
+}
+
+// ─── Session properties (meta key-value pairs) ───
+
+export function getSessionProperties(sessionName: string): Record<string, string> {
+  const file = join(SESSIONS_DIR, `${sessionName}.meta`);
+  if (!existsSync(file)) return {};
+  try {
+    return JSON.parse(readFileSync(file, "utf-8"));
+  } catch { return {}; }
+}
+
+export function saveSessionProperties(sessionName: string, meta: Record<string, string>): void {
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+  writeFileSync(join(SESSIONS_DIR, `${sessionName}.meta`), JSON.stringify(meta));
+}
+
+export function deleteSessionProperties(sessionName: string): void {
+  const file = join(SESSIONS_DIR, `${sessionName}.meta`);
+  if (existsSync(file)) unlinkSync(file);
 }
 
 // ─── Exports ───

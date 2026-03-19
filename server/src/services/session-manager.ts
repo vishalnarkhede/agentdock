@@ -24,6 +24,7 @@ import {
   getSessionOrder,
   saveSessionOrder,
   deleteHookStatus,
+  deleteSessionProperties,
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
@@ -68,10 +69,17 @@ function buildSystemInstructions(sessionName: string): string {
     .replace(/\{\{SESSION_NAME\}\}/g, sessionName);
 }
 
-export function writeSystemPromptFile(sessionName: string): string {
+export function writeSystemPromptFile(sessionName: string, meta?: Record<string, string>): string {
   mkdirSync(SYSTEM_PROMPT_DIR, { recursive: true });
   const filePath = `${SYSTEM_PROMPT_DIR}/${sessionName}.txt`;
-  writeFileSync(filePath, buildSystemInstructions(sessionName));
+  let content = buildSystemInstructions(sessionName);
+  if (meta && Object.keys(meta).length > 0) {
+    content += "\n\n## Session Context\n\nThis session has the following metadata properties:\n";
+    for (const [key, value] of Object.entries(meta)) {
+      content += `- **${key}**: ${value}\n`;
+    }
+  }
+  writeFileSync(filePath, content);
   return filePath;
 }
 
@@ -82,7 +90,7 @@ function writePromptFile(sessionName: string, prompt: string): string {
   return promptFile;
 }
 
-function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string, addDirs?: string[]): string {
+export function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string, addDirs?: string[]): string {
   if (agentType === "cursor") {
     return dangerouslySkipPermissions ? "agent --yolo" : "agent";
   }
@@ -111,17 +119,17 @@ function shortId(): string {
     .slice(0, 6);
 }
 
-function sessionNameFromTarget(target: string): string {
+export function sessionNameFromTarget(target: string): string {
   const name = target.replace(/:/g, "-").replace(/\//g, "-");
   return `${PREFIX}-${name}`;
 }
 
-interface ParsedPiece {
+export interface ParsedPiece {
   alias: string;
   branch: string;
 }
 
-function parsePiece(piece: string): ParsedPiece {
+export function parsePiece(piece: string): ParsedPiece {
   const colonIdx = piece.indexOf(":");
   if (colonIdx !== -1) {
     return {
@@ -167,6 +175,7 @@ async function launchAgent(
   dangerouslySkipPermissions?: boolean,
   parentSession?: string,
   addDirs?: string[],
+  meta?: Record<string, string>,
 ): Promise<void> {
 
   // Pass env vars via tmux's -e flag so they are set BEFORE the shell starts.
@@ -191,7 +200,7 @@ async function launchAgent(
 
   // Write system prompt file with agentdock instructions (plan saving, PR monitoring, etc.)
   // For Claude, this is injected via --append-system-prompt-file so it's always present
-  const systemPromptFile = writeSystemPromptFile(sess);
+  const systemPromptFile = writeSystemPromptFile(sess, meta);
 
   // Wait for shell init to complete before sending commands
   await sleep(2000);
@@ -291,7 +300,7 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
       : `${PREFIX}-${shortId()}`;
 
     if (!(await tmux.hasSession(sess))) {
-      await launchAgent(sess, `${HOME_DIR}/projects`, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession);
+      await launchAgent(sess, `${HOME_DIR}/projects`, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession, undefined, req.meta);
       if (req.parentSession) saveSessionParent(sess, req.parentSession);
       if (req.sessionType) saveSessionType(sess, req.sessionType);
     }
@@ -354,11 +363,16 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
         }
         repoContext += `\nYour current working directory is: ${workDirs[0]}\n`;
         repoContext += `When you need to work on a different repo, cd into its directory.\n`;
-        if (prompt) fullPrompt = repoContext + "\n" + prompt;
-        else fullPrompt = repoContext;
+        if (prompt) {
+          fullPrompt = repoContext + "\n" + prompt;
+        } else {
+          repoContext += `\nThis is your working environment. Do NOT start any work yet — wait for the user to assign you a task.\n`;
+          repoContext += `Introduce yourself briefly, list the repos you have access to, and ask what the user would like you to work on.\n`;
+          fullPrompt = repoContext;
+        }
       }
 
-      await launchAgent(sess, sessionDir, agentType, fullPrompt, req.dangerouslySkipPermissions, req.parentSession, additionalDirs);
+      await launchAgent(sess, sessionDir, agentType, fullPrompt, req.dangerouslySkipPermissions, req.parentSession, additionalDirs, req.meta);
     } else {
       // Single repo
       const resolved = await resolvePiece(target, newBranch, sessionSlug);
@@ -366,7 +380,7 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
         saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir);
       }
 
-      await launchAgent(sess, resolved.workDir, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession);
+      await launchAgent(sess, resolved.workDir, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession, undefined, req.meta);
     }
 
     // Save parent-child relationship if this is a sub-agent
@@ -420,6 +434,7 @@ export async function stopSession(sessionName: string): Promise<void> {
   deleteSessionParent(sessionName);
   deleteSessionSubAgents(sessionName);
   deleteSessionType(sessionName);
+  deleteSessionProperties(sessionName);
 
   // Remove from session order
   const order = getSessionOrder();
