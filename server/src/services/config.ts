@@ -682,6 +682,7 @@ export interface Preferences {
   terminalFontSize?: number;
   notificationsEnabled?: boolean;
   groupBy?: string;
+  collapsedGroups?: string[];
 }
 
 export function getPreferences(): Preferences {

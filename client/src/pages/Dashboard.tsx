@@ -758,6 +758,7 @@ export function Dashboard() {
       const next = new Set(prev);
       if (next.has(group)) next.delete(group);
       else next.add(group);
+      updatePreferences({ collapsedGroups: [...next] });
       return next;
     });
   }, []);
@@ -766,6 +767,7 @@ export function Dashboard() {
     fetchPreferences().then((p) => {
       if (p.pinnedSessions) setPinnedSessions(new Set(p.pinnedSessions));
       if (p.groupBy) setGroupBy(p.groupBy);
+      if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
     });
     fetchMetaPropertyPresets().then(setMetaPresets);
   }, []);
@@ -1121,7 +1123,9 @@ export function Dashboard() {
                 const allKeys = [...Object.keys(groupedSessions.groups)];
                 if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
                 const allCollapsed = allKeys.every(k => collapsedGroups.has(k));
-                setCollapsedGroups(allCollapsed ? new Set() : new Set(allKeys));
+                const next = allCollapsed ? new Set<string>() : new Set(allKeys);
+                setCollapsedGroups(next);
+                updatePreferences({ collapsedGroups: [...next] });
               }}
               title={collapsedGroups.size > 0 ? "Expand all" : "Collapse all"}
             >
