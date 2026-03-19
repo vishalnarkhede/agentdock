@@ -10,6 +10,7 @@ import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo, MetaPropertyPreset } from "../types";
+import type { QuickLaunch } from "../components/Header";
 
 function timeAgo(unixSeconds: number): string {
   const diff = Math.floor(Date.now() / 1000) - unixSeconds;
@@ -50,6 +51,7 @@ function SessionRow({
   isDragging,
   isDragOver,
   onEditProps,
+  onPinToHeader,
 }: {
   session: SessionInfo;
   active: boolean;
@@ -70,6 +72,7 @@ function SessionRow({
   isDragging?: boolean;
   isDragOver?: boolean;
   onEditProps?: () => void;
+  onPinToHeader?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -218,6 +221,9 @@ function SessionRow({
               )}
               {onEditProps && (
                 <button className="session-row-menu-item" onClick={handleEditProps}>Edit properties</button>
+              )}
+              {onPinToHeader && (
+                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onPinToHeader(); setMenuOpen(false); }}>Pin to header</button>
               )}
               <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
               <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
@@ -955,6 +961,31 @@ export function Dashboard() {
     refresh();
   };
 
+  const handlePinToHeader = useCallback(async (session: SessionInfo) => {
+    // Derive targets from the session's repos
+    const targets = session.worktrees?.length
+      ? session.worktrees.map(wt => {
+          const repoName = wt.repoPath.split("/").pop() || wt.repoPath;
+          return repoName;
+        })
+      : session.path ? [session.path.split("/").pop() || session.displayName] : [session.displayName];
+    const ql: QuickLaunch = {
+      id: `ql-${Date.now().toString(36)}`,
+      label: session.displayName,
+      sessionName: session.displayName,
+      targets,
+      agentType: session.agentType,
+    };
+    const prefs = await fetchPreferences();
+    const existing: QuickLaunch[] = prefs.quickLaunches || [];
+    // Don't add duplicates (same targets)
+    if (existing.some(q => q.targets.join(",") === targets.join(","))) return;
+    const updated = [...existing, ql];
+    await updatePreferences({ quickLaunches: updated });
+    // Notify Header to refresh
+    window.dispatchEvent(new CustomEvent("agentdock-quick-launches-changed"));
+  }, []);
+
   // Get the list of parent session names in current order
   const parentSessionNames = useMemo(() => {
     return orderedSessions.filter((e) => !e.isChild).map((e) => e.session.name);
@@ -1083,6 +1114,20 @@ export function Dashboard() {
               <option key={p.key} value={p.key}>{p.label}</option>
             ))}
           </select>
+          {groupBy && groupedSessions && (
+            <button
+              className="session-group-collapse-all"
+              onClick={() => {
+                const allKeys = [...Object.keys(groupedSessions.groups)];
+                if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
+                const allCollapsed = allKeys.every(k => collapsedGroups.has(k));
+                setCollapsedGroups(allCollapsed ? new Set() : new Set(allKeys));
+              }}
+              title={collapsedGroups.size > 0 ? "Expand all" : "Collapse all"}
+            >
+              {collapsedGroups.size > 0 ? "\u25B8\u25B8" : "\u25BE\u25BE"}
+            </button>
+          )}
         </div>
         <div className="session-list">
           {loading ? (
@@ -1148,6 +1193,7 @@ export function Dashboard() {
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                      onPinToHeader={() => handlePinToHeader(session)}
                     />
                   ))}
                 </div>
@@ -1195,6 +1241,7 @@ export function Dashboard() {
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                      onPinToHeader={() => handlePinToHeader(session)}
                     />
                   ))}
                 </div>
@@ -1226,6 +1273,7 @@ export function Dashboard() {
                 isDragging={!isChild && dragIdx === parentIdx}
                 isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
                 onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                onPinToHeader={() => handlePinToHeader(session)}
               />
             ))
           )}

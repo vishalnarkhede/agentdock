@@ -1034,6 +1034,24 @@ h1 {
   border-color: var(--accent);
 }
 
+.session-group-collapse-all {
+  flex-shrink: 0;
+  font-size: calc(var(--fs-base) - 3px);
+  padding: 3px 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  letter-spacing: -2px;
+  transition: all 0.1s;
+}
+
+.session-group-collapse-all:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
 .session-group {
   margin-bottom: 4px;
   transition: outline 0.1s;
@@ -3715,6 +3733,35 @@ h1 {
 .header-fix-me-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ─── Quick launch buttons ─── */
+.header-quick-launch {
+  position: relative;
+  display: inline-flex;
+}
+
+.header-quick-launch-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  background: var(--red, #f33);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0;
+}
+
+.header-quick-launch:hover .header-quick-launch-remove {
+  opacity: 1;
 }
 
 /* ─── Settings gear button ─── */

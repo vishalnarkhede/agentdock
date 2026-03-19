@@ -1,10 +1,18 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsModal } from "./SettingsModal";
-import { createSession } from "../api";
+import { createSession, fetchPreferences, updatePreferences } from "../api";
 import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
 import type { Tab } from "../MobileNavContext";
+
+export interface QuickLaunch {
+  id: string;
+  label: string;
+  sessionName?: string;
+  targets: string[];
+  agentType?: string;
+}
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "terminal", label: "terminal" },
@@ -19,9 +27,49 @@ export function Header() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);
+  const [quickLaunches, setQuickLaunches] = useState<QuickLaunch[]>([]);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const mobileNav = useMobileNav();
   const { enabled: authEnabled, logout } = useAuth();
+
+  const loadQuickLaunches = useCallback(() => {
+    fetchPreferences().then((p) => {
+      if (p.quickLaunches) setQuickLaunches(p.quickLaunches);
+    });
+  }, []);
+
+  useEffect(() => {
+    loadQuickLaunches();
+    const handler = () => loadQuickLaunches();
+    window.addEventListener("agentdock-quick-launches-changed", handler);
+    return () => window.removeEventListener("agentdock-quick-launches-changed", handler);
+  }, [loadQuickLaunches]);
+
+  const handleQuickLaunch = useCallback(async (ql: QuickLaunch) => {
+    if (launchingId) return;
+    setLaunchingId(ql.id);
+    try {
+      const { sessions } = await createSession({
+        targets: ql.targets,
+        name: ql.sessionName,
+        dangerouslySkipPermissions: true,
+        agentType: (ql.agentType as any) || "claude",
+        grouped: true,
+      });
+      if (sessions?.[0]) navigate(`/?session=${sessions[0]}`);
+    } catch (err) {
+      console.error("Failed to launch:", err);
+    } finally {
+      setLaunchingId(null);
+    }
+  }, [launchingId, navigate]);
+
+  const removeQuickLaunch = useCallback(async (id: string) => {
+    const updated = quickLaunches.filter(q => q.id !== id);
+    setQuickLaunches(updated);
+    await updatePreferences({ quickLaunches: updated });
+  }, [quickLaunches]);
 
   const handleFixMe = async () => {
     if (fixingMe) return;
@@ -42,7 +90,7 @@ export function Header() {
     if (talkingToMe) return;
     setTalkingToMe(true);
     try {
-      const { sessions } = await createSession({ targets: [], name: "talk", dangerouslySkipPermissions: true });
+      const { sessions } = await createSession({ targets: [], name: "general-chat", dangerouslySkipPermissions: true });
       if (sessions?.[0]) {
         navigate(`/?session=${sessions[0]}`);
       }
@@ -103,8 +151,25 @@ export function Header() {
           disabled={talkingToMe}
           title="Open a general discussion session"
         >
-          {talkingToMe ? "..." : "talk to me"}
+          {talkingToMe ? "..." : "general chat"}
         </button>
+        {quickLaunches.map((ql) => (
+          <div key={ql.id} className="header-quick-launch">
+            <button
+              className="header-fix-me-btn"
+              onClick={() => handleQuickLaunch(ql)}
+              disabled={launchingId === ql.id}
+              title={ql.targets.join(", ")}
+            >
+              {launchingId === ql.id ? "..." : ql.label}
+            </button>
+            <button
+              className="header-quick-launch-remove"
+              onClick={() => removeQuickLaunch(ql.id)}
+              title="Remove from header"
+            >&times;</button>
+          </div>
+        ))}
         <button
           className="settings-gear-btn"
           onClick={() => setSettingsOpen(true)}
@@ -156,8 +221,18 @@ export function Header() {
               onClick={() => { handleTalkToMe(); setMenuOpen(false); }}
               disabled={talkingToMe}
             >
-              {talkingToMe ? "..." : "talk to me"}
+              {talkingToMe ? "..." : "general chat"}
             </button>
+            {quickLaunches.map((ql) => (
+              <button
+                key={ql.id}
+                className="header-fix-me-btn"
+                onClick={() => { handleQuickLaunch(ql); setMenuOpen(false); }}
+                disabled={launchingId === ql.id}
+              >
+                {launchingId === ql.id ? "..." : ql.label}
+              </button>
+            ))}
             <button
               className="settings-gear-btn"
               onClick={() => {
