@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   createSession,
   fetchTemplates,
@@ -15,6 +15,7 @@ import type { AgentType, MetaPropertyPreset } from "../types";
 
 export function CreateSession() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [sessionName, setSessionName] = useState("");
   const [targets, setTargets] = useState<string[]>([]);
   const grouped = true;
@@ -31,7 +32,16 @@ export function CreateSession() {
 
   useEffect(() => {
     fetchTemplates().then(setTemplates);
-    fetchMetaPropertyPresets().then(setMetaPresets);
+    fetchMetaPropertyPresets().then((presets) => {
+      setMetaPresets(presets);
+      // Pre-fill meta values from URL params (e.g., /create?priority=high)
+      const initial: Record<string, string> = {};
+      for (const p of presets) {
+        const v = searchParams.get(p.key);
+        if (v) initial[p.key] = v;
+      }
+      if (Object.keys(initial).length > 0) setMetaValues(initial);
+    });
     fetchPreferences().then((p) => {
       if (p.recentRepos) setRecentRepos(p.recentRepos);
     });

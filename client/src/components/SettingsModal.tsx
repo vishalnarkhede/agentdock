@@ -598,22 +598,86 @@ function MetaPropertiesPanel() {
         {presets.length === 0 && (
           <div className="settings-empty">No meta properties configured.</div>
         )}
-        {presets.map((preset) => (
-          <div key={preset.key} className="settings-repo-row">
-            <div className="settings-repo-info">
-              <span className="settings-repo-alias">{preset.label}</span>
-              <span className="settings-repo-path">
-                {preset.values.length > 0 ? preset.values.join(", ") : "(free text)"}
-              </span>
-              <span className="settings-repo-remote">key: {preset.key}</span>
-            </div>
-            <button className="btn btn-danger-sm" onClick={() => handleDelete(preset.key)}>
-              Remove
-            </button>
-          </div>
+        {presets.map((preset, idx) => (
+          <MetaPropertyRow
+            key={preset.key}
+            preset={preset}
+            onUpdate={async (updated) => {
+              const next = [...presets];
+              next[idx] = updated;
+              await saveMetaPropertyPresets(next);
+              load();
+            }}
+            onDelete={() => handleDelete(preset.key)}
+          />
         ))}
       </div>
     </>
+  );
+}
+
+// ─── Meta Property Row (editable) ───
+
+function MetaPropertyRow({ preset, onUpdate, onDelete }: {
+  preset: MetaPropertyPreset;
+  onUpdate: (updated: MetaPropertyPreset) => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(preset.label);
+  const [values, setValues] = useState(preset.values.join(", "));
+
+  const handleSave = () => {
+    const parsed = values.trim()
+      ? values.split(",").map(v => v.trim()).filter(Boolean)
+      : [];
+    onUpdate({ ...preset, label: label.trim(), values: parsed });
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="settings-repo-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            className="form-input"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Label"
+            style={{ flex: 1 }}
+          />
+          <span className="settings-repo-remote" style={{ alignSelf: "center", flexShrink: 0 }}>key: {preset.key}</span>
+        </div>
+        <input
+          className="form-input"
+          value={values}
+          onChange={(e) => setValues(e.target.value)}
+          placeholder="Preset values, comma-separated (leave empty for free-text)"
+        />
+        <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!label.trim()}>Save</button>
+          <button className="btn btn-sm" onClick={() => { setLabel(preset.label); setValues(preset.values.join(", ")); setEditing(false); }}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-repo-row">
+      <div className="settings-repo-info">
+        <span className="settings-repo-alias">{preset.label}</span>
+        <span className="settings-repo-path">
+          {preset.values.length > 0 ? preset.values.join(", ") : "(free text)"}
+        </span>
+        <span className="settings-repo-remote">key: {preset.key}</span>
+      </div>
+      <button className="btn btn-sm" onClick={() => setEditing(true)} style={{ marginRight: 4 }}>
+        Edit
+      </button>
+      <button className="btn btn-danger-sm" onClick={onDelete}>
+        Remove
+      </button>
+    </div>
   );
 }
 

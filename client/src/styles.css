@@ -1082,12 +1082,47 @@ h1 {
   letter-spacing: 0.5px;
 }
 
+.session-group-label.status-working { color: var(--cyan); }
+.session-group-label.status-background { color: #f5a623; }
+.session-group-label.status-waiting { color: var(--green); }
+.session-group-label.status-done { color: var(--green); }
+.session-group-label.status-error { color: var(--red); }
+.session-group-label.status-input { color: var(--yellow, #f5a623); }
+
 .session-group-count {
   font-size: calc(var(--fs-base) - 3px);
   color: var(--text-dim);
   background: var(--border);
   padding: 1px 6px;
   border-radius: 8px;
+}
+
+.session-group-add {
+  margin-left: auto;
+  font-size: calc(var(--fs-base) - 1px);
+  font-family: var(--font-mono);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.1s;
+}
+
+.session-group-header:hover .session-group-add {
+  opacity: 1;
+}
+
+.session-group-add:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
 }
 
 /* ─── Meta fields in create session ─── */

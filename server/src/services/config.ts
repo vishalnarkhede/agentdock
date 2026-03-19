@@ -576,8 +576,16 @@ const HOOK_SCRIPT_DEST = join(CONFIG_DIR, "hooks", "status-hook.sh");
 
 /**
  * Install the agentdock status hook script and inject hooks into Claude's settings.json.
- * This gives us reliable status detection via Claude's Stop and Notification lifecycle hooks
- * instead of fragile terminal output pattern matching.
+ *
+ * We use 5 lifecycle hooks for reliable status detection:
+ *   PreToolUse       → "working"  (fires every tool call, including sub-agents — keeps status fresh)
+ *   UserPromptSubmit → "working"  (user sent input)
+ *   SubagentStop     → "working"  (sub-agent finished, but parent is still active)
+ *   Stop             → "waiting"  (Claude finished responding)
+ *   Notification     → "waiting"  (idle at prompt)
+ *
+ * PreToolUse is the key addition — it fires frequently during active work (even by sub-agents),
+ * so the "working" status stays fresh. The Stop hook resets to "waiting" when done.
  */
 export function syncHooksToClaudeSettings(): void {
   // 1. Copy hook script to a stable location
@@ -599,47 +607,32 @@ export function syncHooksToClaudeSettings(): void {
 
   if (!settings.hooks) settings.hooks = {};
 
-  // 4. Inject Stop hook (fires when Claude finishes responding → "waiting")
-  const stopHookCmd = `${HOOK_SCRIPT_DEST} waiting`;
-  const stopHooks = settings.hooks.Stop || [];
-  const hasStopHook = Array.isArray(stopHooks) && stopHooks.some(
-    (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
-  );
-  if (!hasStopHook) {
-    stopHooks.push({
-      hooks: [{ type: "command", command: stopHookCmd, async: true }],
-    });
-    settings.hooks.Stop = stopHooks;
-  }
+  // Helper: check if our hook already exists in a hook array
+  const hasOurHook = (hookArray: any[]) =>
+    Array.isArray(hookArray) && hookArray.some(
+      (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
+    );
 
-  // 5. Inject Notification hook for idle_prompt (fires when Claude is idle at prompt)
-  const notifHookCmd = `${HOOK_SCRIPT_DEST} waiting`;
-  const notifHooks = settings.hooks.Notification || [];
-  const hasNotifHook = Array.isArray(notifHooks) && notifHooks.some(
-    (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
-  );
-  if (!hasNotifHook) {
-    notifHooks.push({
-      matcher: "idle_prompt",
-      hooks: [{ type: "command", command: notifHookCmd, async: true }],
-    });
-    settings.hooks.Notification = notifHooks;
-  }
+  // Helper: inject a hook if not already present
+  const ensureHook = (eventName: string, status: string, extra?: Record<string, any>) => {
+    const hooks = settings.hooks[eventName] || [];
+    if (!hasOurHook(hooks)) {
+      hooks.push({
+        ...extra,
+        hooks: [{ type: "command", command: `${HOOK_SCRIPT_DEST} ${status}`, async: true }],
+      });
+      settings.hooks[eventName] = hooks;
+    }
+  };
 
-  // 6. Inject UserPromptSubmit hook (fires when user sends prompt → "working")
-  const promptHookCmd = `${HOOK_SCRIPT_DEST} working`;
-  const promptHooks = settings.hooks.UserPromptSubmit || [];
-  const hasPromptHook = Array.isArray(promptHooks) && promptHooks.some(
-    (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
-  );
-  if (!hasPromptHook) {
-    promptHooks.push({
-      hooks: [{ type: "command", command: promptHookCmd, async: true }],
-    });
-    settings.hooks.UserPromptSubmit = promptHooks;
-  }
+  // 4. Inject hooks
+  ensureHook("Stop", "waiting");
+  ensureHook("Notification", "waiting", { matcher: "idle_prompt" });
+  ensureHook("UserPromptSubmit", "working");
+  ensureHook("PreToolUse", "working");
+  ensureHook("SubagentStop", "working");
 
-  // 7. Write back
+  // 5. Write back
   const settingsDir = join(HOME, ".claude");
   mkdirSync(settingsDir, { recursive: true });
   writeFileSync(CLAUDE_SETTINGS_FILE, JSON.stringify(settings, null, 2));
@@ -655,9 +648,11 @@ export function getHookStatus(sessionName: string): "waiting" | "working" | null
   if (!existsSync(statusFile)) return null;
   try {
     const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-    // Only trust status if it's recent (within 60 seconds)
+    // Only trust status if it's recent (within 2 minutes).
+    // PreToolUse hook fires on every tool call, keeping "working" fresh.
+    // If nothing fires for 2 min, the session is likely stuck or disconnected.
     const age = Math.floor(Date.now() / 1000) - (data.ts || 0);
-    if (age > 60) return null;
+    if (age > 120) return null;
     if (data.status === "waiting" || data.status === "working") return data.status;
   } catch { /* corrupt file */ }
   return null;

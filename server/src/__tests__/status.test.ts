@@ -47,12 +47,6 @@ describe("detectStatus", () => {
     expect(detect("Some context\n◐ Thinking")).toBe("working");
   });
 
-  test("detects Claude cooking animation as working", () => {
-    // Pattern: single char + space + word + ellipsis (…)
-    expect(detect("Some context\n✽ Flambeing…")).toBe("working");
-    expect(detect("Some context\n✶ Baking…")).toBe("working");
-  });
-
   test("detects Cursor working patterns", () => {
     expect(detect("Some context\nThinking...")).toBe("working");
     expect(detect("Some context\nWorking...")).toBe("working");

@@ -860,11 +860,17 @@ export function Dashboard() {
 
   const groupedSessions = useMemo(() => {
     if (!groupBy) return null;
+    const isStatusGroup = groupBy === "__status__";
     const groups: Record<string, typeof filteredSessions> = {};
     const ungrouped: typeof filteredSessions = [];
     for (const entry of filteredSessions) {
-      if (entry.isChild) continue; // children follow their parent
-      const value = entry.session.meta?.[groupBy] || "";
+      if (entry.isChild) continue;
+      let value: string;
+      if (isStatusGroup) {
+        value = getDisplayStatus(entry.session) || entry.session.status || "unknown";
+      } else {
+        value = entry.session.meta?.[groupBy] || "";
+      }
       if (value) {
         if (!groups[value]) groups[value] = [];
         groups[value].push(entry);
@@ -872,13 +878,24 @@ export function Dashboard() {
         ungrouped.push(entry);
       }
       // Also add children after their parent
-      if (!entry.isChild) {
-        const childEntries = filteredSessions.filter(
-          (e) => e.isChild && e.session.parentSession === entry.session.name
-        );
-        const target = value ? groups[value] : ungrouped;
-        target!.push(...childEntries);
+      const childEntries = filteredSessions.filter(
+        (e) => e.isChild && e.session.parentSession === entry.session.name
+      );
+      const target = value ? groups[value] : ungrouped;
+      target!.push(...childEntries);
+    }
+    // For status grouping, order groups sensibly
+    if (isStatusGroup) {
+      const order = ["working", "background", "input", "error", "waiting", "done", "unknown"];
+      const sorted: Record<string, typeof filteredSessions> = {};
+      for (const key of order) {
+        if (groups[key]) sorted[key] = groups[key];
       }
+      // Any remaining groups not in the order
+      for (const key of Object.keys(groups)) {
+        if (!sorted[key]) sorted[key] = groups[key];
+      }
+      return { groups: sorted, ungrouped };
     }
     return { groups, ungrouped };
   }, [filteredSessions, groupBy]);
@@ -1050,24 +1067,23 @@ export function Dashboard() {
             />
           </div>
         )}
-        {metaPresets.length > 0 && (
-          <div className="session-group-by-wrap">
-            <span className="session-group-by-icon">&#x25A4;</span>
-            <select
-              className="session-group-by-select"
-              value={groupBy}
-              onChange={(e) => {
-                setGroupBy(e.target.value);
-                updatePreferences({ groupBy: e.target.value });
-              }}
-            >
-              <option value="">No grouping</option>
-              {metaPresets.map((p) => (
-                <option key={p.key} value={p.key}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="session-group-by-wrap">
+          <span className="session-group-by-icon">&#x25A4;</span>
+          <select
+            className="session-group-by-select"
+            value={groupBy}
+            onChange={(e) => {
+              setGroupBy(e.target.value);
+              updatePreferences({ groupBy: e.target.value });
+            }}
+          >
+            <option value="">No grouping</option>
+            <option value="__status__">Status</option>
+            {metaPresets.map((p) => (
+              <option key={p.key} value={p.key}>{p.label}</option>
+            ))}
+          </select>
+        </div>
         <div className="session-list">
           {loading ? (
             <div className="loading">LOADING...</div>
@@ -1084,24 +1100,31 @@ export function Dashboard() {
               {Object.entries(groupedSessions.groups).map(([value, entries]) => (
                 <div
                   key={value}
-                  className={`session-group ${dragIdx !== null ? "session-group-drop-target" : ""}`}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-                  onDrop={(e) => {
+                  className={`session-group ${groupBy !== "__status__" && dragIdx !== null ? "session-group-drop-target" : ""}`}
+                  onDragOver={groupBy !== "__status__" ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
+                  onDrop={groupBy !== "__status__" ? (e) => {
                     e.preventDefault();
                     const sessionName = e.dataTransfer.getData("text/plain");
                     if (sessionName) {
                       updateSessionMeta(sessionName, { [groupBy]: value });
                       refresh();
                     }
-                  }}
+                  } : undefined}
                 >
                   <div
                     className="session-group-header"
                     onClick={() => toggleGroup(value)}
                   >
                     <span className="session-group-chevron">{collapsedGroups.has(value) ? "\u25B8" : "\u25BE"}</span>
-                    <span className="session-group-label">{value}</span>
+                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""}`}>{value}</span>
                     <span className="session-group-count">{entries.filter(e => !e.isChild).length}</span>
+                    {groupBy !== "__status__" && (
+                      <button
+                        className="session-group-add"
+                        onClick={(e) => { e.stopPropagation(); navigate(`/create?${groupBy}=${encodeURIComponent(value)}`); }}
+                        title={`New session in ${value}`}
+                      >+</button>
+                    )}
                   </div>
                   {!collapsedGroups.has(value) && entries.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
                     <SessionRow
