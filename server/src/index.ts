@@ -12,6 +12,7 @@ import dbRoutes from "./routes/db";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
 import { handleWsOpen, handleWsMessage, handleWsClose } from "./routes/ws";
 import { syncRepos, syncHooksToClaudeSettings } from "./services/config";
+import { migrateUnnamedSessions } from "./services/session-manager";
 
 const app = new Hono();
 
@@ -80,3 +81,6 @@ setInterval(syncRepos, 10_000);
 
 // Install Claude Code hooks for deterministic status detection
 syncHooksToClaudeSettings();
+
+// Name any existing unnamed Claude sessions so they can be resumed after reboot
+migrateUnnamedSessions().catch(console.error);

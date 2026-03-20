@@ -784,6 +784,86 @@ h1 {
   background: var(--text-dim);
 }
 
+.session-row-dot.status-stopped {
+  background: var(--border);
+  border: 1px solid var(--text-dim);
+}
+
+.session-row-stopped {
+  opacity: 0.6;
+}
+
+.session-row-stopped .session-row-name {
+  color: var(--text-dim);
+}
+
+.session-row-restore-btn {
+  margin-left: 4px;
+  padding: 1px 7px;
+  font-size: calc(var(--fs-base) - 3px);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0.85;
+  white-space: nowrap;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.session-row-restore-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(0, 255, 204, 0.08);
+}
+
+.session-row-restore-btn:disabled,
+.session-row-restore-btn.restoring {
+  opacity: 0.5;
+  cursor: default;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
+.session-group-label.status-stopped { color: var(--text-dim); }
+
+.stopped-session-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 40px;
+}
+
+.stopped-session-icon {
+  font-size: 48px;
+  opacity: 0.3;
+  line-height: 1;
+}
+
+.stopped-session-title {
+  font-size: calc(var(--fs-base) + 4px);
+  font-weight: 600;
+  color: var(--text);
+  opacity: 0.7;
+}
+
+.stopped-session-desc {
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  max-width: 340px;
+  opacity: 0.7;
+}
+
+.stopped-session-restore-btn {
+  margin-top: 8px;
+  padding: 8px 20px;
+  font-size: var(--fs-base);
+}
+
 .session-row-age {
   font-size: calc(var(--fs-base) - 2px);
   color: var(--text-dim);

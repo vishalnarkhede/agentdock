@@ -4,7 +4,7 @@ export interface RepoConfig {
   remote?: string;
 }
 
-export type SessionStatus = "waiting" | "working" | "background" | "shell" | "unknown";
+export type SessionStatus = "waiting" | "working" | "background" | "shell" | "unknown" | "stopped";
 
 export type AgentType = "claude" | "cursor";
 

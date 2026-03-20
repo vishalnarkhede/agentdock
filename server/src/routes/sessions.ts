@@ -14,21 +14,25 @@ import {
   getSessionProperties,
   saveSessionProperties,
   deleteSessionProperties,
+  getKnownSessionNames,
 } from "../services/config";
 import { detectStatus, extractStatusLine } from "../services/status";
 import {
   startSession,
   stopSession,
   stopAllSessions,
+  restoreSession,
 } from "../services/session-manager";
 import type { CreateSessionRequest, SessionInfo, AgentType } from "../types";
 
 const app = new Hono();
 
 app.get("/", async (c) => {
-  const sessions = await listSessions(PREFIX);
+  const liveSessions = await listSessions(PREFIX);
+  const liveNames = new Set(liveSessions.map((s) => s.name));
+
   const enriched: SessionInfo[] = await Promise.all(
-    sessions.map(async (s) => {
+    liveSessions.map(async (s) => {
       let status: SessionInfo["status"] = "unknown";
       let statusLine: SessionInfo["statusLine"] = undefined;
       const snap = await capturePaneSnapshot(s.name);
@@ -62,18 +66,49 @@ app.get("/", async (c) => {
       };
     }),
   );
+
+  // Orphaned sessions: metadata exists but no live tmux session (e.g. after reboot)
+  const knownNames = getKnownSessionNames();
+  const stoppedSessions: SessionInfo[] = knownNames
+    .filter((n) => !liveNames.has(n))
+    .map((name) => {
+      const agentType = getSessionAgentType(name) as AgentType | null;
+      const parentSession = getSessionParent(name) ?? undefined;
+      const children = getSessionChildren(name);
+      const sessionType = getSessionType(name) ?? undefined;
+      const meta = getSessionProperties(name);
+      const worktrees = getSessionMeta(name);
+      return {
+        name,
+        displayName: name.replace(`${PREFIX}-`, ""),
+        windows: 0,
+        attached: false,
+        created: 0,
+        path: worktrees[0]?.wtDir ?? "",
+        worktrees,
+        status: "stopped" as const,
+        agentType: agentType || undefined,
+        parentSession,
+        children: children.length > 0 ? children : undefined,
+        sessionType,
+        meta: Object.keys(meta).length > 0 ? meta : undefined,
+      };
+    });
+
+  const allSessions = [...enriched, ...stoppedSessions];
+
   // Sort by saved order (unordered sessions appended at end)
   const order = getSessionOrder();
   if (order.length > 0) {
     const orderMap = new Map(order.map((name, idx) => [name, idx]));
-    enriched.sort((a, b) => {
+    allSessions.sort((a, b) => {
       const ai = orderMap.get(a.name) ?? Number.MAX_SAFE_INTEGER;
       const bi = orderMap.get(b.name) ?? Number.MAX_SAFE_INTEGER;
       return ai - bi;
     });
   }
 
-  return c.json(enriched);
+  return c.json(allSessions);
 });
 
 app.put("/reorder", async (c) => {
@@ -340,6 +375,16 @@ app.patch("/:name/meta", async (c) => {
   }
   saveSessionProperties(name, merged);
   return c.json(merged);
+});
+
+app.post("/:name/restore", async (c) => {
+  const name = c.req.param("name");
+  try {
+    await restoreSession(name);
+    return c.json({ ok: true });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 app.delete("/:name", async (c) => {

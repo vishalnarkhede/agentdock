@@ -371,6 +371,37 @@ export function deleteSessionSubAgents(sessionName: string): void {
   if (existsSync(file)) unlinkSync(file);
 }
 
+// ─── Session claude-named flag ───
+
+export function isSessionClaudeNamed(sessionName: string): boolean {
+  return existsSync(join(SESSIONS_DIR, `${sessionName}.claude-named`));
+}
+
+export function markSessionClaudeNamed(sessionName: string): void {
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+  writeFileSync(join(SESSIONS_DIR, `${sessionName}.claude-named`), "1");
+}
+
+export function deleteSessionClaudeNamed(sessionName: string): void {
+  const file = join(SESSIONS_DIR, `${sessionName}.claude-named`);
+  if (existsSync(file)) unlinkSync(file);
+}
+
+// ─── Known session names (for detecting orphaned sessions after reboot) ───
+
+export function getKnownSessionNames(): string[] {
+  if (!existsSync(SESSIONS_DIR)) return [];
+  const names = new Set<string>();
+  const knownExtensions = /\.(agent|meta|skip-perms|type|parent|sub-agents|claude-named)$/;
+  for (const file of readdirSync(SESSIONS_DIR)) {
+    const base = file.replace(knownExtensions, "");
+    if (base.startsWith(PREFIX + "-")) {
+      names.add(base);
+    }
+  }
+  return [...names];
+}
+
 // ─── Database shards ───
 
 export function getDbShards(): DbShard[] {

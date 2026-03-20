@@ -12,8 +12,10 @@ import {
   getSessionAgentType,
   deleteSessionAgentType,
   saveSessionSkipPerms,
+  getSessionSkipPerms,
   deleteSessionSkipPerms,
   saveSessionParent,
+  getSessionParent,
   getSessionChildren,
   deleteSessionParent,
   getNextChildIndex,
@@ -25,6 +27,10 @@ import {
   saveSessionOrder,
   deleteHookStatus,
   deleteSessionProperties,
+  getSessionProperties,
+  isSessionClaudeNamed,
+  markSessionClaudeNamed,
+  deleteSessionClaudeNamed,
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
@@ -90,7 +96,7 @@ function writePromptFile(sessionName: string, prompt: string): string {
   return promptFile;
 }
 
-export function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string, addDirs?: string[]): string {
+export function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string, addDirs?: string[], claudeSessionName?: string): string {
   if (agentType === "cursor") {
     return dangerouslySkipPermissions ? "agent --yolo" : "agent";
   }
@@ -108,6 +114,9 @@ export function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?:
   }
   if (addDirs && addDirs.length > 0) {
     cmd += ` --add-dir ${addDirs.join(" --add-dir ")}`;
+  }
+  if (claudeSessionName) {
+    cmd += ` -n "${claudeSessionName}"`;
   }
   return cmd;
 }
@@ -203,12 +212,14 @@ async function launchAgent(
   const systemPromptFile = writeSystemPromptFile(sess, meta);
 
   // Wait for shell init to complete before sending commands
+  const displayName = sess.replace(`${PREFIX}-`, "");
   await sleep(2000);
-  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile, addDirs));
+  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile, addDirs, agentType === "claude" ? displayName : undefined));
 
   // Save session metadata
   saveSessionAgentType(sess, agentType);
   saveSessionSkipPerms(sess, !!dangerouslySkipPermissions);
+  if (agentType === "claude") markSessionClaudeNamed(sess);
 
   if (prompt) {
     const promptFile = writePromptFile(sess, prompt);
@@ -435,6 +446,7 @@ export async function stopSession(sessionName: string): Promise<void> {
   deleteSessionSubAgents(sessionName);
   deleteSessionType(sessionName);
   deleteSessionProperties(sessionName);
+  deleteSessionClaudeNamed(sessionName);
 
   // Remove from session order
   const order = getSessionOrder();
@@ -451,5 +463,81 @@ export async function stopAllSessions(): Promise<void> {
   const sessions = await tmux.listSessions(PREFIX);
   for (const session of sessions) {
     await stopSession(session.name);
+  }
+}
+
+export async function restoreSession(sessionName: string): Promise<void> {
+  if (await tmux.hasSession(sessionName)) {
+    throw new Error(`Session ${sessionName} is already running`);
+  }
+
+  const agentType = (getSessionAgentType(sessionName) as AgentType) || "claude";
+  if (agentType !== "claude") {
+    throw new Error(`Resume is only supported for Claude sessions (agent: ${agentType})`);
+  }
+
+  const metas = getSessionMeta(sessionName);
+  const cwd = metas.length > 0 ? metas[0].wtDir : `${HOME_DIR}/projects`;
+  const skipPerms = getSessionSkipPerms(sessionName);
+  const meta = getSessionProperties(sessionName);
+  const displayName = sessionName.replace(`${PREFIX}-`, "");
+  const parentSession = getSessionParent(sessionName) || sessionName;
+
+  const sessionEnv: Record<string, string> = {
+    AD_AGENT_PARENT: parentSession,
+    AGENTDOCK_SERVER: "http://localhost:4800",
+    DISABLE_UPDATE_PROMPT: "true",
+    NO_COLOR: "",
+    COLORTERM: "truecolor",
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1",
+  };
+  const authPassword = getAuthPassword();
+  if (authPassword) {
+    sessionEnv.AD_AUTH_TOKEN = createHash("sha256").update(`ad:${authPassword}`).digest("hex");
+  }
+
+  await tmux.createSession(sessionName, cwd, sessionEnv);
+  await tmux.setOption(sessionName, "extended-keys", "on");
+
+  const systemPromptFile = writeSystemPromptFile(sessionName, Object.keys(meta).length > 0 ? meta : undefined);
+
+  await sleep(2000);
+
+  // Build resume command: --resume <name> resumes Claude conversation history
+  let cmd: string;
+  if (skipPerms) {
+    cmd = "claude --dangerously-skip-permissions";
+  } else {
+    const tools = ALLOWED_TOOLS.map((t) => t.includes("(") ? `'${t}'` : t).join(" ");
+    cmd = `claude --allowedTools ${tools}`;
+  }
+  cmd += ` --append-system-prompt-file ${systemPromptFile}`;
+  cmd += ` --resume "${displayName}"`;
+
+  await tmux.sendKeys(sessionName, cmd);
+
+  // Accept trust prompt (if any) then mark as named
+  await sleep(2000);
+  await tmux.sendSpecialKey(sessionName, "Enter");
+  markSessionClaudeNamed(sessionName);
+
+  console.log(`[restore] ${sessionName}: resumed with --resume "${displayName}"`);
+}
+
+export async function migrateUnnamedSessions(): Promise<void> {
+  const liveSessions = await tmux.listSessions(PREFIX);
+  for (const s of liveSessions) {
+    const agentType = getSessionAgentType(s.name);
+    if (agentType !== "claude" && agentType !== null) continue;
+    if (isSessionClaudeNamed(s.name)) continue;
+    const displayName = s.name.replace(`${PREFIX}-`, "");
+    console.log(`[migrate] Naming session ${s.name} as "${displayName}"`);
+    try {
+      await tmux.sendKeysRaw(s.name, `/rename "${displayName}"`);
+      await tmux.sendSpecialKey(s.name, "Enter");
+      markSessionClaudeNamed(s.name);
+    } catch (err) {
+      console.warn(`[migrate] Failed to rename ${s.name}:`, err);
+    }
   }
 }

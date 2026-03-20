@@ -58,6 +58,15 @@ export async function deleteSession(name: string): Promise<void> {
   await fetch(`${BASE}/api/sessions/${name}`, { method: "DELETE" });
 }
 
+export async function restoreSession(name: string): Promise<void> {
+  if (isDemo()) return;
+  const res = await fetch(`${BASE}/api/sessions/${name}/restore`, { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to restore session");
+  }
+}
+
 export async function deleteAllSessions(): Promise<void> {
   if (isDemo()) return;
   await fetch(`${BASE}/api/sessions`, { method: "DELETE" });

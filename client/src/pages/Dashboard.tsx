@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta, restoreSession } from "../api";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
@@ -27,6 +27,7 @@ const ASCII_LOGO = `
 `;
 
 function getDisplayStatus(session: SessionInfo): string {
+  if (session.status === "stopped") return "stopped";
   return session.statusLine?.type
     ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
 }
@@ -52,6 +53,7 @@ function SessionRow({
   isDragOver,
   onEditProps,
   onPinToHeader,
+  onRestore,
 }: {
   session: SessionInfo;
   active: boolean;
@@ -73,8 +75,10 @@ function SessionRow({
   isDragOver?: boolean;
   onEditProps?: () => void;
   onPinToHeader?: () => void;
+  onRestore?: () => Promise<void>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu on outside click
@@ -126,11 +130,22 @@ function SessionRow({
     }
   };
 
+  const handleRestore = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    setRestoring(true);
+    try {
+      await onRestore?.();
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const displayStatus = getDisplayStatus(session);
 
   return (
     <div
-      className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
+      className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
       onClick={onSelect}
       draggable={draggable}
       onDragStart={onDragStart}
@@ -176,12 +191,24 @@ function SessionRow({
             )}
           </button>
         )}
-        {displayStatus && (
+        {displayStatus && displayStatus !== "stopped" && (
           <span className={`session-row-status status-${displayStatus}`}>
             {displayStatus}
           </span>
         )}
-        <span className="session-row-age">{timeAgo(session.created)}</span>
+        {session.status === "stopped" && onRestore && (
+          <button
+            className={`session-row-restore-btn ${restoring ? "restoring" : ""}`}
+            onClick={handleRestore}
+            disabled={restoring}
+            title="Restore session"
+          >
+            {restoring ? "restoring…" : "↺ restore"}
+          </button>
+        )}
+        {session.status !== "stopped" && (
+          <span className="session-row-age">{timeAgo(session.created)}</span>
+        )}
       </div>
       {session.statusLine && (
         <div className={`session-row-statusline status-${session.statusLine.type}`}>
@@ -227,8 +254,17 @@ function SessionRow({
               )}
               <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
               <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
-              <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
-              <button className="session-row-menu-item danger" onClick={handleKill}>Kill session</button>
+              {session.status !== "stopped" && (
+                <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
+              )}
+              {session.status === "stopped" && onRestore && (
+                <button className="session-row-menu-item" onClick={handleRestore} disabled={restoring}>
+                  {restoring ? "Restoring…" : "↺ Restore session"}
+                </button>
+              )}
+              <button className="session-row-menu-item danger" onClick={handleKill}>
+                {session.status === "stopped" ? "Delete" : "Kill session"}
+              </button>
             </div>
           )}
         </div>
@@ -894,7 +930,7 @@ export function Dashboard() {
     }
     // For status grouping, order groups sensibly
     if (isStatusGroup) {
-      const order = ["working", "background", "input", "error", "waiting", "done", "unknown"];
+      const order = ["working", "background", "input", "error", "waiting", "done", "unknown", "stopped"];
       const sorted: Record<string, typeof filteredSessions> = {};
       for (const key of order) {
         if (groups[key]) sorted[key] = groups[key];
@@ -1029,6 +1065,11 @@ export function Dashboard() {
     // session killed externally
   };
 
+  const handleRestoreSession = useCallback(async (name: string) => {
+    await restoreSession(name);
+    refresh();
+  }, [refresh]);
+
   // Auto-select first session if none selected, or fix stale selection
   useEffect(() => {
     if (loading) return; // don't touch URL param while sessions are loading
@@ -1036,8 +1077,10 @@ export function Dashboard() {
       if (activeSession) setActiveSession(null);
       return;
     }
+    const liveSessions = sessions.filter((s) => s.status !== "stopped");
+    const candidates = liveSessions.length > 0 ? liveSessions : sessions;
     if (!activeSession || !sessions.find((s) => s.name === activeSession)) {
-      setActiveSession(sessions[0].name);
+      setActiveSession(candidates[0].name);
     }
   }, [sessions, loading, activeSession, setActiveSession]);
 
@@ -1198,6 +1241,7 @@ export function Dashboard() {
                       isDragging={!isChild && dragIdx === parentIdx}
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                       onPinToHeader={() => handlePinToHeader(session)}
+                      onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                     />
                   ))}
                 </div>
@@ -1246,6 +1290,7 @@ export function Dashboard() {
                       isDragging={!isChild && dragIdx === parentIdx}
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                       onPinToHeader={() => handlePinToHeader(session)}
+                      onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                     />
                   ))}
                 </div>
@@ -1278,6 +1323,7 @@ export function Dashboard() {
                 isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
                 onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                 onPinToHeader={() => handlePinToHeader(session)}
+                onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
               />
             ))
           )}
@@ -1321,7 +1367,19 @@ export function Dashboard() {
             </div>
             <div className="main-content main-content-split" ref={splitContainerRef}>
               <div className="split-terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
-                {(!isMobile || mobileShowTerminal) && (
+                {activeSessionInfo?.status === "stopped" ? (
+                  <div className="stopped-session-placeholder">
+                    <div className="stopped-session-icon">◎</div>
+                    <div className="stopped-session-title">{activeSessionInfo.displayName}</div>
+                    <div className="stopped-session-desc">This session stopped (e.g. after a reboot).<br />Restore it to resume with full conversation history.</div>
+                    <button
+                      className="btn btn-primary stopped-session-restore-btn"
+                      onClick={() => handleRestoreSession(activeSession)}
+                    >
+                      ↺ Restore Session
+                    </button>
+                  </div>
+                ) : (!isMobile || mobileShowTerminal) && (
                   <TerminalView
                     key={activeSession}
                     sessionName={activeSession}
