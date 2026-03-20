@@ -1,5 +1,5 @@
 import { basename, join, dirname } from "path";
-import { existsSync, mkdirSync, copyFileSync, readdirSync, rmdirSync } from "fs";
+import { existsSync, mkdirSync, copyFileSync, readdirSync, rmdirSync, symlinkSync } from "fs";
 import { getBasePath } from "./config";
 
 async function git(
@@ -134,8 +134,24 @@ export async function createWorktree(
   }
 
   await copyEnvFiles(repoPath, wtDir);
+  linkClaudeDir(repoPath, wtDir);
 
   return wtDir;
+}
+
+/**
+ * Symlink the main repo's .claude/ dir into the worktree so Claude Code
+ * picks up the same skills, hooks, and CLAUDE.md without duplication.
+ */
+function linkClaudeDir(repoPath: string, wtDir: string): void {
+  const src = join(repoPath, ".claude");
+  const dest = join(wtDir, ".claude");
+  if (!existsSync(src) || existsSync(dest)) return;
+  try {
+    symlinkSync(src, dest);
+  } catch {
+    // best effort — don't fail worktree creation
+  }
 }
 
 export async function removeWorktree(
