@@ -4826,13 +4826,12 @@ h1 {
     color: var(--text-dim);
   }
 
-  /* Session rows: larger touch targets, no overflow */
+  /* Session rows: larger touch targets */
   .session-row {
     padding: 14px;
     min-height: 48px;
     display: flex;
     align-items: center;
-    overflow: hidden;
   }
 
   .session-row-name {
