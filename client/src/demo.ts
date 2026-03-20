@@ -34,6 +34,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     status: "working",
     statusLine: undefined,
     agentType: "claude",
+    meta: { project: "acme-api" },
   },
   {
     name: "acme-api-rate-limiter",
@@ -46,6 +47,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     status: "waiting",
     statusLine: { type: "done", message: "implemented token bucket rate limiter with Redis backend" },
     agentType: "claude",
+    meta: { project: "acme-api" },
   },
   {
     name: "mobile-app-ui-refresh",
@@ -57,6 +59,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     worktrees: [],
     status: "working",
     agentType: "cursor",
+    meta: { project: "mobile" },
   },
   {
     name: "infra-k8s-migration",
@@ -69,6 +72,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     status: "working",
     agentType: "claude",
     children: ["infra-k8s-migration/db-schema", "infra-k8s-migration/api-routes"],
+    meta: { project: "infra" },
   },
   {
     name: "infra-k8s-migration/db-schema",
@@ -81,6 +85,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     status: "working",
     agentType: "claude",
     parentSession: "infra-k8s-migration",
+    meta: { project: "infra" },
   },
   {
     name: "infra-k8s-migration/api-routes",
@@ -94,6 +99,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     statusLine: { type: "input", message: "should I use gRPC or REST for the internal service mesh?" },
     agentType: "claude",
     parentSession: "infra-k8s-migration",
+    meta: { project: "infra" },
   },
   {
     name: "dashboard-redesign",
@@ -106,6 +112,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     status: "stopped",
     statusLine: { type: "done", message: "redesigned dashboard with new component library" },
     agentType: "claude",
+    meta: { project: "mobile" },
   },
 ];
 
