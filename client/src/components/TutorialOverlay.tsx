@@ -239,7 +239,7 @@ export function TutorialOverlay({ onClose }: { onClose: () => void }) {
         <rect
           width={W}
           height={H}
-          fill="rgba(0,0,0,0.72)"
+          fill="rgba(0,0,0,0.45)"
           mask="url(#tutorial-spotlight-mask)"
         />
         {/* Glowing border around spotlight */}
