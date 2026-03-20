@@ -35,6 +35,9 @@ function TooltipBox({
   const isCenter = step.position === "center" || !rect;
   const margin = 16;
   const tooltipWidth = 320;
+  const tooltipHeight = 240; // conservative estimate for clamping
+  const W = window.innerWidth;
+  const H = window.innerHeight;
 
   let style: React.CSSProperties = {};
 
@@ -53,43 +56,41 @@ function TooltipBox({
     const spotCenterX = rect.left + rect.width / 2;
     const spotCenterY = rect.top + rect.height / 2;
 
-    const pos: TutorialPosition = step.position;
+    // Clamp helpers
+    const clampX = (x: number) => Math.min(Math.max(x, margin), W - tooltipWidth - margin);
+    const clampY = (y: number) => Math.min(Math.max(y, margin), H - tooltipHeight - margin);
+
+    let pos: TutorialPosition = step.position;
+
+    // Auto-flip if preferred side doesn't have enough room
+    if (pos === "right" && spotRight + tooltipWidth + margin > W) pos = "left";
+    if (pos === "left" && spotLeft - tooltipWidth - margin < 0) pos = "right";
+    if (pos === "bottom" && spotBottom + tooltipHeight + margin > H) pos = "top";
+    if (pos === "top" && spotTop - tooltipHeight - margin < 0) pos = "bottom";
 
     if (pos === "bottom") {
       style = {
         position: "fixed",
-        top: spotBottom + margin,
-        left: Math.min(
-          Math.max(spotCenterX - tooltipWidth / 2, margin),
-          window.innerWidth - tooltipWidth - margin
-        ),
+        top: clampY(spotBottom + margin),
+        left: clampX(spotCenterX - tooltipWidth / 2),
       };
     } else if (pos === "top") {
       style = {
         position: "fixed",
-        bottom: window.innerHeight - spotTop + margin,
-        left: Math.min(
-          Math.max(spotCenterX - tooltipWidth / 2, margin),
-          window.innerWidth - tooltipWidth - margin
-        ),
+        top: clampY(spotTop - tooltipHeight - margin),
+        left: clampX(spotCenterX - tooltipWidth / 2),
       };
     } else if (pos === "right") {
       style = {
         position: "fixed",
-        top: Math.min(
-          Math.max(spotCenterY - 80, margin),
-          window.innerHeight - 200
-        ),
-        left: spotRight + margin,
+        top: clampY(spotCenterY - tooltipHeight / 2),
+        left: clampX(spotRight + margin),
       };
     } else if (pos === "left") {
       style = {
         position: "fixed",
-        top: Math.min(
-          Math.max(spotCenterY - 80, margin),
-          window.innerHeight - 200
-        ),
-        right: window.innerWidth - spotLeft + margin,
+        top: clampY(spotCenterY - tooltipHeight / 2),
+        left: clampX(spotLeft - tooltipWidth - margin),
       };
     }
   }
