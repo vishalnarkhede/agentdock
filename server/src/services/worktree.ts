@@ -134,23 +134,34 @@ export async function createWorktree(
   }
 
   await copyEnvFiles(repoPath, wtDir);
-  linkClaudeDir(repoPath, wtDir);
+  linkHiddenEntries(repoPath, wtDir);
 
   return wtDir;
 }
 
 /**
- * Symlink the main repo's .claude/ dir into the worktree so Claude Code
- * picks up the same skills, hooks, and CLAUDE.md without duplication.
+ * Symlink all hidden files/dirs (dot-prefixed) from the main repo into the
+ * worktree, skipping .git (managed by git itself) and anything that already
+ * exists in the worktree.
  */
-function linkClaudeDir(repoPath: string, wtDir: string): void {
-  const src = join(repoPath, ".claude");
-  const dest = join(wtDir, ".claude");
-  if (!existsSync(src) || existsSync(dest)) return;
+function linkHiddenEntries(repoPath: string, wtDir: string): void {
+  let entries: string[];
   try {
-    symlinkSync(src, dest);
+    entries = readdirSync(repoPath).filter(
+      (f) => f.startsWith(".") && f !== ".git"
+    );
   } catch {
-    // best effort — don't fail worktree creation
+    return;
+  }
+  for (const entry of entries) {
+    const src = join(repoPath, entry);
+    const dest = join(wtDir, entry);
+    if (existsSync(dest)) continue;
+    try {
+      symlinkSync(src, dest);
+    } catch {
+      // best effort — skip entries that can't be linked
+    }
   }
 }
 
