@@ -878,7 +878,6 @@ h1 {
   gap: 8px;
   padding-left: 16px;
   min-width: 0;
-  overflow: hidden;
 }
 
 .session-row-path {
