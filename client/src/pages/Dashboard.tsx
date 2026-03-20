@@ -5,6 +5,8 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
 import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta, restoreSession } from "../api";
+import { isDemo } from "../demo";
+import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
@@ -25,6 +27,18 @@ const ASCII_LOGO = `
  ├─┤│ ┬├┤ │││ │  │││ │ │  ├┴┐
  ┴ ┴└─┘└─┘┘└┘ ┴ ─┴┘└─┘└─┘┴ ┴
 `;
+
+function getDemoTutorialAttr(session: SessionInfo): string | undefined {
+  if (!isDemo()) return undefined;
+  if (session.name === "acme-api-auth-fix") return "session-auth-fix";
+  if (session.status === "working" && session.name === "acme-api-auth-fix") return "session-working";
+  if (session.name === "acme-api-rate-limiter") return "session-done";
+  if (session.name === "infra-k8s-migration/api-routes") return "session-input";
+  if (session.name === "infra-k8s-migration") return "session-subagents";
+  if (session.status === "stopped") return "session-stopped";
+  if (session.status === "working") return "session-working";
+  return undefined;
+}
 
 function getDisplayStatus(session: SessionInfo): string {
   if (session.status === "stopped") return "stopped";
@@ -54,6 +68,7 @@ function SessionRow({
   onEditProps,
   onPinToHeader,
   onRestore,
+  dataTutorial,
 }: {
   session: SessionInfo;
   active: boolean;
@@ -76,6 +91,7 @@ function SessionRow({
   onEditProps?: () => void;
   onPinToHeader?: () => void;
   onRestore?: () => Promise<void>;
+  dataTutorial?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -146,6 +162,7 @@ function SessionRow({
   return (
     <div
       className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
+      data-tutorial={dataTutorial}
       onClick={onSelect}
       draggable={draggable}
       onDragStart={onDragStart}
@@ -771,6 +788,11 @@ export function Dashboard() {
     setSearchParams(name ? { session: name } : {}, { replace: true });
   }, [setSearchParams]);
 
+  // Tour mode: active when ?tour=1 is in the URL (demo mode only)
+  const [tourActive, setTourActive] = useState(() =>
+    isDemo() && new URLSearchParams(window.location.search).has("tour")
+  );
+
   // Track which parent session groups are expanded/collapsed
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const toggleParentCollapse = useCallback((parentName: string) => {
@@ -1112,7 +1134,7 @@ export function Dashboard() {
                 kill --all
               </button>
             )}
-            <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")}>
+            <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")} data-tutorial="new-session-btn">
               + new
             </button>
             <button
@@ -1147,6 +1169,7 @@ export function Dashboard() {
           <span className="session-group-by-icon">&#x25A4;</span>
           <select
             className="session-group-by-select"
+            data-tutorial="group-by-select"
             value={groupBy}
             onChange={(e) => {
               setGroupBy(e.target.value);
@@ -1176,7 +1199,7 @@ export function Dashboard() {
             </button>
           )}
         </div>
-        <div className="session-list">
+        <div className="session-list" data-tutorial="session-list">
           {loading ? (
             <div className="loading">LOADING...</div>
           ) : sessions.length === 0 ? (
@@ -1242,6 +1265,7 @@ export function Dashboard() {
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
+                      dataTutorial={getDemoTutorialAttr(session)}
                     />
                   ))}
                 </div>
@@ -1291,6 +1315,7 @@ export function Dashboard() {
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
+                      dataTutorial={getDemoTutorialAttr(session)}
                     />
                   ))}
                 </div>
@@ -1324,6 +1349,7 @@ export function Dashboard() {
                 onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                 onPinToHeader={() => handlePinToHeader(session)}
                 onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
+                dataTutorial={getDemoTutorialAttr(session)}
               />
             ))
           )}
@@ -1366,7 +1392,7 @@ export function Dashboard() {
               <div className="main-tabs-toolbar" ref={toolbarRef} />
             </div>
             <div className="main-content main-content-split" ref={splitContainerRef}>
-              <div className="split-terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
+              <div className="split-terminal-pane" data-tutorial="terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
                 {activeSessionInfo?.status === "stopped" ? (
                   <div className="stopped-session-placeholder">
                     <div className="stopped-session-icon">◎</div>
@@ -1399,6 +1425,7 @@ export function Dashboard() {
                   <div className="plan-tab-wrap" ref={planMenuRef}>
                     <button
                       className={`main-tab ${bottomTab === "plan" ? "main-tab-active" : ""}`}
+                      data-tutorial="tab-plan"
                       onClick={() => setBottomTab(bottomTab === "plan" ? null : "plan")}
                     >
                       plan
@@ -1437,6 +1464,7 @@ export function Dashboard() {
                   </div>
                   <button
                     className={`main-tab ${bottomTab === "changes" ? "main-tab-active" : ""}`}
+                    data-tutorial="tab-changes"
                     onClick={() => setBottomTab(bottomTab === "changes" ? null : "changes")}
                   >
                     changes
@@ -1462,7 +1490,7 @@ export function Dashboard() {
                 </div>
               </div>
               {bottomTab && (
-                <div className="split-bottom-pane" style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
+                <div className="split-bottom-pane" data-tutorial={bottomTab === "plan" ? "plan-content" : bottomTab === "changes" ? "changes-content" : undefined} style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
                   {bottomTab === "changes" ? (
                     <ChangesView
                       key={activeSession}
@@ -1582,6 +1610,7 @@ export function Dashboard() {
           }}
         />
       )}
+      {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
     </div>
   );
 }

@@ -95,6 +95,18 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     agentType: "claude",
     parentSession: "infra-k8s-migration",
   },
+  {
+    name: "dashboard-redesign",
+    displayName: "dashboard-redesign",
+    windows: 0,
+    attached: false,
+    created: now - 86400,
+    path: "~/projects/mobile-app",
+    worktrees: [],
+    status: "stopped",
+    statusLine: { type: "done", message: "redesigned dashboard with new component library" },
+    agentType: "claude",
+  },
 ];
 
 // ─── Mock Plans ───

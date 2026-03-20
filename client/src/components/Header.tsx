@@ -5,6 +5,7 @@ import { createSession, fetchPreferences, updatePreferences } from "../api";
 import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
 import type { Tab } from "../MobileNavContext";
+import { isDemo } from "../demo";
 
 export interface QuickLaunch {
   id: string;
@@ -170,8 +171,18 @@ export function Header() {
             >&times;</button>
           </div>
         ))}
+        {!isDemo() && (
+          <button
+            className="header-tour-btn"
+            onClick={() => window.open("/?demo&tour=1", "_blank")}
+            title="Interactive product tour"
+          >
+            ▶ tour
+          </button>
+        )}
         <button
           className="settings-gear-btn"
+          data-tutorial="settings-btn"
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
         >
