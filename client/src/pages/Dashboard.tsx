@@ -545,6 +545,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
         <>
           <div
             className="plan-content"
+            data-tutorial="plan-comment-area"
             ref={contentRef}
             style={{ position: "relative" }}
             onMouseUp={handleContentMouseUp}

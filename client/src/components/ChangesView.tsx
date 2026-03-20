@@ -85,6 +85,7 @@ function DiffBlock({
   onLineClick,
   onAddComment,
   sessionName,
+  tutorialTarget,
 }: {
   file: DiffFile;
   fileIdx: number;
@@ -98,6 +99,7 @@ function DiffBlock({
   onLineClick: (fileIdx: number, lineIdx: number, shiftKey: boolean) => void;
   onAddComment: (filePath: string, selectedCode: string, comment: string) => void;
   sessionName?: string;
+  tutorialTarget?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [comment, setComment] = useState("");
@@ -236,7 +238,7 @@ function DiffBlock({
         </span>
       </button>
       {open && (
-        <pre ref={preRef} className="diff-file-content">{renderedLines}</pre>
+        <pre ref={preRef} className="diff-file-content" data-tutorial={tutorialTarget}>{renderedLines}</pre>
       )}
     </div>
   );
@@ -674,6 +676,7 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
                   file={file}
                   fileIdx={i}
                   defaultOpen={diffFiles.length <= 5}
+                  tutorialTarget={i === 0 ? "diff-file-content" : undefined}
                   {...diffBlockProps}
                 />
               ))}
