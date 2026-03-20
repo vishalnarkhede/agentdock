@@ -588,6 +588,7 @@ h1 {
 .session-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ─── Session row ─── */
@@ -629,6 +630,7 @@ h1 {
   align-items: center;
   gap: 10px;
   margin-bottom: 4px;
+  min-width: 0;
 }
 
 .session-row-dot {
@@ -875,6 +877,8 @@ h1 {
   align-items: center;
   gap: 8px;
   padding-left: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .session-row-path {
@@ -4822,16 +4826,23 @@ h1 {
     color: var(--text-dim);
   }
 
-  /* Session rows: larger touch targets */
+  /* Session rows: larger touch targets, no overflow */
   .session-row {
     padding: 14px;
     min-height: 48px;
     display: flex;
     align-items: center;
+    overflow: hidden;
   }
 
   .session-row-name {
     font-size: 15px;
+  }
+
+  /* Hide meta tags and type badges on mobile — keep rows compact */
+  .session-row-meta-tags,
+  .session-row-type-badge {
+    display: none;
   }
 
   .session-row-menu-btn {
