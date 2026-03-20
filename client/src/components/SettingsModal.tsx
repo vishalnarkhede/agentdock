@@ -81,6 +81,16 @@ export function SettingsModal({ open, onClose }: Props) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [open, onClose]);
 
+  // Tutorial: listen for tab-switch events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent).detail as Category;
+      if (CATEGORIES.find((c) => c.id === tab)) setCategory(tab);
+    };
+    window.addEventListener("agentdock-settings-tab", handler);
+    return () => window.removeEventListener("agentdock-settings-tab", handler);
+  }, []);
+
   if (!open) return null;
 
   const handleTestNotification = async () => {
@@ -106,10 +116,10 @@ export function SettingsModal({ open, onClose }: Props) {
 
   return createPortal(
     <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="settings-modal" data-tutorial="settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">Settings</span>
-          <button className="settings-close-btn" onClick={onClose}>
+          <button className="settings-close-btn" data-tutorial="settings-close" onClick={onClose}>
             &times;
           </button>
         </div>
@@ -118,6 +128,7 @@ export function SettingsModal({ open, onClose }: Props) {
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
+                data-tutorial={`settings-tab-${cat.id}`}
                 className={`settings-sidebar-btn ${category === cat.id ? "settings-sidebar-btn-active" : ""}`}
                 onClick={() => setCategory(cat.id)}
               >
@@ -125,7 +136,7 @@ export function SettingsModal({ open, onClose }: Props) {
               </button>
             ))}
           </div>
-          <div className="settings-panel">
+          <div className="settings-panel" data-tutorial="settings-panel">
             {category === "appearance" && (
               <>
                 <div className="settings-row">

@@ -144,12 +144,13 @@ export function TutorialOverlay({ onClose }: { onClose: () => void }) {
     setRect(r);
   }, [step.target]);
 
-  // Navigate to required route when step changes
+  // Navigate to required route and call onEnter when step changes
   useEffect(() => {
     if (step.route) {
       navigate(step.route);
     }
-  }, [step.route, navigate]);
+    step.onEnter?.();
+  }, [step, navigate]);
 
   // Poll target rect via rAF for smooth tracking
   useEffect(() => {

@@ -9,6 +9,7 @@ export interface TutorialStep {
   action?: "click-target";   // if set, step auto-advances when user clicks the target
   route?: string;            // navigate here before showing this step
   padding?: number;          // spotlight padding around target (default 8)
+  onEnter?: () => void;      // called when this step becomes active
 }
 
 export const TUTORIAL_STEPS: TutorialStep[] = [
@@ -96,6 +97,14 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     padding: 0,
   },
   {
+    id: "comment-batch-bar",
+    title: "Leave a comment, send it to Claude",
+    body: "Click ＋ on any diff line to add a comment. Comments batch up here — then hit \"Send to Claude\" to inject them directly into the agent's context as instructions.",
+    target: "@comment-batch-bar",
+    position: "top",
+    padding: 4,
+  },
+  {
     id: "sub-agents",
     title: "Agents can spawn sub-agents",
     body: "For complex tasks, an agent can divide the work and spin up parallel sub-agents. This k8s migration agent spawned 2 — one for the DB schema, one for API routing.",
@@ -125,11 +134,68 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     position: "right",
   },
   {
-    id: "settings",
+    id: "open-settings",
     title: "Configure everything",
-    body: "Add repos, connect Linear for ticket-based sessions, set up MCP servers, adjust the theme, and check tool health — all in Settings.",
+    body: "Click the ⚙ gear to open Settings — repos, MCP servers, appearance, and more.",
     target: "@settings-btn",
     position: "bottom",
+    action: "click-target",
+  },
+  {
+    id: "settings-modal",
+    title: "Settings sidebar",
+    body: "Each section of settings is one click away. Let's walk through the most important panels.",
+    position: "center",
+  },
+  {
+    id: "settings-repos",
+    title: "Add your repositories",
+    body: "Click Repositories to register the repos you want agents to work in. Give each one an alias — you'll use the alias to launch sessions.",
+    target: "@settings-tab-repos",
+    position: "right",
+    action: "click-target",
+  },
+  {
+    id: "settings-repos-panel",
+    title: "Your repo list",
+    body: "Each entry maps an alias (like \"chat\" or \"api\") to an absolute path on disk. Agents use the path to open the right worktree.",
+    position: "center",
+    onEnter: () => {
+      window.dispatchEvent(new CustomEvent("agentdock-settings-tab", { detail: "repos" }));
+    },
+  },
+  {
+    id: "settings-mcp",
+    title: "MCP Servers",
+    body: "Click MCP Servers to connect tools like Linear, Notion, Slack, or any custom MCP — giving your agents access to external context.",
+    target: "@settings-tab-mcp",
+    position: "right",
+    action: "click-target",
+  },
+  {
+    id: "settings-health",
+    title: "Tool health check",
+    body: "Click Health to verify tmux, Claude CLI, git, and other required tools are installed and working correctly.",
+    target: "@settings-tab-health",
+    position: "right",
+    action: "click-target",
+  },
+  {
+    id: "settings-health-panel",
+    title: "Health status",
+    body: "Green = installed and ready. If anything is red, the install instructions are one click away.",
+    position: "center",
+    onEnter: () => {
+      window.dispatchEvent(new CustomEvent("agentdock-settings-tab", { detail: "health" }));
+    },
+  },
+  {
+    id: "settings-close",
+    title: "Close settings",
+    body: "Click × to close — your changes are saved automatically.",
+    target: "@settings-close",
+    position: "bottom",
+    action: "click-target",
   },
   {
     id: "done",

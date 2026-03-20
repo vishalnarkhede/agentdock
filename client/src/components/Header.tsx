@@ -102,6 +102,13 @@ export function Header() {
     }
   };
 
+  // Tutorial: open settings modal on request
+  useEffect(() => {
+    const handler = () => setSettingsOpen(true);
+    window.addEventListener("agentdock-tutorial-open-settings", handler);
+    return () => window.removeEventListener("agentdock-tutorial-open-settings", handler);
+  }, []);
+
   // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;

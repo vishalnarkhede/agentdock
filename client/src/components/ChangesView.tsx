@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { fetchGitChanges, fetchPRDiff, createPR, pushChanges, sendSessionInput } from "../api";
+import { isDemo } from "../demo";
 
 interface Props {
   sessionPaths: string[];
@@ -259,7 +260,7 @@ function CommentBatchBar({
   if (comments.length === 0) return null;
 
   return (
-    <div className="comment-batch-bar">
+    <div className="comment-batch-bar" data-tutorial="comment-batch-bar">
       <div className="comment-batch-summary" onClick={() => setExpanded(!expanded)}>
         <span className="comment-batch-count">
           {comments.length} comment{comments.length !== 1 ? "s" : ""}
@@ -271,6 +272,7 @@ function CommentBatchBar({
           </button>
           <button
             className="btn btn-primary btn-sm"
+            data-tutorial="send-to-claude-btn"
             onClick={(e) => { e.stopPropagation(); onSendAll(); }}
             disabled={sending}
           >
@@ -328,8 +330,15 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
   const [prDiffLoading, setPrDiffLoading] = useState(false);
   const [prDiffError, setPrDiffError] = useState("");
 
-  // Batch comment state
-  const [pendingComments, setPendingComments] = useState<PendingComment[]>([]);
+  // Batch comment state — pre-seed one comment in demo mode so the batch bar is visible
+  const [pendingComments, setPendingComments] = useState<PendingComment[]>(() =>
+    isDemo() ? [{
+      id: "demo-comment-1",
+      filePath: "auth/token_manager.go",
+      selectedCode: "+\tresult, err, _ := tm.sfGroup.Do(\"refresh\", func() (interface{}, error) {",
+      comment: "add a timeout context here so a slow identity provider can't stall all requests",
+    }] : []
+  );
   const [batchSending, setBatchSending] = useState(false);
 
   // Drag state (refs to avoid re-renders)
