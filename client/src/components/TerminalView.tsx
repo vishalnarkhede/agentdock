@@ -106,13 +106,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [kbVisible, setKbVisible] = useState(false);
 
-  // Refit terminal when keyboard shows/hides so it fills available space
+  // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
   useEffect(() => {
-    const id = setTimeout(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(() => {
       fitAddonRef.current?.fit();
-    }, 50);
-    return () => clearTimeout(id);
-  }, [kbVisible]);
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   // Listen for toggle events dispatched from the hamburger menu
   useEffect(() => {
