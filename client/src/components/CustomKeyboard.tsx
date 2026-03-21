@@ -44,7 +44,7 @@ export function CustomKeyboard({ onInput, onDismiss }: Props) {
     <div className="ckb">
       {/* Special row */}
       <div className="ckb-row ckb-row-special">
-        <button className="ckb-key ckb-key-special ckb-key-dismiss" onPointerDown={(e) => { e.preventDefault(); onDismiss(); }}>⌄</button>
+        <button className="ckb-key ckb-key-special ckb-key-dismiss" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss(); }}>⌄</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tap("@"); }}>@</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tap("/"); }}>/</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tap("`"); }}>` </button>

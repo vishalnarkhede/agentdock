@@ -120,17 +120,29 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   }, []);
 
   // When custom keyboard is active, prevent xterm's hidden textarea from
-  // triggering the native keyboard on mobile
+  // triggering the native keyboard on mobile. inputmode="none" is the
+  // reliable way to suppress the virtual keyboard on iOS/Android.
   useEffect(() => {
-    if (!containerRef.current) return;
-    const textarea = containerRef.current.querySelector("textarea");
-    if (!textarea) return;
-    if (customKb) {
-      textarea.setAttribute("readonly", "true");
-      textarea.blur();
-    } else {
-      textarea.removeAttribute("readonly");
+    const suppress = () => {
+      if (!containerRef.current) return;
+      const textarea = containerRef.current.querySelector("textarea");
+      if (!textarea) return;
+      if (customKb) {
+        textarea.setAttribute("inputmode", "none");
+        textarea.setAttribute("readonly", "true");
+        textarea.blur();
+      } else {
+        textarea.removeAttribute("inputmode");
+        textarea.removeAttribute("readonly");
+      }
+    };
+    suppress();
+    // xterm may recreate the textarea — observe for it
+    const observer = new MutationObserver(suppress);
+    if (containerRef.current) {
+      observer.observe(containerRef.current, { childList: true, subtree: true });
     }
+    return () => observer.disconnect();
   }, [customKb]);
 
   useEffect(() => {
@@ -509,7 +521,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       <div
         ref={containerRef}
         className="terminal-wrapper"
-        onClick={() => { if (!focused) termRef.current?.focus(); if (customKb) setKbVisible(true); }}
+        onClick={() => { if (customKb) { setKbVisible(true); } else if (!focused) { termRef.current?.focus(); } }}
         onWheel={(e) => {
           if (e.deltaY < 0 && !scrollPausedRef.current) {
             scrollPausedRef.current = true;
