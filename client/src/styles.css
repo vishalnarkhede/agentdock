@@ -1074,6 +1074,11 @@ h1 {
   justify-content: flex-end;
 }
 
+/* Toolbar row: transparent wrapper on desktop, becomes a flex row on mobile */
+.session-toolbar-row {
+  display: contents;
+}
+
 /* ─── Session group-by ─── */
 .session-group-by-wrap {
   display: flex;
@@ -4878,18 +4883,67 @@ h1 {
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Sidebar header */
+  /* Sidebar header — compact on mobile */
   .sidebar-header {
-    padding: 10px 12px;
+    padding: 7px 10px;
   }
 
-  /* Sidebar action buttons (kill --all, +new) */
+  .sidebar-title {
+    font-size: 11px;
+  }
+
+  /* Sidebar action buttons */
   .sidebar-actions .btn-sm {
-    font-size: 12px;
-    padding: 6px 10px;
-    min-height: 36px;
+    font-size: 11px;
+    padding: 4px 8px;
+    min-height: 28px;
     display: inline-flex;
     align-items: center;
+  }
+
+  /* Search + group-by collapse into a single toolbar row */
+  .session-toolbar-row {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .session-search-wrap {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border-bottom: none;
+  }
+
+  .session-search {
+    padding: 6px 10px;
+    font-size: 12px;
+    border: none;
+    border-radius: 0;
+    height: 100%;
+  }
+
+  .session-group-by-wrap {
+    padding: 4px 8px;
+    gap: 4px;
+    border-left: 1px solid var(--border);
+    border-bottom: none;
+  }
+
+  .session-group-by-icon {
+    display: none;
+  }
+
+  .session-group-by-select {
+    font-size: 11px;
+    padding: 3px 20px 3px 6px;
+    max-width: 100px;
+  }
+
+  .session-group-collapse-all {
+    font-size: 10px;
+    padding: 2px 4px;
   }
 
   /* Tabs: hidden on mobile, moved to hamburger menu */

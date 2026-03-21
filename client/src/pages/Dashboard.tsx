@@ -1148,6 +1148,7 @@ export function Dashboard() {
           </div>
         </div>
 
+        <div className="session-toolbar-row">
         {sessions.length > 0 && (
           <div className="session-search-wrap">
             <input
@@ -1199,6 +1200,7 @@ export function Dashboard() {
               {collapsedGroups.size > 0 ? "\u25B8\u25B8" : "\u25BE\u25BE"}
             </button>
           )}
+        </div>
         </div>
         <div className="session-list" data-tutorial="session-list">
           {loading ? (
