@@ -4009,8 +4009,8 @@ h1 {
   .ckb {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 6px 4px;
+    gap: 6px;
+    padding: 8px 4px 12px;
     background: var(--bg-card);
     border-top: 1px solid var(--border);
     user-select: none;
@@ -4021,23 +4021,23 @@ h1 {
   .ckb-row {
     display: flex;
     justify-content: center;
-    gap: 4px;
+    gap: 6px;
   }
 
   .ckb-row-special {
-    gap: 3px;
+    gap: 4px;
   }
 
   .ckb-key {
     flex: 1;
     min-width: 0;
-    height: 40px;
+    height: 44px;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text);
     font-family: var(--font-mono);
-    font-size: 14px;
+    font-size: 17px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4054,15 +4054,15 @@ h1 {
   }
 
   .ckb-key-special {
-    font-size: 12px;
-    height: 34px;
+    font-size: 13px;
+    height: 38px;
     background: rgba(255,255,255,0.04);
     color: var(--accent);
   }
 
   .ckb-key-mod {
-    flex: 1.4;
-    font-size: 11px;
+    flex: 1.5;
+    font-size: 13px;
     background: var(--bg-card);
   }
 
@@ -4074,12 +4074,12 @@ h1 {
 
   .ckb-key-wide {
     flex: 1.6;
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .ckb-key-space {
     flex: 4;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
 
@@ -4087,7 +4087,7 @@ h1 {
     background: var(--accent);
     color: #000;
     border-color: var(--accent);
-    font-size: 16px;
+    font-size: 18px;
   }
 }
 
