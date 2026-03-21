@@ -4106,6 +4106,13 @@ h1 {
     border-color: var(--accent);
     font-size: 18px;
   }
+
+  .ckb-key-attach {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 /* ─── Tutorial overlay ─── */
