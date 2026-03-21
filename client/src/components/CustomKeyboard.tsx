@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 interface Props {
   onInput: (text: string) => void;
+  onAttach: (files: FileList) => void;
 }
 
 const ROWS_NORMAL = [
@@ -27,8 +28,9 @@ const ROWS_SYM = [
 
 type Mode = "normal" | "shift" | "sym";
 
-export function CustomKeyboard({ onInput }: Props) {
+export function CustomKeyboard({ onInput, onAttach }: Props) {
   const [mode, setMode] = useState<Mode>("normal");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const rows = mode === "normal" ? ROWS_NORMAL : mode === "shift" ? ROWS_SHIFT : ROWS_SYM;
 
@@ -48,8 +50,18 @@ export function CustomKeyboard({ onInput }: Props) {
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x1b[B"); }}>↓</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x1b[D"); }}>←</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x1b[C"); }}>→</button>
+        <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); fileInputRef.current?.click(); }}>📎</button>
         <button className="ckb-key ckb-key-special ckb-key-enter" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\r"); }}>send</button>
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          if (e.target.files?.length) { onAttach(e.target.files); e.target.value = ""; }
+        }}
+      />
 
       {/* Main rows */}
       {rows.map((row, ri) => (
