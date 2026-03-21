@@ -4825,21 +4825,45 @@ h1 {
     color: var(--text-dim);
   }
 
-  /* Session rows: larger touch targets */
+  /* Session rows: multi-row layout on mobile */
   .session-row {
-    padding: 14px;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
+    padding: 12px 14px;
+    display: block;
+  }
+
+  .session-row-main {
+    gap: 8px;
+    margin-bottom: 2px;
   }
 
   .session-row-name {
     font-size: 15px;
   }
 
-  /* Hide meta tags and type badges on mobile — keep rows compact */
+  .session-row-status {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  .session-row-statusline {
+    font-size: 11px;
+    padding-left: 18px;
+    margin-bottom: 3px;
+  }
+
+  .session-row-meta {
+    padding-left: 18px;
+    gap: 6px;
+  }
+
+  .session-row-path {
+    font-size: 11px;
+  }
+
+  /* Hide meta tags and type badges on mobile — keep rows readable */
   .session-row-meta-tags,
-  .session-row-type-badge {
+  .session-row-type-badge,
+  .session-row-age {
     display: none;
   }
 
