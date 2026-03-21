@@ -4951,9 +4951,27 @@ h1 {
     padding: 2px 4px;
   }
 
-  /* Tabs: hidden on mobile, moved to hamburger menu */
+  /* Tabs: hidden on mobile, moved to hamburger menu.
+     But keep .main-tabs-toolbar visible so the Esc/copy buttons show. */
   .main-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    min-height: 0;
+    padding: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Hide regular tab buttons but keep back button and toolbar strip */
+  .main-tabs > .main-tab:not(.mobile-back-btn):not(.session-breadcrumb),
+  .main-tabs > .sidebar-expand-btn {
     display: none;
+  }
+
+  .main-tabs-toolbar {
+    flex: 1;
+    display: flex;
+    justify-content: flex-end;
   }
 
   /* Quick actions: horizontal scroll chips */
