@@ -3051,6 +3051,11 @@ h1 {
   color: var(--text);
 }
 
+.terminal-esc-btn {
+  border-color: rgba(255, 100, 100, 0.4);
+  color: var(--red, #ff6464);
+}
+
 .terminal-wrapper {
   flex: 1;
   background: var(--term-bg, #0a0a0a);
@@ -5000,6 +5005,19 @@ h1 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+  }
+
+  /* Esc button: larger touch target on mobile */
+  .terminal-esc-btn {
+    min-width: 52px;
+    min-height: 36px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* iTerm button: not useful on mobile */
+  .terminal-copy-btn[title="Open in iTerm2"] {
+    display: none;
   }
 
   /* Terminal: visible scrollbar on mobile */

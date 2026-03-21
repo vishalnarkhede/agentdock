@@ -385,6 +385,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         {connected && (
           <button
+            className="terminal-copy-btn terminal-esc-btn"
+            onClick={() => sendInput("\x1b")}
+            title="Send Escape (stop current action)"
+          >
+            Esc
+          </button>
+        )}
+        {connected && (
+          <button
             className="terminal-copy-btn"
             onClick={() => openInIterm(sessionName)}
             title="Open in iTerm2"
