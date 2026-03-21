@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
+import { CustomKeyboard } from "./CustomKeyboard";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -102,6 +103,34 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
+  const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
+
+  // Listen for toggle events dispatched from the hamburger menu
+  useEffect(() => {
+    const handler = () => {
+      setCustomKb((prev) => {
+        const next = !prev;
+        localStorage.setItem("agentdock-kb", next ? "custom" : "native");
+        return next;
+      });
+    };
+    window.addEventListener("agentdock-toggle-kb", handler);
+    return () => window.removeEventListener("agentdock-toggle-kb", handler);
+  }, []);
+
+  // When custom keyboard is active, prevent xterm's hidden textarea from
+  // triggering the native keyboard on mobile
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const textarea = containerRef.current.querySelector("textarea");
+    if (!textarea) return;
+    if (customKb) {
+      textarea.setAttribute("readonly", "true");
+      textarea.blur();
+    } else {
+      textarea.removeAttribute("readonly");
+    }
+  }, [customKb]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -456,15 +485,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             Stop
           </button>
         )}
-        {connected && (
-          <button
-            className="terminal-mobile-btn"
-            onClick={() => sendInput("\x1b\r")}
-            title="Insert newline (Alt+Enter)"
-          >
-            ↵ newline
-          </button>
-        )}
         {lastContent && (
           <button
             className="terminal-mobile-btn"
@@ -485,6 +505,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           {fullscreen ? "Exit full" : "Fullscreen"}
         </button>
       </div>
+      {customKb && <CustomKeyboard onInput={sendInput} />}
       <div
         ref={containerRef}
         className="terminal-wrapper"

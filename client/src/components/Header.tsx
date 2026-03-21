@@ -26,6 +26,7 @@ export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);
@@ -309,6 +310,18 @@ export function Header() {
                 {ngrokLoading ? "..." : ngrok.running ? `ngrok on${ngrok.url ? ` — ${ngrok.url}` : ""}` : "ngrok off"}
               </button>
             )}
+            <button
+              className={`header-fix-me-btn ${customKb ? "header-kb-active" : ""}`}
+              onClick={() => {
+                const next = !customKb;
+                setCustomKb(next);
+                localStorage.setItem("agentdock-kb", next ? "custom" : "native");
+                window.dispatchEvent(new CustomEvent("agentdock-toggle-kb"));
+                setMenuOpen(false);
+              }}
+            >
+              {customKb ? "⌨ custom keyboard" : "⌨ native keyboard"}
+            </button>
             {authEnabled && (
               <button
                 className="header-logout-btn"
