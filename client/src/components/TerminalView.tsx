@@ -446,6 +446,36 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       {toolbarPortal?.current
         ? createPortal(toolbarContent, toolbarPortal.current)
         : toolbarContent}
+      {/* Mobile-only controls bar — always rendered inline, never portalled */}
+      <div className="terminal-mobile-controls">
+        {connected && (
+          <button
+            className="terminal-mobile-btn terminal-mobile-esc"
+            onClick={() => sendInput("\x1b")}
+          >
+            Esc
+          </button>
+        )}
+        {lastContent && (
+          <button
+            className="terminal-mobile-btn"
+            onClick={() => {
+              const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+              navigator.clipboard.writeText(clean.trim());
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+          >
+            {copied ? "✓" : "Copy"}
+          </button>
+        )}
+        <button
+          className="terminal-mobile-btn"
+          onClick={() => setFullscreen((f) => !f)}
+        >
+          {fullscreen ? "Exit full" : "Fullscreen"}
+        </button>
+      </div>
       <div
         ref={containerRef}
         className="terminal-wrapper"

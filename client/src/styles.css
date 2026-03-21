@@ -3056,6 +3056,11 @@ h1 {
   color: var(--red, #ff6464);
 }
 
+/* Mobile controls bar is hidden on desktop */
+.terminal-mobile-controls {
+  display: none;
+}
+
 .terminal-wrapper {
   flex: 1;
   background: var(--term-bg, #0a0a0a);
@@ -4951,27 +4956,9 @@ h1 {
     padding: 2px 4px;
   }
 
-  /* Tabs: hidden on mobile, moved to hamburger menu.
-     But keep .main-tabs-toolbar visible so the Esc/copy buttons show. */
+  /* Tabs: hidden on mobile, moved to hamburger menu */
   .main-tabs {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow: hidden;
-    min-height: 0;
-    padding: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  /* Hide regular tab buttons but keep back button and toolbar strip */
-  .main-tabs > .main-tab:not(.mobile-back-btn):not(.session-breadcrumb),
-  .main-tabs > .sidebar-expand-btn {
     display: none;
-  }
-
-  .main-tabs-toolbar {
-    flex: 1;
-    display: flex;
-    justify-content: flex-end;
   }
 
   /* Quick actions: horizontal scroll chips */
@@ -5000,11 +4987,6 @@ h1 {
     font-size: 16px !important;
     padding: 10px 12px !important;
     min-height: 44px;
-  }
-
-  /* Hide "Connected" label on mobile — it's absolutely positioned and overlaps */
-  .terminal-toolbar-status {
-    display: none;
   }
 
   /* Hide unfocused hint on mobile (uses chat input bar) */
@@ -5041,6 +5023,37 @@ h1 {
   /* iTerm button: not useful on mobile */
   .terminal-copy-btn[title="Open in iTerm2"] {
     display: none;
+  }
+
+  /* Mobile-only inline controls bar */
+  .terminal-mobile-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .terminal-mobile-btn {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    text-align: center;
+    min-height: 40px;
+  }
+
+  .terminal-mobile-esc {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: var(--red, #ef4444);
   }
 
   /* Terminal: visible scrollbar on mobile */
