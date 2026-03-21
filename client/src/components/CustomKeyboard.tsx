@@ -48,7 +48,7 @@ export function CustomKeyboard({ onInput }: Props) {
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x1b[B"); }}>↓</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x1b[D"); }}>←</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x1b[C"); }}>→</button>
-        <button className="ckb-key ckb-key-special ckb-key-enter" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\r"); }}>⏎</button>
+        <button className="ckb-key ckb-key-special ckb-key-enter" onPointerDown={(e) => { e.preventDefault(); tapSpecial("\r"); }}>send</button>
       </div>
 
       {/* Main rows */}
