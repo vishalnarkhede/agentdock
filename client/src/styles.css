@@ -4009,8 +4009,8 @@ h1 {
   .ckb {
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    padding: 4px 2px 8px;
+    gap: 1px;
+    padding: 2px 1px 4px;
     background: var(--bg-card);
     border-top: 1px solid var(--border);
     user-select: none;
@@ -4021,11 +4021,11 @@ h1 {
   .ckb-row {
     display: flex;
     justify-content: center;
-    gap: 3px;
+    gap: 1px;
   }
 
   .ckb-row-special {
-    gap: 2px;
+    gap: 1px;
   }
 
   .ckb-key {
