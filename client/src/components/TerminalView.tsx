@@ -511,6 +511,14 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             {copied ? "✓" : "Copy"}
           </button>
         )}
+        {customKb && (
+          <button
+            className="terminal-mobile-btn"
+            onClick={() => setKbVisible((v) => !v)}
+          >
+            {kbVisible ? "⌨ hide" : "⌨ show"}
+          </button>
+        )}
         <button
           className="terminal-mobile-btn"
           onClick={() => setFullscreen((f) => !f)}
@@ -521,7 +529,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       <div
         ref={containerRef}
         className="terminal-wrapper"
-        onClick={() => { if (customKb) { setKbVisible(true); } else if (!focused) { termRef.current?.focus(); } }}
+        onClick={() => { if (!customKb && !focused) termRef.current?.focus(); }}
         onWheel={(e) => {
           if (e.deltaY < 0 && !scrollPausedRef.current) {
             scrollPausedRef.current = true;
@@ -649,7 +657,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           </div>
         </>
       )}
-      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onDismiss={() => setKbVisible(false)} />}
+      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} />}
     </div>
   );
 }
