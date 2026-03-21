@@ -456,6 +456,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             Stop
           </button>
         )}
+        {connected && (
+          <button
+            className="terminal-mobile-btn"
+            onClick={() => sendInput("\x1b\r")}
+            title="Insert newline (Alt+Enter)"
+          >
+            ↵ newline
+          </button>
+        )}
         {lastContent && (
           <button
             className="terminal-mobile-btn"
