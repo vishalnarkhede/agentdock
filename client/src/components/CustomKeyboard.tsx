@@ -58,7 +58,7 @@ export function CustomKeyboard({ onInput }: Props) {
       {/* Main rows */}
       {rows.map((row, ri) => (
         <div key={ri} className="ckb-row">
-          {ri === 2 && (
+          {ri === 3 && (
             <button
               className={`ckb-key ckb-key-mod ${mode !== "normal" ? "ckb-key-mod-active" : ""}`}
               onPointerDown={(e) => { e.preventDefault(); setMode(mode === "shift" ? "normal" : "shift"); }}
@@ -75,20 +75,12 @@ export function CustomKeyboard({ onInput }: Props) {
               {ch}
             </button>
           ))}
-          {ri === 2 && (
+          {ri === 3 && (
             <button
               className="ckb-key ckb-key-wide"
               onPointerDown={(e) => { e.preventDefault(); tapSpecial("\x7f"); }}
             >
               ⌫
-            </button>
-          )}
-          {ri === 3 && (
-            <button
-              className="ckb-key ckb-key-mod"
-              onPointerDown={(e) => { e.preventDefault(); setMode(mode === "shift" ? "normal" : "shift"); }}
-            >
-              ⇧
             </button>
           )}
         </div>
