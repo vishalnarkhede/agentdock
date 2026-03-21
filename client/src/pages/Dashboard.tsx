@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta, restoreSession } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta, restoreSession, createSession } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
@@ -68,6 +68,7 @@ function SessionRow({
   onEditProps,
   onPinToHeader,
   onRestore,
+  onForkSession,
   dataTutorial,
 }: {
   session: SessionInfo;
@@ -91,6 +92,7 @@ function SessionRow({
   onEditProps?: () => void;
   onPinToHeader?: () => void;
   onRestore?: () => Promise<void>;
+  onForkSession?: () => void;
   dataTutorial?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -268,6 +270,11 @@ function SessionRow({
               )}
               {onPinToHeader && (
                 <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onPinToHeader(); setMenuOpen(false); }}>Pin to header</button>
+              )}
+              {onForkSession && (
+                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onForkSession(); setMenuOpen(false); }}>
+                  + New agent here
+                </button>
               )}
               <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
               <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
@@ -1093,6 +1100,26 @@ export function Dashboard() {
     refresh();
   }, [refresh]);
 
+  const handleForkSession = useCallback(async (session: SessionInfo) => {
+    const worktree = session.worktrees?.[0];
+    const path = worktree?.wtDir || worktree?.repoPath || session.path;
+    if (!path) return;
+    try {
+      const { sessions: created } = await createSession({
+        targets: [path],
+        dangerouslySkipPermissions: true,
+        agentType: session.agentType || "claude",
+      });
+      if (created?.[0]) {
+        setActiveSession(created[0]);
+        setMobileShowTerminal(true);
+        refresh();
+      }
+    } catch (err) {
+      console.error("Failed to fork session:", err);
+    }
+  }, [refresh]);
+
   // Auto-select first session if none selected, or fix stale selection
   useEffect(() => {
     if (loading) return; // don't touch URL param while sessions are loading
@@ -1268,6 +1295,7 @@ export function Dashboard() {
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
+                      onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                       dataTutorial={getDemoTutorialAttr(session)}
                     />
                   ))}
@@ -1318,6 +1346,7 @@ export function Dashboard() {
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
+                      onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                       dataTutorial={getDemoTutorialAttr(session)}
                     />
                   ))}
