@@ -29,7 +29,7 @@ const ROWS_SYM = [
 // Ctrl labels shown on keys when ctrl is active
 const CTRL_LABELS: Record<string, string> = {
   a: "^A", b: "^B", c: "^C", d: "^D", e: "^E",
-  k: "^K", l: "^L", o: "^O", u: "^U", w: "^W",
+  k: "^K", l: "^L", o: "^O", u: "^U", v: "paste", w: "^W",
 };
 
 type Mode = "normal" | "shift" | "sym";
@@ -43,7 +43,11 @@ export function CustomKeyboard({ onInput, onAttach }: Props) {
   const tap = (ch: string) => {
     if (ctrl) {
       const lower = ch.toLowerCase();
-      if (lower >= "a" && lower <= "z") {
+      if (lower === "v") {
+        navigator.clipboard.readText().then((text) => {
+          if (text) onInput(text);
+        }).catch(() => {});
+      } else if (lower >= "a" && lower <= "z") {
         onInput(String.fromCharCode(lower.charCodeAt(0) - 96));
       }
       setCtrl(false);
