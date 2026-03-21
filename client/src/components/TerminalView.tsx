@@ -453,7 +453,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             className="terminal-mobile-btn terminal-mobile-esc"
             onClick={() => sendInput("\x1b")}
           >
-            Esc
+            Stop
           </button>
         )}
         {lastContent && (
