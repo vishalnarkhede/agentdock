@@ -97,6 +97,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [showPasteInput, setShowPasteInput] = useState(false);
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
+  const mobileFileInputRef = useRef<HTMLInputElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollPausedRef = useRef(false);
   const dragCountRef = useRef(0);
@@ -531,11 +532,29 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         <button
           className="terminal-mobile-btn"
+          onClick={() => mobileFileInputRef.current?.click()}
+        >
+          📎
+        </button>
+        <button
+          className="terminal-mobile-btn"
           onClick={() => setFullscreen((f) => !f)}
         >
           {fullscreen ? "Exit full" : "Fullscreen"}
         </button>
       </div>
+      <input
+        ref={mobileFileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          if (e.target.files?.length) {
+            handleFileDrop(e.target.files);
+            e.target.value = "";
+          }
+        }}
+      />
       <div
         ref={containerRef}
         className="terminal-wrapper"
