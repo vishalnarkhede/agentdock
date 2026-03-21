@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsModal } from "./SettingsModal";
-import { createSession, fetchPreferences, updatePreferences } from "../api";
+import { createSession, fetchPreferences, updatePreferences, fetchNgrokStatus, startNgrok, stopNgrok } from "../api";
 import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
 import type { Tab } from "../MobileNavContext";
 import { isDemo } from "../demo";
+import type { NgrokStatus } from "../api";
 
 export interface QuickLaunch {
   id: string;
@@ -28,6 +29,8 @@ export function Header() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);
+  const [ngrok, setNgrok] = useState<NgrokStatus>({ running: false, url: null });
+  const [ngrokLoading, setNgrokLoading] = useState(false);
   const [quickLaunches, setQuickLaunches] = useState<QuickLaunch[]>([]);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -99,6 +102,33 @@ export function Header() {
       console.error("Failed to create talk session:", err);
     } finally {
       setTalkingToMe(false);
+    }
+  };
+
+  // Ngrok: load status on mount and poll while running
+  useEffect(() => {
+    if (isDemo()) return;
+    fetchNgrokStatus().then(setNgrok);
+  }, []);
+
+  useEffect(() => {
+    if (!ngrok.running) return;
+    const id = setInterval(() => fetchNgrokStatus().then(setNgrok), 5000);
+    return () => clearInterval(id);
+  }, [ngrok.running]);
+
+  const handleNgrokToggle = async () => {
+    setNgrokLoading(true);
+    try {
+      if (ngrok.running) {
+        await stopNgrok();
+        setNgrok({ running: false, url: null });
+      } else {
+        const status = await startNgrok();
+        setNgrok(status);
+      }
+    } finally {
+      setNgrokLoading(false);
     }
   };
 
@@ -187,6 +217,16 @@ export function Header() {
             ▶ tour
           </button>
         )}
+        {!isDemo() && (
+          <button
+            className={`header-ngrok-btn ${ngrok.running ? "header-ngrok-btn-on" : ""}`}
+            onClick={handleNgrokToggle}
+            disabled={ngrokLoading}
+            title={ngrok.running && ngrok.url ? `ngrok: ${ngrok.url}` : "Start ngrok tunnel"}
+          >
+            {ngrokLoading ? "..." : ngrok.running ? "ngrok on" : "ngrok"}
+          </button>
+        )}
         <button
           className="settings-gear-btn"
           data-tutorial="settings-btn"
@@ -260,6 +300,15 @@ export function Header() {
             >
               &#9881; Settings
             </button>
+            {!isDemo() && (
+              <button
+                className={`header-ngrok-btn ${ngrok.running ? "header-ngrok-btn-on" : ""}`}
+                onClick={() => { handleNgrokToggle(); setMenuOpen(false); }}
+                disabled={ngrokLoading}
+              >
+                {ngrokLoading ? "..." : ngrok.running ? `ngrok on${ngrok.url ? ` — ${ngrok.url}` : ""}` : "ngrok off"}
+              </button>
+            )}
             {authEnabled && (
               <button
                 className="header-logout-btn"

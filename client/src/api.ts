@@ -630,3 +630,26 @@ export async function updateSessionMeta(
   });
   return res.json();
 }
+
+// ─── Ngrok API ───
+
+export interface NgrokStatus {
+  running: boolean;
+  url: string | null;
+}
+
+export async function fetchNgrokStatus(): Promise<NgrokStatus> {
+  if (isDemo()) return { running: false, url: null };
+  const res = await fetch(`${BASE}/api/ngrok/status`);
+  return res.json();
+}
+
+export async function startNgrok(): Promise<NgrokStatus> {
+  const res = await fetch(`${BASE}/api/ngrok/start`, { method: "POST" });
+  return res.json();
+}
+
+export async function stopNgrok(): Promise<void> {
+  await fetch(`${BASE}/api/ngrok/stop`, { method: "POST" });
+}
+
