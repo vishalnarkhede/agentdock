@@ -505,7 +505,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           {fullscreen ? "Exit full" : "Fullscreen"}
         </button>
       </div>
-      {customKb && <CustomKeyboard onInput={sendInput} />}
       <div
         ref={containerRef}
         className="terminal-wrapper"
@@ -637,6 +636,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           </div>
         </>
       )}
+      {customKb && <CustomKeyboard onInput={sendInput} />}
     </div>
   );
 }
