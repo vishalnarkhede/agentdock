@@ -29,7 +29,7 @@ app.post("/start", async (c) => {
   // Already running (externally or via us)
   const existingUrl = await fetchNgrokUrl();
   if (existingUrl) {
-    return c.json({ ok: true, url: existingUrl });
+    return c.json({ running: true, url: existingUrl });
   }
 
   const port = process.env.NGROK_PORT || "5173";
@@ -52,7 +52,7 @@ app.post("/start", async (c) => {
     if (url) break;
   }
 
-  return c.json({ ok: true, url });
+  return c.json({ running: url !== null, url });
 });
 
 app.post("/stop", async (c) => {
