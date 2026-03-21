@@ -4071,6 +4071,12 @@ h1 {
     border-color: rgba(239, 68, 68, 0.3);
   }
 
+  .ckb-key-ctrl-highlight {
+    color: var(--accent);
+    border-color: var(--accent);
+    font-size: 11px;
+  }
+
   .ckb-key-mod {
     flex: 1.5;
     font-size: 13px;

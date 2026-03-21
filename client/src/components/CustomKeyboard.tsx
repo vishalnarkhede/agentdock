@@ -26,15 +26,30 @@ const ROWS_SYM = [
   ["*", "(", ")", "-", "+", "=", "_"],
 ];
 
+// Ctrl labels shown on keys when ctrl is active
+const CTRL_LABELS: Record<string, string> = {
+  a: "^A", c: "^C", d: "^D", e: "^E",
+  k: "^K", l: "^L", u: "^U", w: "^W",
+};
+
 type Mode = "normal" | "shift" | "sym";
 
 export function CustomKeyboard({ onInput, onAttach }: Props) {
   const [mode, setMode] = useState<Mode>("normal");
+  const [ctrl, setCtrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const rows = mode === "normal" ? ROWS_NORMAL : mode === "shift" ? ROWS_SHIFT : ROWS_SYM;
 
   const tap = (ch: string) => {
+    if (ctrl) {
+      const lower = ch.toLowerCase();
+      if (lower >= "a" && lower <= "z") {
+        onInput(String.fromCharCode(lower.charCodeAt(0) - 96));
+      }
+      setCtrl(false);
+      return;
+    }
     onInput(ch);
     if (mode === "shift") setMode("normal");
   };
@@ -69,20 +84,25 @@ export function CustomKeyboard({ onInput, onAttach }: Props) {
           {ri === 3 && (
             <button
               className={`ckb-key ckb-key-mod ${mode !== "normal" ? "ckb-key-mod-active" : ""}`}
-              onPointerDown={(e) => { e.preventDefault(); setMode(mode === "shift" ? "normal" : "shift"); }}
+              onPointerDown={(e) => { e.preventDefault(); setMode(mode === "shift" ? "normal" : "shift"); if (ctrl) setCtrl(false); }}
             >
               ⇧
             </button>
           )}
-          {row.map((ch) => (
-            <button
-              key={ch}
-              className="ckb-key"
-              onPointerDown={(e) => { e.preventDefault(); tap(ch); }}
-            >
-              {ch}
-            </button>
-          ))}
+          {row.map((ch) => {
+            const lower = ch.toLowerCase();
+            const isCtrlKey = ctrl && lower >= "a" && lower <= "z";
+            const label = ctrl && CTRL_LABELS[lower] ? CTRL_LABELS[lower] : ch;
+            return (
+              <button
+                key={ch}
+                className={`ckb-key ${isCtrlKey && CTRL_LABELS[lower] ? "ckb-key-ctrl-highlight" : ""}`}
+                onPointerDown={(e) => { e.preventDefault(); tap(ch); }}
+              >
+                {label}
+              </button>
+            );
+          })}
           {ri === 3 && (
             <button
               className="ckb-key ckb-key-wide"
@@ -103,16 +123,22 @@ export function CustomKeyboard({ onInput, onAttach }: Props) {
           ?!#
         </button>
         <button
-          className="ckb-key ckb-key-mod"
-          onPointerDown={(e) => { e.preventDefault(); tapSpecial("\t"); }}
+          className={`ckb-key ckb-key-mod ${ctrl ? "ckb-key-mod-active" : ""}`}
+          onPointerDown={(e) => { e.preventDefault(); setCtrl((v) => !v); }}
         >
-          ⇥ tab
+          ctrl
         </button>
         <button
           className="ckb-key ckb-key-space"
           onPointerDown={(e) => { e.preventDefault(); tap(" "); }}
         >
           space
+        </button>
+        <button
+          className="ckb-key ckb-key-mod"
+          onPointerDown={(e) => { e.preventDefault(); tapSpecial("\t"); }}
+        >
+          ⇥ tab
         </button>
         <button
           className="ckb-key ckb-key-mod"
