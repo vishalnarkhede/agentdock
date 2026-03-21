@@ -5002,6 +5002,11 @@ h1 {
     min-height: 44px;
   }
 
+  /* Hide "Connected" label on mobile — it's absolutely positioned and overlaps */
+  .terminal-toolbar-status {
+    display: none;
+  }
+
   /* Hide unfocused hint on mobile (uses chat input bar) */
   .terminal-unfocused-hint {
     display: none;
