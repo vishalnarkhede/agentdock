@@ -4060,6 +4060,12 @@ h1 {
     color: var(--accent);
   }
 
+  .ckb-key-dismiss {
+    flex: 0.8;
+    font-size: 18px;
+    color: var(--text-dim);
+  }
+
   .ckb-key-mod {
     flex: 1.5;
     font-size: 13px;

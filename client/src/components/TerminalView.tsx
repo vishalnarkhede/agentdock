@@ -104,6 +104,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
+  const [kbVisible, setKbVisible] = useState(true);
 
   // Listen for toggle events dispatched from the hamburger menu
   useEffect(() => {
@@ -508,7 +509,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       <div
         ref={containerRef}
         className="terminal-wrapper"
-        onClick={() => { if (!focused) termRef.current?.focus(); }}
+        onClick={() => { if (!focused) termRef.current?.focus(); if (customKb) setKbVisible(true); }}
         onWheel={(e) => {
           if (e.deltaY < 0 && !scrollPausedRef.current) {
             scrollPausedRef.current = true;
@@ -636,7 +637,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           </div>
         </>
       )}
-      {customKb && <CustomKeyboard onInput={sendInput} />}
+      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onDismiss={() => setKbVisible(false)} />}
     </div>
   );
 }

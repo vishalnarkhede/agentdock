@@ -2,6 +2,7 @@ import { useState } from "react";
 
 interface Props {
   onInput: (text: string) => void;
+  onDismiss: () => void;
 }
 
 const ROWS_NORMAL = [
@@ -27,7 +28,7 @@ const ROWS_SYM = [
 
 type Mode = "normal" | "shift" | "sym";
 
-export function CustomKeyboard({ onInput }: Props) {
+export function CustomKeyboard({ onInput, onDismiss }: Props) {
   const [mode, setMode] = useState<Mode>("normal");
 
   const rows = mode === "normal" ? ROWS_NORMAL : mode === "shift" ? ROWS_SHIFT : ROWS_SYM;
@@ -43,6 +44,7 @@ export function CustomKeyboard({ onInput }: Props) {
     <div className="ckb">
       {/* Special row */}
       <div className="ckb-row ckb-row-special">
+        <button className="ckb-key ckb-key-special ckb-key-dismiss" onPointerDown={(e) => { e.preventDefault(); onDismiss(); }}>⌄</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tap("@"); }}>@</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tap("/"); }}>/</button>
         <button className="ckb-key ckb-key-special" onPointerDown={(e) => { e.preventDefault(); tap("`"); }}>` </button>
