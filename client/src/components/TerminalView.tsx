@@ -667,7 +667,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           </div>
         </>
       )}
-      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} />}
+      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={() => { setShowPasteInput(true); requestAnimationFrame(() => pasteInputRef.current?.focus()); }} />}
     </div>
   );
 }

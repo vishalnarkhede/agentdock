@@ -3,6 +3,7 @@ import { useState } from "react";
 interface Props {
   onInput: (text: string) => void;
   onAttach: (files: FileList) => void;
+  onPasteRequest: () => void;
 }
 
 const ROWS_NORMAL = [
@@ -34,7 +35,7 @@ const CTRL_LABELS: Record<string, string> = {
 
 type Mode = "normal" | "shift" | "sym";
 
-export function CustomKeyboard({ onInput, onAttach }: Props) {
+export function CustomKeyboard({ onInput, onAttach, onPasteRequest }: Props) {
   const [mode, setMode] = useState<Mode>("normal");
   const [ctrl, setCtrl] = useState(false);
 
@@ -44,9 +45,7 @@ export function CustomKeyboard({ onInput, onAttach }: Props) {
     if (ctrl) {
       const lower = ch.toLowerCase();
       if (lower === "v") {
-        navigator.clipboard.readText().then((text) => {
-          if (text) onInput(text);
-        }).catch(() => {});
+        onPasteRequest();
       } else if (lower >= "a" && lower <= "z") {
         onInput(String.fromCharCode(lower.charCodeAt(0) - 96));
       }
