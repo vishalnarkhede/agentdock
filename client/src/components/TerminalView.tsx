@@ -526,7 +526,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             className="terminal-mobile-btn"
             onClick={() => setKbVisible((v) => !v)}
           >
-            {kbVisible ? "⌨ hide" : "⌨ show"}
+            {kbVisible ? "⌨ hide" : "⌨ write"}
           </button>
         )}
         <button
