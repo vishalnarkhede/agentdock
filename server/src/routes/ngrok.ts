@@ -1,11 +1,10 @@
 import { Hono } from "hono";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import type { ChildProcess } from "child_process";
 
 const app = new Hono();
 
 let ngrokProcess: ChildProcess | null = null;
-let ngrokUrl: string | null = null;
 
 async function fetchNgrokUrl(): Promise<string | null> {
   try {
@@ -19,51 +18,50 @@ async function fetchNgrokUrl(): Promise<string | null> {
   }
 }
 
+// Always check the real ngrok local API — works even if server restarted
 app.get("/status", async (c) => {
-  const running = ngrokProcess !== null && ngrokProcess.exitCode === null;
-  if (running && !ngrokUrl) {
-    ngrokUrl = await fetchNgrokUrl();
-  }
-  return c.json({ running, url: ngrokUrl });
+  const url = await fetchNgrokUrl();
+  return c.json({ running: url !== null, url });
 });
 
 app.post("/start", async (c) => {
-  if (ngrokProcess && ngrokProcess.exitCode === null) {
-    const url = await fetchNgrokUrl();
-    return c.json({ ok: true, url });
+  // Already running (externally or via us)
+  const existingUrl = await fetchNgrokUrl();
+  if (existingUrl) {
+    return c.json({ ok: true, url: existingUrl });
   }
 
-  ngrokUrl = null;
   const port = process.env.NGROK_PORT || "5173";
   const proc = spawn("ngrok", ["http", port], { detached: false });
 
   proc.on("exit", () => {
-    if (ngrokProcess === proc) {
-      ngrokProcess = null;
-      ngrokUrl = null;
-    }
+    if (ngrokProcess === proc) ngrokProcess = null;
   });
 
   ngrokProcess = proc;
 
-  // Poll ngrok local API until tunnel is up (max 8s)
+  // Poll until tunnel is up (max 8s)
+  let url: string | null = null;
   for (let i = 0; i < 16; i++) {
     await new Promise((r) => setTimeout(r, 500));
-    const url = await fetchNgrokUrl();
-    if (url) {
-      ngrokUrl = url;
-      break;
-    }
+    url = await fetchNgrokUrl();
+    if (url) break;
   }
 
-  return c.json({ ok: true, url: ngrokUrl });
+  return c.json({ ok: true, url });
 });
 
-app.post("/stop", (c) => {
+app.post("/stop", async (c) => {
+  // Kill our tracked process if we have one
   if (ngrokProcess) {
     ngrokProcess.kill();
     ngrokProcess = null;
-    ngrokUrl = null;
+  }
+  // Also kill any external ngrok process (e.g. started before server restart)
+  try {
+    execSync("pkill -f 'ngrok http'", { stdio: "ignore" });
+  } catch {
+    // pkill exits non-zero if nothing matched — that's fine
   }
   return c.json({ ok: true });
 });
