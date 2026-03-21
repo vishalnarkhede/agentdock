@@ -109,12 +109,6 @@ export function CustomKeyboard({ onInput }: Props) {
         >
           ↵
         </button>
-        <button
-          className="ckb-key ckb-key-mod ckb-key-enter"
-          onPointerDown={(e) => { e.preventDefault(); tapSpecial("\r"); }}
-        >
-          ⏎
-        </button>
       </div>
     </div>
   );
