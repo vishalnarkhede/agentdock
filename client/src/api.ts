@@ -653,3 +653,22 @@ export async function stopNgrok(): Promise<void> {
   await fetch(`${BASE}/api/ngrok/stop`, { method: "POST" });
 }
 
+export async function fetchNgrokBasicAuthStatus(): Promise<{ configured: boolean }> {
+  if (isDemo()) return { configured: false };
+  const res = await fetch(`${BASE}/api/settings/ngrok-basic-auth`);
+  return res.json();
+}
+
+export async function setNgrokBasicAuth(value: string): Promise<{ ok?: boolean; error?: string }> {
+  const res = await fetch(`${BASE}/api/settings/ngrok-basic-auth`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  return res.json();
+}
+
+export async function deleteNgrokBasicAuth(): Promise<void> {
+  await fetch(`${BASE}/api/settings/ngrok-basic-auth`, { method: "DELETE" });
+}
+

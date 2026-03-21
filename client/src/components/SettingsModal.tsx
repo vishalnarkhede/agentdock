@@ -15,6 +15,9 @@ import {
   deleteMcpServer,
   fetchMetaPropertyPresets,
   saveMetaPropertyPresets,
+  fetchNgrokBasicAuthStatus,
+  setNgrokBasicAuth as apiSetNgrokBasicAuth,
+  deleteNgrokBasicAuth as apiDeleteNgrokBasicAuth,
   type SettingsHealth,
   type McpServerInfo,
 } from "../api";
@@ -702,6 +705,41 @@ function SecurityPanel() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [ngrokAuth, setNgrokAuth] = useState("");
+  const [ngrokConfigured, setNgrokConfigured] = useState(false);
+  const [ngrokError, setNgrokError] = useState<string | null>(null);
+  const [ngrokSuccess, setNgrokSuccess] = useState<string | null>(null);
+  const [ngrokSaving, setNgrokSaving] = useState(false);
+
+  useEffect(() => {
+    fetchNgrokBasicAuthStatus().then((s) => setNgrokConfigured(s.configured));
+  }, []);
+
+  const handleSaveNgrokAuth = async () => {
+    setNgrokError(null);
+    setNgrokSuccess(null);
+    if (!ngrokAuth.includes(":")) {
+      setNgrokError("Format must be user:password");
+      return;
+    }
+    setNgrokSaving(true);
+    const result = await apiSetNgrokBasicAuth(ngrokAuth);
+    setNgrokSaving(false);
+    if (result.error) {
+      setNgrokError(result.error);
+    } else {
+      setNgrokAuth("");
+      setNgrokConfigured(true);
+      setNgrokSuccess("Saved — will be used next time ngrok starts");
+    }
+  };
+
+  const handleClearNgrokAuth = async () => {
+    await apiDeleteNgrokBasicAuth();
+    setNgrokConfigured(false);
+    setNgrokSuccess("Ngrok basic auth removed");
+  };
+
   const handleSetPassword = async () => {
     setError(null);
     setSuccess(null);
@@ -766,6 +804,40 @@ function SecurityPanel() {
           </button>
         </div>
       )}
+
+      <div className="settings-section-divider" />
+      <p className="settings-label" style={{ marginBottom: 6 }}>Ngrok Basic Auth</p>
+      <p className="settings-security-desc">
+        {ngrokConfigured
+          ? "Basic auth is configured. Anyone accessing via ngrok will be prompted for credentials."
+          : "Optionally protect your ngrok tunnel with HTTP basic auth (user:password)."}
+      </p>
+      <div className="settings-security-form">
+        <input
+          className="form-input"
+          type="text"
+          value={ngrokAuth}
+          onChange={(e) => { setNgrokAuth(e.target.value); setNgrokError(null); setNgrokSuccess(null); }}
+          placeholder="user:password"
+          autoComplete="off"
+        />
+        {ngrokError && <div className="settings-security-error">{ngrokError}</div>}
+        {ngrokSuccess && <div className="settings-security-success">{ngrokSuccess}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSaveNgrokAuth}
+            disabled={ngrokSaving || !ngrokAuth}
+          >
+            {ngrokSaving ? "..." : ngrokConfigured ? "Update" : "Save"}
+          </button>
+          {ngrokConfigured && (
+            <button className="btn btn-danger-sm" onClick={handleClearNgrokAuth}>
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
     </>
   );
 }

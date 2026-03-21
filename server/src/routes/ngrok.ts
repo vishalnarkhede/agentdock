@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { spawn, execSync } from "child_process";
 import type { ChildProcess } from "child_process";
+import { getNgrokBasicAuth } from "../services/config";
 
 const app = new Hono();
 
@@ -32,7 +33,10 @@ app.post("/start", async (c) => {
   }
 
   const port = process.env.NGROK_PORT || "5173";
-  const proc = spawn("ngrok", ["http", port], { detached: false });
+  const args = ["http", port];
+  const basicAuth = getNgrokBasicAuth();
+  if (basicAuth) args.push("--basic-auth", basicAuth);
+  const proc = spawn("ngrok", args, { detached: false });
 
   proc.on("exit", () => {
     if (ngrokProcess === proc) ngrokProcess = null;

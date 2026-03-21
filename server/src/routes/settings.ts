@@ -27,6 +27,9 @@ import {
   savePreferences,
   getMetaPropertyPresets,
   saveMetaPropertyPresets,
+  getNgrokBasicAuth,
+  setNgrokBasicAuth,
+  deleteNgrokBasicAuth,
 } from "../services/config";
 import type { RepoConfig } from "../types";
 
@@ -239,6 +242,27 @@ app.put("/meta-properties", async (c) => {
     return c.json({ error: "body must be an array" }, 400);
   }
   saveMetaPropertyPresets(body);
+  return c.json({ ok: true });
+});
+
+// ─── Ngrok basic auth ───
+
+app.get("/ngrok-basic-auth", (c) => {
+  const value = getNgrokBasicAuth();
+  return c.json({ configured: !!value });
+});
+
+app.put("/ngrok-basic-auth", async (c) => {
+  const body = (await c.req.json()) as { value: string };
+  if (!body.value || !body.value.includes(":")) {
+    return c.json({ error: "Format must be user:password" }, 400);
+  }
+  setNgrokBasicAuth(body.value);
+  return c.json({ ok: true });
+});
+
+app.delete("/ngrok-basic-auth", (c) => {
+  deleteNgrokBasicAuth();
   return c.json({ ok: true });
 });
 

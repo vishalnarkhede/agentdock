@@ -12,6 +12,7 @@ const LINEAR_KEY_FILE = join(CONFIG_DIR, "linear-api-key");
 const SLACK_TOKEN_FILE = join(CONFIG_DIR, "slack-token");
 const LINEAR_TEAM_ID_FILE = join(CONFIG_DIR, "linear-team-id");
 const AUTH_PASSWORD_FILE = join(CONFIG_DIR, "auth-password");
+const NGROK_BASIC_AUTH_FILE = join(CONFIG_DIR, "ngrok-basic-auth");
 const DB_SHARDS_DIR = join(CONFIG_DIR, "db-shards");
 const DB_SHARDS_FILE = join(DB_SHARDS_DIR, "shards.json");
 const SESSIONS_DIR = join(CONFIG_DIR, "sessions");
@@ -205,6 +206,22 @@ export function getAuthPassword(): string | null {
 export function setAuthPassword(password: string): void {
   ensureConfigDir();
   writeFileSync(AUTH_PASSWORD_FILE, password.trim());
+}
+
+// ─── Ngrok basic auth ───
+
+export function getNgrokBasicAuth(): string | null {
+  if (!existsSync(NGROK_BASIC_AUTH_FILE)) return null;
+  return readFileSync(NGROK_BASIC_AUTH_FILE, "utf-8").trim() || null;
+}
+
+export function setNgrokBasicAuth(value: string): void {
+  ensureConfigDir();
+  writeFileSync(NGROK_BASIC_AUTH_FILE, value.trim());
+}
+
+export function deleteNgrokBasicAuth(): void {
+  if (existsSync(NGROK_BASIC_AUTH_FILE)) unlinkSync(NGROK_BASIC_AUTH_FILE);
 }
 
 // ─── Session metadata ───
