@@ -29,7 +29,7 @@ const ROWS_SYM = [
 // Ctrl labels shown on keys when ctrl is active
 const CTRL_LABELS: Record<string, string> = {
   a: "^A", c: "^C", d: "^D", e: "^E",
-  k: "^K", l: "^L", u: "^U", w: "^W",
+  k: "^K", l: "^L", o: "^O", u: "^U", w: "^W",
 };
 
 type Mode = "normal" | "shift" | "sym";
