@@ -104,7 +104,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
-  const [kbVisible, setKbVisible] = useState(true);
+  const [kbVisible, setKbVisible] = useState(false);
+
+  // Refit terminal when keyboard shows/hides so it fills available space
+  useEffect(() => {
+    const id = setTimeout(() => {
+      fitAddonRef.current?.fit();
+    }, 50);
+    return () => clearTimeout(id);
+  }, [kbVisible]);
 
   // Listen for toggle events dispatched from the hamburger menu
   useEffect(() => {
