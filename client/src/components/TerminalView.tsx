@@ -107,6 +107,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const sendShiftEnterRef = useRef<() => void>(() => {});
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [kbVisible, setKbVisible] = useState(false);
+  const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
+  const scrollbarDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
 
   // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
   useEffect(() => {
@@ -252,17 +254,26 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
     // Detect scroll position on xterm's viewport — pause rendering when
     // user scrolls up, resume when they scroll back to the bottom.
-    // This works for both mouse wheel and touch scroll on mobile.
+    // Also updates the custom scrollbar thumb position.
     const handleViewportScroll = () => {
       const viewport = containerRef.current?.querySelector(".xterm-viewport");
       if (!viewport) return;
-      const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 20;
       if (!atBottom && !scrollPausedRef.current) {
         scrollPausedRef.current = true;
         setScrollPaused(true);
       } else if (atBottom && scrollPausedRef.current) {
         scrollPausedRef.current = false;
         setScrollPaused(false);
+      }
+      // Update thumb
+      if (scrollHeight <= clientHeight) {
+        setScrollThumb({ top: 0, size: 1 });
+      } else {
+        const size = clientHeight / scrollHeight;
+        const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
+        setScrollThumb({ top, size });
       }
     };
     // Attach after a tick so xterm has rendered the viewport
@@ -330,6 +341,17 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       "\x1b[?25h"       // show cursor at final position
     );
     setLastContent(snapshot.content);
+
+    // Update scrollbar thumb after render
+    requestAnimationFrame(() => {
+      const viewport = containerRef.current?.querySelector(".xterm-viewport");
+      if (!viewport) return;
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      if (scrollHeight <= clientHeight) { setScrollThumb({ top: 0, size: 1 }); return; }
+      const size = clientHeight / scrollHeight;
+      const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
+      setScrollThumb({ top, size });
+    });
 
     // On mobile, scroll wrapper to keep cursor visible
     if (window.innerWidth <= 768 && containerRef.current) {
@@ -574,6 +596,35 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           {fullscreen ? "Exit full" : "Fullscreen"}
         </button>
       </div>
+      {/* Custom scrollbar — mobile only, shown when there's content to scroll */}
+      {scrollThumb.size < 0.99 && (
+        <div className="term-scrollbar">
+          <div
+            className="term-scrollbar-thumb"
+            style={{ top: `${scrollThumb.top * 100}%`, height: `${scrollThumb.size * 100}%` }}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement;
+              if (!viewport) return;
+              scrollbarDragRef.current = { startY: e.clientY, startScrollTop: viewport.scrollTop };
+              const onMove = (me: PointerEvent) => {
+                if (!scrollbarDragRef.current || !viewport) return;
+                const trackH = (e.currentTarget as HTMLElement).parentElement!.clientHeight;
+                const dy = me.clientY - scrollbarDragRef.current.startY;
+                const scrollRange = viewport.scrollHeight - viewport.clientHeight;
+                viewport.scrollTop = scrollbarDragRef.current.startScrollTop + (dy / trackH) * scrollRange / scrollThumb.size;
+              };
+              const onUp = () => {
+                scrollbarDragRef.current = null;
+                window.removeEventListener("pointermove", onMove);
+                window.removeEventListener("pointerup", onUp);
+              };
+              window.addEventListener("pointermove", onMove);
+              window.addEventListener("pointerup", onUp);
+            }}
+          />
+        </div>
+      )}
       <div
         ref={containerRef}
         className="terminal-wrapper"

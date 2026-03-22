@@ -2968,6 +2968,7 @@ h1 {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
 }
 
 .terminal-fullscreen {
@@ -5207,37 +5208,42 @@ h1 {
     color: var(--red, #ef4444);
   }
 
-  /* Terminal: visible scrollbar on left side on mobile */
+  /* Hide browser scrollbar — we use our custom one */
   .terminal-wrapper .xterm-viewport {
-    scrollbar-width: auto !important;
+    scrollbar-width: none !important;
     -webkit-overflow-scrolling: touch;
-    direction: rtl;
   }
-
-  .terminal-wrapper .xterm-screen {
-    direction: ltr;
-  }
-
   .terminal-wrapper .xterm-viewport::-webkit-scrollbar {
-    width: 14px;
+    display: none;
   }
 
-  .terminal-wrapper .xterm-viewport::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05);
+  .term-scrollbar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 18px;
+    background: rgba(255,255,255,0.05);
+    z-index: 20;
+    border-radius: 0 4px 4px 0;
   }
 
-  .terminal-wrapper .xterm-viewport::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 7px;
-    border: 3px solid transparent;
-    background-clip: padding-box;
+  .term-scrollbar-thumb {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    min-height: 32px;
+    background: rgba(255,255,255,0.35);
+    border-radius: 6px;
+    cursor: grab;
+    touch-action: none;
   }
 
-  .terminal-wrapper .xterm-viewport::-webkit-scrollbar-thumb:active {
-    background: rgba(255, 255, 255, 0.5);
-    border: 2px solid transparent;
-    background-clip: padding-box;
+  .term-scrollbar-thumb:active {
+    background: rgba(255,255,255,0.6);
+    cursor: grabbing;
   }
+
 
   /* Chat input on mobile — visible */
   .chat-input-bar {
