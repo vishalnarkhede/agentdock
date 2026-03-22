@@ -618,7 +618,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
                 setScrollPaused(true);
                 const onMove = (me: PointerEvent) => {
                   const dy = me.clientY - startY;
-                  viewport.scrollTop = startScrollTop + (dy / trackH) * scrollRange / scrollThumb.size;
+                  viewport.scrollTop = startScrollTop + (dy / trackH) * scrollRange;
                 };
                 const onUp = () => {
                   thumb.releasePointerCapture(e.pointerId);
