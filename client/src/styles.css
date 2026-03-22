@@ -2968,7 +2968,14 @@ h1 {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.term-scrollbar-area {
+  flex: 1;
   position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .terminal-fullscreen {
@@ -5226,6 +5233,7 @@ h1 {
     background: rgba(255,255,255,0.05);
     z-index: 20;
     border-radius: 0 4px 4px 0;
+    pointer-events: all;
   }
 
   .term-scrollbar-thumb {

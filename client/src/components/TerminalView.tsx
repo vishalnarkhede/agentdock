@@ -596,49 +596,46 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           {fullscreen ? "Exit full" : "Fullscreen"}
         </button>
       </div>
-      {/* Custom scrollbar — shown when there's content to scroll */}
-      {scrollThumb.size < 0.99 && (
-        <div className="term-scrollbar">
-          <div
-            className="term-scrollbar-thumb"
-            style={{ top: `${scrollThumb.top * 100}%`, height: `${scrollThumb.size * 100}%` }}
-            onPointerDown={(e) => {
-              e.preventDefault();
-              const thumb = e.currentTarget as HTMLElement;
-              const track = thumb.parentElement!;
-              const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement;
-              if (!viewport) return;
-              // Capture pointer so we get events even outside the element
-              thumb.setPointerCapture(e.pointerId);
-              const startY = e.clientY;
-              const startScrollTop = viewport.scrollTop;
-              const trackH = track.clientHeight;
-              const scrollRange = viewport.scrollHeight - viewport.clientHeight;
-              // Pause rendering while dragging
-              scrollPausedRef.current = true;
-              setScrollPaused(true);
-              const onMove = (me: PointerEvent) => {
-                const dy = me.clientY - startY;
-                viewport.scrollTop = startScrollTop + (dy / trackH) * scrollRange / scrollThumb.size;
-              };
-              const onUp = () => {
-                scrollbarDragRef.current = null;
-                thumb.releasePointerCapture(e.pointerId);
-                // Resume if at bottom
-                const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
-                if (atBottom) { scrollPausedRef.current = false; setScrollPaused(false); }
-                thumb.removeEventListener("pointermove", onMove);
-                thumb.removeEventListener("pointerup", onUp);
-              };
-              thumb.addEventListener("pointermove", onMove);
-              thumb.addEventListener("pointerup", onUp);
-            }}
-          />
-        </div>
-      )}
-      <div
-        ref={containerRef}
-        className="terminal-wrapper"
+      {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
+      <div className="term-scrollbar-area">
+        {scrollThumb.size < 0.99 && (
+          <div className="term-scrollbar">
+            <div
+              className="term-scrollbar-thumb"
+              style={{ top: `${scrollThumb.top * 100}%`, height: `${scrollThumb.size * 100}%` }}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                const thumb = e.currentTarget as HTMLElement;
+                const track = thumb.parentElement!;
+                const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement;
+                if (!viewport) return;
+                thumb.setPointerCapture(e.pointerId);
+                const startY = e.clientY;
+                const startScrollTop = viewport.scrollTop;
+                const trackH = track.clientHeight;
+                const scrollRange = viewport.scrollHeight - viewport.clientHeight;
+                scrollPausedRef.current = true;
+                setScrollPaused(true);
+                const onMove = (me: PointerEvent) => {
+                  const dy = me.clientY - startY;
+                  viewport.scrollTop = startScrollTop + (dy / trackH) * scrollRange / scrollThumb.size;
+                };
+                const onUp = () => {
+                  thumb.releasePointerCapture(e.pointerId);
+                  const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
+                  if (atBottom) { scrollPausedRef.current = false; setScrollPaused(false); }
+                  thumb.removeEventListener("pointermove", onMove);
+                  thumb.removeEventListener("pointerup", onUp);
+                };
+                thumb.addEventListener("pointermove", onMove);
+                thumb.addEventListener("pointerup", onUp);
+              }}
+            />
+          </div>
+        )}
+        <div
+          ref={containerRef}
+          className="terminal-wrapper"
         onClick={() => { if (!customKb && !focused) termRef.current?.focus(); }}
         onTouchStart={(e) => {
           const touch = e.touches[0];
@@ -680,7 +677,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           }
           e.preventDefault();
         }}
-      />
+        />
+      </div>{/* end term-scrollbar-area */}
       {scrollPaused && (
         <button
           className="terminal-scroll-resume"
