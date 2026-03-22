@@ -5207,10 +5207,15 @@ h1 {
     color: var(--red, #ef4444);
   }
 
-  /* Terminal: visible scrollbar on mobile */
+  /* Terminal: visible scrollbar on left side on mobile */
   .terminal-wrapper .xterm-viewport {
     scrollbar-width: auto !important;
     -webkit-overflow-scrolling: touch;
+    direction: rtl;
+  }
+
+  .terminal-wrapper .xterm-screen {
+    direction: ltr;
   }
 
   .terminal-wrapper .xterm-viewport::-webkit-scrollbar {
