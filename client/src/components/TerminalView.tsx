@@ -98,6 +98,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartYRef = useRef<number>(0);
+  const touchScrollingRef = useRef<boolean>(false);
   const scrollPausedRef = useRef(false);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -114,6 +116,18 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
+  }, []);
+
+  // Non-passive touchmove listener so we can call preventDefault and prevent
+  // the page from scrolling while the user is scrolling inside the terminal.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: TouchEvent) => {
+      if (touchScrollingRef.current) e.preventDefault();
+    };
+    el.addEventListener("touchmove", handler, { passive: false });
+    return () => el.removeEventListener("touchmove", handler);
   }, []);
 
   // Listen for toggle events dispatched from the hamburger menu
@@ -566,6 +580,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         onClick={() => { if (!customKb && !focused) termRef.current?.focus(); }}
         onTouchStart={(e) => {
           const touch = e.touches[0];
+          touchStartYRef.current = touch.clientY;
+          touchScrollingRef.current = false;
           longPressTimer.current = setTimeout(() => {
             setContextMenu({ x: touch.clientX, y: touch.clientY });
           }, 500);
@@ -575,12 +591,32 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
           }
+          touchScrollingRef.current = false;
         }}
-        onTouchMove={() => {
+        onTouchMove={(e) => {
           if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
           }
+          const dy = touchStartYRef.current - e.touches[0].clientY;
+          if (Math.abs(dy) < 5) return; // ignore tiny jitter
+          touchScrollingRef.current = true;
+          touchStartYRef.current = e.touches[0].clientY; // incremental delta
+          // Manually scroll the xterm viewport (canvas intercepts touch events)
+          const viewport = containerRef.current?.querySelector(".xterm-viewport");
+          if (viewport) {
+            viewport.scrollTop += dy;
+            // Check if at bottom — resume rendering
+            const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
+            if (!atBottom && !scrollPausedRef.current) {
+              scrollPausedRef.current = true;
+              setScrollPaused(true);
+            } else if (atBottom && scrollPausedRef.current) {
+              scrollPausedRef.current = false;
+              setScrollPaused(false);
+            }
+          }
+          e.preventDefault();
         }}
       />
       {scrollPaused && (
