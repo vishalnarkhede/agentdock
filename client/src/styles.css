@@ -4039,13 +4039,13 @@ h1 {
   .ckb-key {
     flex: 1;
     min-width: 0;
-    height: 44px;
+    height: 52px;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text);
     font-family: var(--font-mono);
-    font-size: 17px;
+    font-size: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4062,8 +4062,8 @@ h1 {
   }
 
   .ckb-key-special {
-    font-size: 13px;
-    height: 38px;
+    font-size: 15px;
+    height: 46px;
     background: rgba(255,255,255,0.04);
     color: var(--accent);
   }
