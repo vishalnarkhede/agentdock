@@ -4863,7 +4863,7 @@ h1 {
     top: 100%;
     right: 0;
     margin-top: 4px;
-    background: var(--bg-card);
+    background: var(--bg);
     border: 1px solid var(--border);
     padding: 8px;
     display: flex;
@@ -4871,7 +4871,7 @@ h1 {
     gap: 8px;
     z-index: 200;
     min-width: 180px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
   }
 
   .header-mobile-menu a {
