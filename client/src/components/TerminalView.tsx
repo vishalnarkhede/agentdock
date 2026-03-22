@@ -98,7 +98,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const touchStartYRef = useRef<number>(0);
   const scrollPausedRef = useRef(false);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -237,6 +236,27 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
     if (!isMobile) term.focus();
 
+    // Detect scroll position on xterm's viewport — pause rendering when
+    // user scrolls up, resume when they scroll back to the bottom.
+    // This works for both mouse wheel and touch scroll on mobile.
+    const handleViewportScroll = () => {
+      const viewport = containerRef.current?.querySelector(".xterm-viewport");
+      if (!viewport) return;
+      const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
+      if (!atBottom && !scrollPausedRef.current) {
+        scrollPausedRef.current = true;
+        setScrollPaused(true);
+      } else if (atBottom && scrollPausedRef.current) {
+        scrollPausedRef.current = false;
+        setScrollPaused(false);
+      }
+    };
+    // Attach after a tick so xterm has rendered the viewport
+    const viewportScrollTimer = setTimeout(() => {
+      const viewport = containerRef.current?.querySelector(".xterm-viewport");
+      viewport?.addEventListener("scroll", handleViewportScroll, { passive: true });
+    }, 100);
+
     // Track focus state via xterm's hidden textarea
     // Re-focus terminal when focus moves to non-interactive elements (e.g. clicking
     // session list, tabs, plan view) so keyboard input keeps going to the terminal.
@@ -258,6 +278,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
 
     return () => {
+      clearTimeout(viewportScrollTimer);
+      const viewport = containerRef.current?.querySelector(".xterm-viewport");
+      viewport?.removeEventListener("scroll", handleViewportScroll);
       observer.disconnect();
       window.removeEventListener("resize", handleResize);
       if (vv) vv.removeEventListener("resize", handleViewportResize);
@@ -541,22 +564,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         ref={containerRef}
         className="terminal-wrapper"
         onClick={() => { if (!customKb && !focused) termRef.current?.focus(); }}
-        onWheel={(e) => {
-          if (e.deltaY < 0 && !scrollPausedRef.current) {
-            scrollPausedRef.current = true;
-            setScrollPaused(true);
-          } else if (e.deltaY > 0 && scrollPausedRef.current) {
-            // Check if scrolled to bottom
-            const viewport = containerRef.current?.querySelector('.xterm-viewport');
-            if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 10) {
-              scrollPausedRef.current = false;
-              setScrollPaused(false);
-            }
-          }
-        }}
         onTouchStart={(e) => {
           const touch = e.touches[0];
-          touchStartYRef.current = touch.clientY;
           longPressTimer.current = setTimeout(() => {
             setContextMenu({ x: touch.clientX, y: touch.clientY });
           }, 500);
@@ -567,23 +576,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             longPressTimer.current = null;
           }
         }}
-        onTouchMove={(e) => {
+        onTouchMove={() => {
           if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
-          }
-          const deltaY = touchStartYRef.current - e.touches[0].clientY;
-          // Scrolling up (finger moving down → deltaY < 0) → pause
-          if (deltaY < -5 && !scrollPausedRef.current) {
-            scrollPausedRef.current = true;
-            setScrollPaused(true);
-          } else if (deltaY > 5 && scrollPausedRef.current) {
-            // Scrolling down — resume if xterm viewport is near bottom
-            const viewport = containerRef.current?.querySelector('.xterm-viewport');
-            if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20) {
-              scrollPausedRef.current = false;
-              setScrollPaused(false);
-            }
           }
         }}
       />
