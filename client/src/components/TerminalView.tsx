@@ -98,6 +98,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartYRef = useRef<number>(0);
   const scrollPausedRef = useRef(false);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -555,6 +556,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         }}
         onTouchStart={(e) => {
           const touch = e.touches[0];
+          touchStartYRef.current = touch.clientY;
           longPressTimer.current = setTimeout(() => {
             setContextMenu({ x: touch.clientX, y: touch.clientY });
           }, 500);
@@ -565,10 +567,23 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             longPressTimer.current = null;
           }
         }}
-        onTouchMove={() => {
+        onTouchMove={(e) => {
           if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
+          }
+          const deltaY = touchStartYRef.current - e.touches[0].clientY;
+          // Scrolling up (finger moving down → deltaY < 0) → pause
+          if (deltaY < -5 && !scrollPausedRef.current) {
+            scrollPausedRef.current = true;
+            setScrollPaused(true);
+          } else if (deltaY > 5 && scrollPausedRef.current) {
+            // Scrolling down — resume if xterm viewport is near bottom
+            const viewport = containerRef.current?.querySelector('.xterm-viewport');
+            if (viewport && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20) {
+              scrollPausedRef.current = false;
+              setScrollPaused(false);
+            }
           }
         }}
       />
