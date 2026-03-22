@@ -5226,13 +5226,13 @@ h1 {
 
   .term-scrollbar {
     position: absolute;
-    left: 0;
+    right: 0;
     top: 0;
     bottom: 0;
     width: 18px;
     background: rgba(255,255,255,0.05);
     z-index: 20;
-    border-radius: 0 4px 4px 0;
+    border-radius: 4px 0 0 4px;
     pointer-events: all;
   }
 
