@@ -334,14 +334,17 @@ body::after {
   display: none;
 }
 
+html {
+  height: 100%;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--fs-base);
   line-height: 1.6;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
   overflow: hidden;
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top);
