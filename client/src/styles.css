@@ -393,6 +393,7 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   padding: 14px 32px;
+  padding-top: max(14px, env(safe-area-inset-top));
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
