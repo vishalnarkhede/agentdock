@@ -5527,6 +5527,11 @@ h1 {
     line-height: 1;
   }
 
+  /* Back chevron needs to be bigger to read clearly */
+  .mobile-nav-item:first-child .mobile-nav-icon {
+    font-size: 24px;
+  }
+
   .mobile-nav-label {
     font-size: 9px;
     text-transform: uppercase;

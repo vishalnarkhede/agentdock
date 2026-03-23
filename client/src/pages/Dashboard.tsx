@@ -1665,8 +1665,8 @@ export function Dashboard() {
         className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
         onClick={() => setMobileShowTerminal(false)}
       >
-        <span className="mobile-nav-icon">⊟</span>
-        <span className="mobile-nav-label">Sessions</span>
+        <span className="mobile-nav-icon">{mobileInSession ? "‹" : "⊟"}</span>
+        <span className="mobile-nav-label">{mobileInSession ? "Back" : "Sessions"}</span>
       </button>
       <button
         className={`mobile-nav-item ${mobileInSession && !bottomTab ? "mobile-nav-item-active" : ""} ${!mobileInSession ? "mobile-nav-item-disabled" : ""}`}
