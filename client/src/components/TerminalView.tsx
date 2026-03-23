@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { CustomKeyboard } from "./CustomKeyboard";
+import { useMobileNav } from "../MobileNavContext";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -107,6 +108,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const sendShiftEnterRef = useRef<() => void>(() => {});
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [kbVisible, setKbVisible] = useState(false);
+  const mobileNav = useMobileNav();
   const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
   const scrollbarDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
 
@@ -558,44 +560,47 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       {toolbarPortal?.current
         ? createPortal(toolbarContent, toolbarPortal.current)
         : toolbarContent}
-      {/* Mobile-only controls bar — always rendered inline, never portalled */}
-      <div className="terminal-mobile-controls">
-        {connected && (
-          <button
-            className="terminal-mobile-btn terminal-mobile-esc"
-            onClick={() => sendInput("\x1b")}
-          >
-            Stop
-          </button>
-        )}
-        {lastContent && (
+      {/* Mobile controls — portalled into header slot to merge the two bars */}
+      {mobileNav?.headerControlsRef?.current && createPortal(
+        <div className="terminal-mobile-controls terminal-mobile-controls-inline">
+          {connected && (
+            <button
+              className="terminal-mobile-btn terminal-mobile-esc"
+              onClick={() => sendInput("\x1b")}
+            >
+              Stop
+            </button>
+          )}
+          {lastContent && (
+            <button
+              className="terminal-mobile-btn"
+              onClick={() => {
+                const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+                navigator.clipboard.writeText(clean.trim());
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "✓" : "Copy"}
+            </button>
+          )}
+          {customKb && (
+            <button
+              className="terminal-mobile-btn"
+              onClick={() => setKbVisible((v) => !v)}
+            >
+              {kbVisible ? "⌨ hide" : "⌨ write"}
+            </button>
+          )}
           <button
             className="terminal-mobile-btn"
-            onClick={() => {
-              const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-              navigator.clipboard.writeText(clean.trim());
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
+            onClick={() => setFullscreen((f) => !f)}
           >
-            {copied ? "✓" : "Copy"}
+            {fullscreen ? "↙" : "↗"}
           </button>
-        )}
-        {customKb && (
-          <button
-            className="terminal-mobile-btn"
-            onClick={() => setKbVisible((v) => !v)}
-          >
-            {kbVisible ? "⌨ hide" : "⌨ write"}
-          </button>
-        )}
-        <button
-          className="terminal-mobile-btn"
-          onClick={() => setFullscreen((f) => !f)}
-        >
-          {fullscreen ? "Exit full" : "Fullscreen"}
-        </button>
-      </div>
+        </div>,
+        mobileNav.headerControlsRef.current
+      )}
       {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
       <div className="term-scrollbar-area">
         {scrollThumb.size < 0.99 && (
