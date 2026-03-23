@@ -836,6 +836,9 @@ export function Dashboard() {
       if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
     });
     fetchMetaPropertyPresets().then(setMetaPresets);
+    const handler = () => fetchMetaPropertyPresets().then(setMetaPresets);
+    window.addEventListener("agentdock-meta-presets-changed", handler);
+    return () => window.removeEventListener("agentdock-meta-presets-changed", handler);
   }, []);
 
   const togglePin = useCallback((name: string) => {

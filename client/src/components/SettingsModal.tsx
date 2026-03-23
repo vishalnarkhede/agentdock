@@ -556,6 +556,7 @@ function MetaPropertiesPanel() {
       : [];
     const updated = [...presets, { key: newKey.trim().toLowerCase().replace(/\s+/g, "_"), label: newLabel.trim(), values }];
     await saveMetaPropertyPresets(updated);
+    window.dispatchEvent(new CustomEvent("agentdock-meta-presets-changed"));
     setNewKey("");
     setNewLabel("");
     setNewValues("");
@@ -566,6 +567,7 @@ function MetaPropertiesPanel() {
   const handleDelete = async (key: string) => {
     const updated = presets.filter(p => p.key !== key);
     await saveMetaPropertyPresets(updated);
+    window.dispatchEvent(new CustomEvent("agentdock-meta-presets-changed"));
     load();
   };
 
@@ -620,6 +622,7 @@ function MetaPropertiesPanel() {
               const next = [...presets];
               next[idx] = updated;
               await saveMetaPropertyPresets(next);
+              window.dispatchEvent(new CustomEvent("agentdock-meta-presets-changed"));
               load();
             }}
             onDelete={() => handleDelete(preset.key)}
