@@ -3068,10 +3068,6 @@ h1 {
   color: var(--red, #ff6464);
 }
 
-/* Mobile controls bar is hidden on desktop */
-.terminal-mobile-controls {
-  display: none;
-}
 
 .terminal-wrapper {
   flex: 1;
@@ -4910,59 +4906,6 @@ h1 {
     font-size: 13px;
   }
 
-  /* Back button in header (mobile, in-session) */
-  .header-back-btn {
-    display: flex;
-    align-items: center;
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    padding: 6px 10px;
-    min-height: 36px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  /* Tab buttons inside hamburger menu */
-  .header-mobile-tabs {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-bottom: 8px;
-    margin-bottom: 4px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .header-mobile-tab {
-    background: none;
-    border: 1px solid transparent;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    padding: 10px 12px;
-    min-height: 44px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    text-align: left;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-  }
-
-  .header-mobile-tab:hover {
-    color: var(--text);
-    border-color: var(--border);
-  }
-
-  .header-mobile-tab-active {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: var(--green-dim);
-  }
 
   /* Split layout: full-width stacked, toggle between sidebar and main */
   .split-layout {
@@ -5055,8 +4998,9 @@ h1 {
   }
 
   /* Sidebar header — compact on mobile */
+  /* Sidebar header hidden on mobile — controls moved into header via portal */
   .sidebar-header {
-    padding: 7px 10px;
+    display: none;
   }
 
   .sidebar-title {
@@ -5189,39 +5133,10 @@ h1 {
     display: none;
   }
 
-  /* Mobile-only inline controls bar */
-  .terminal-mobile-controls {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-  }
-
-  .header-mobile-controls-slot {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .terminal-mobile-btn {
-    flex: 1;
-    padding: 6px 4px;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
-    cursor: pointer;
-    text-align: center;
-    min-height: 40px;
-  }
-
-  .terminal-mobile-esc {
-    background: rgba(239, 68, 68, 0.15);
-    border-color: rgba(239, 68, 68, 0.4);
-    color: var(--red, #ef4444);
+  /* Fullscreen button: not useful on mobile */
+  .terminal-copy-btn[title="Fullscreen"],
+  .terminal-copy-btn[title="Exit fullscreen (Esc)"] {
+    display: none;
   }
 
   /* Hide browser scrollbar — we use our custom one */
@@ -5430,6 +5345,187 @@ h1 {
 
   .settings-inline-form {
     width: 100%;
+  }
+
+  /* ─── Settings bottom sheet ─── */
+  .settings-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .settings-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 16px 16px 0 0;
+    animation: slideUpSheet 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  @keyframes slideUpSheet {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  /* Drag handle at top of sheet */
+  .settings-modal::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 10px auto 0;
+    flex-shrink: 0;
+  }
+
+  /* ─── Bottom navigation bar ─── */
+  body {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+
+  /* ─── Session card left-border status indicator ─── */
+  .session-row {
+    border-left: 3px solid transparent;
+    padding-left: 11px;
+  }
+
+  .session-row:has(.status-working) {
+    border-left-color: var(--accent, #7aa2f7);
+  }
+
+  .session-row:has(.status-waiting) {
+    border-left-color: var(--green, #9ece6a);
+  }
+
+  .session-row.session-row-stopped {
+    border-left-color: var(--red, #f7768e);
+  }
+
+  /* ─── Mobile terminal bottom toolbar ─── */
+  .mobile-terminal-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .mobile-term-btn {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+    min-height: 44px;
+    font-family: var(--font-mono);
+    text-align: center;
+  }
+
+  .mobile-term-btn-stop {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: var(--red, #ef4444);
+  }
+
+  .mobile-term-btn-placeholder {
+    background: transparent;
+    border-color: transparent;
+    pointer-events: none;
+  }
+}
+
+/* ─── Bottom nav & FAB: outside media query so desktop hides them cleanly ─── */
+.mobile-bottom-nav {
+  display: none;
+}
+
+.session-fab {
+  display: none;
+}
+
+.mobile-terminal-toolbar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .mobile-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 4px 10px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    gap: 3px;
+    min-height: 52px;
+    font-family: var(--font-mono);
+    transition: color 0.15s;
+  }
+
+  .mobile-nav-item:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .mobile-nav-item-active {
+    color: var(--accent, #7aa2f7);
+  }
+
+  .mobile-nav-icon {
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .mobile-nav-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    line-height: 1;
+  }
+
+  .session-fab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    right: 18px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent, #7aa2f7);
+    color: #fff;
+    font-size: 30px;
+    font-weight: 300;
+    border: none;
+    cursor: pointer;
+    z-index: 90;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    line-height: 1;
+  }
+
+  .mobile-terminal-toolbar {
+    display: flex;
   }
 }
 
