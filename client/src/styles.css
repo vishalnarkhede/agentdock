@@ -4886,7 +4886,7 @@ h1 {
   .header-mobile-menu {
     position: absolute;
     top: 100%;
-    right: 0;
+    left: 0;
     margin-top: 4px;
     background: var(--bg);
     border: 1px solid var(--border);
