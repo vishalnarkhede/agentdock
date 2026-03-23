@@ -682,7 +682,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           />
           <div
             className="terminal-context-menu"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
+            style={{
+              top: Math.min(contextMenu.y, window.innerHeight - 120),
+              left: Math.min(contextMenu.x, window.innerWidth - 160),
+            }}
           >
             <button
               onClick={() => {
@@ -769,11 +772,18 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             {copied ? "✓ Copied" : "⎘ Copy"}
           </button>
         )}
-        {customKb && (
-          <button className="mobile-term-btn" onClick={() => setKbVisible((v) => !v)}>
-            {kbVisible ? "⌨ hide" : "⌨ write"}
-          </button>
-        )}
+        <button className="mobile-term-btn" onClick={() => {
+          if (!customKb) {
+            setCustomKb(true);
+            localStorage.setItem("agentdock-kb", "custom");
+            window.dispatchEvent(new CustomEvent("agentdock-toggle-kb"));
+            setKbVisible(true);
+          } else {
+            setKbVisible((v) => !v);
+          }
+        }}>
+          {customKb && kbVisible ? "⌨ hide" : "⌨ write"}
+        </button>
       </div>
       {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={() => { setShowPasteInput(true); requestAnimationFrame(() => pasteInputRef.current?.focus()); }} />}
     </div>

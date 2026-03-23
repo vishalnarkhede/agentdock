@@ -680,7 +680,13 @@ export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const mobileNav = useMobileNav();
   const [mobileShowTerminal, setMobileShowTerminal] = useState(false);
-  const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const activeTab = mobileNav?.activeTab ?? "terminal";
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
@@ -1665,33 +1671,34 @@ export function Dashboard() {
         className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
         onClick={() => setMobileShowTerminal(false)}
       >
-        <span className="mobile-nav-icon">{mobileInSession ? "‹" : "⊟"}</span>
-        <span className="mobile-nav-label">{mobileInSession ? "Back" : "Sessions"}</span>
+        <span className="mobile-nav-icon">⊟</span>
+        <span className="mobile-nav-label">Sessions</span>
       </button>
-      <button
-        className={`mobile-nav-item ${mobileInSession && !bottomTab ? "mobile-nav-item-active" : ""} ${!mobileInSession ? "mobile-nav-item-disabled" : ""}`}
-        onClick={() => { if (mobileInSession) { setBottomTab(null); setBottomMaximized(false); } }}
-        disabled={!mobileInSession}
-      >
-        <span className="mobile-nav-icon">▶</span>
-        <span className="mobile-nav-label">Terminal</span>
-      </button>
-      <button
-        className={`mobile-nav-item ${mobileInSession && bottomTab === "plan" ? "mobile-nav-item-active" : ""} ${!mobileInSession ? "mobile-nav-item-disabled" : ""}`}
-        onClick={() => { if (mobileInSession) { setBottomTab("plan"); setBottomMaximized(true); } }}
-        disabled={!mobileInSession}
-      >
-        <span className="mobile-nav-icon">≡</span>
-        <span className="mobile-nav-label">Plan</span>
-      </button>
-      <button
-        className={`mobile-nav-item ${mobileInSession && bottomTab === "changes" ? "mobile-nav-item-active" : ""} ${!mobileInSession ? "mobile-nav-item-disabled" : ""}`}
-        onClick={() => { if (mobileInSession) { setBottomTab("changes"); setBottomMaximized(true); } }}
-        disabled={!mobileInSession}
-      >
-        <span className="mobile-nav-icon">±</span>
-        <span className="mobile-nav-label">Changes</span>
-      </button>
+      {mobileInSession && (
+        <>
+          <button
+            className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
+          >
+            <span className="mobile-nav-icon">▶</span>
+            <span className="mobile-nav-label">Terminal</span>
+          </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">≡</span>
+            <span className="mobile-nav-label">Plan</span>
+          </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">±</span>
+            <span className="mobile-nav-label">Changes</span>
+          </button>
+        </>
+      )}
     </nav>
     </>
   );

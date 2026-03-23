@@ -4873,8 +4873,8 @@ h1 {
     border: 1px solid var(--border);
     color: var(--text);
     font-size: 18px;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4979,6 +4979,7 @@ h1 {
   .session-row {
     padding: 12px 14px;
     display: block;
+    min-height: 44px;
   }
 
   .session-row-main {
@@ -5527,13 +5528,9 @@ h1 {
     line-height: 1;
   }
 
-  /* Back chevron needs to be bigger to read clearly */
-  .mobile-nav-item:first-child .mobile-nav-icon {
-    font-size: 24px;
-  }
 
   .mobile-nav-label {
-    font-size: 9px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     line-height: 1;
