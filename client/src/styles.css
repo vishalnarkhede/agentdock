@@ -500,8 +500,7 @@ h1 {
 .split-layout {
   display: flex;
   flex: 1;
-  height: calc(100vh - 41px);
-  height: calc(100dvh - 41px);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -4964,9 +4963,6 @@ h1 {
   /* Split layout: full-width stacked, toggle between sidebar and main */
   .split-layout {
     flex-direction: column;
-    height: calc(100vh - 37px);
-    height: calc(100dvh - 37px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .split-sidebar {
