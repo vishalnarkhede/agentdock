@@ -151,6 +151,12 @@ export function Header() {
 
   return (
     <header className="header">
+      {/* Back button — mobile only, non-root pages */}
+      {location.pathname !== "/" && (
+        <button className="header-back-btn header-back-btn-mobile" onClick={() => navigate(-1)} aria-label="Back">
+          ‹
+        </button>
+      )}
       {/* Logo — desktop only */}
       <Link to="/" className="header-title header-title-desktop">
         <svg className="header-logo" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

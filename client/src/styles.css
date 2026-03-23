@@ -472,6 +472,27 @@ a:hover {
   display: none;
 }
 
+.header-back-btn-mobile {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .header-back-btn-mobile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 22px;
+    padding: 0 8px;
+    min-height: 36px;
+    width: 36px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+}
+
 
 
 /* ─── Page layout ─── */
@@ -4910,6 +4931,16 @@ h1 {
   /* Split layout: full-width stacked, toggle between sidebar and main */
   .split-layout {
     flex-direction: column;
+  }
+
+  /* Bottom tab bar replaced by bottom nav — hide the inline tab strip */
+  .split-bottom-tabs {
+    display: none;
+  }
+
+  /* Keep the resize handle out of the way too */
+  .split-resize-handle {
+    display: none;
   }
 
   .split-sidebar {
