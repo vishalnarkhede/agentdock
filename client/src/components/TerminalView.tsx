@@ -754,7 +754,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       <div className="mobile-terminal-toolbar">
         {connected ? (
           <button className="mobile-term-btn mobile-term-btn-stop" onClick={() => sendInput("\x1b")}>
-            ⏹ Stop
+            ESC
           </button>
         ) : (
           <div className="mobile-term-btn mobile-term-btn-placeholder" />
