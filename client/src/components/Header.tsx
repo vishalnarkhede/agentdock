@@ -58,7 +58,10 @@ export function Header() {
         agentType: (ql.agentType as any) || "claude",
         grouped: true,
       });
-      if (sessions?.[0]) navigate(`/?session=${sessions[0]}`);
+      if (sessions?.[0]) {
+        navigate(`/?session=${sessions[0]}`);
+        window.dispatchEvent(new CustomEvent("agentdock-mobile-show-terminal"));
+      }
     } catch (err) {
       console.error("Failed to launch:", err);
     } finally {
@@ -79,6 +82,7 @@ export function Header() {
       const { sessions } = await createSession({ targets: ["agentdock"], dangerouslySkipPermissions: true });
       if (sessions?.[0]) {
         navigate(`/?session=${sessions[0]}`);
+        window.dispatchEvent(new CustomEvent("agentdock-mobile-show-terminal"));
       }
     } catch (err) {
       console.error("Failed to create fix-me session:", err);
@@ -94,6 +98,7 @@ export function Header() {
       const { sessions } = await createSession({ targets: [], name: "general-chat", dangerouslySkipPermissions: true });
       if (sessions?.[0]) {
         navigate(`/?session=${sessions[0]}`);
+        window.dispatchEvent(new CustomEvent("agentdock-mobile-show-terminal"));
       }
     } catch (err) {
       console.error("Failed to create talk session:", err);

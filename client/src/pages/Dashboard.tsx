@@ -1152,6 +1152,13 @@ export function Dashboard() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Show terminal when fix-me / quick-launch navigates to a session
+  useEffect(() => {
+    const handler = () => { if (isMobile) setMobileShowTerminal(true); };
+    window.addEventListener("agentdock-mobile-show-terminal", handler);
+    return () => window.removeEventListener("agentdock-mobile-show-terminal", handler);
+  }, [isMobile]);
+
   // Sync mobile nav context
   const { setInSession, setGoBack, setSessionTitle } = mobileNav ?? {};
   useEffect(() => {
