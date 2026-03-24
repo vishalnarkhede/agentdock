@@ -6,11 +6,13 @@ import {
   saveTemplate,
   deleteTemplate,
   fetchMetaPropertyPresets,
+  saveMetaPropertyPresets,
   fetchPreferences,
   updatePreferences,
   type SessionTemplate,
 } from "../api";
 import { RepoSelector, saveRecentRepos } from "../components/RepoSelector";
+import { MetaSelect } from "../components/MetaSelect";
 import type { AgentType, MetaPropertyPreset } from "../types";
 
 export function CreateSession() {
@@ -228,16 +230,18 @@ export function CreateSession() {
                 <div key={preset.key} className="meta-field">
                   <label className="meta-field-label">{preset.label}</label>
                   {preset.values.length > 0 ? (
-                    <select
-                      className="form-input"
+                    <MetaSelect
+                      values={preset.values}
                       value={metaValues[preset.key] || ""}
-                      onChange={(e) => setMetaValues(prev => ({ ...prev, [preset.key]: e.target.value }))}
-                    >
-                      <option value="">—</option>
-                      {preset.values.map((v) => (
-                        <option key={v} value={v}>{v}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setMetaValues(prev => ({ ...prev, [preset.key]: v }))}
+                      onAddNew={(v) => {
+                        preset.values.push(v);
+                        setMetaValues(prev => ({ ...prev, [preset.key]: v }));
+                        setMetaPresets(prev => [...prev]);
+                        saveMetaPropertyPresets(metaPresets);
+                      }}
+                      placeholder="—"
+                    />
                   ) : (
                     <input
                       type="text"

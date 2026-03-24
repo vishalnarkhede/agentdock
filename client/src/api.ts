@@ -646,7 +646,12 @@ export async function fetchNgrokStatus(): Promise<NgrokStatus> {
 
 export async function startNgrok(): Promise<NgrokStatus> {
   const res = await fetch(`${BASE}/api/ngrok/start`, { method: "POST" });
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`ngrok start failed (${res.status}): ${text.slice(0, 200)}`);
+  }
 }
 
 export async function stopNgrok(): Promise<void> {

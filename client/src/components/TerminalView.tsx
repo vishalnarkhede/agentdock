@@ -1,7 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { CustomKeyboard } from "./CustomKeyboard";
-import { useMobileNav } from "../MobileNavContext";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -81,9 +80,11 @@ interface Props {
   onClosed?: () => void;
   onAgentSwitched?: () => void;
   toolbarPortal?: React.RefObject<HTMLDivElement | null>;
+  onSwipeBack?: () => void;
+  onKeyboardVisibilityChange?: (visible: boolean) => void;
 }
 
-export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal }: Props) {
+export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange }: Props) {
   const { settings } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -96,10 +97,26 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [switchStep, setSwitchStep] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showPasteInput, setShowPasteInput] = useState(false);
+  const [pasteError, setPasteError] = useState("");
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const handlePaste = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) { sendInputRef.current(text); return; }
+      setPasteError("clipboard is empty");
+      setTimeout(() => setPasteError(""), 2000);
+    } catch {
+      // Permission denied — show paste bar as last resort
+      setShowPasteInput(true);
+      requestAnimationFrame(() => pasteInputRef.current?.focus());
+    }
+  }, []);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartYRef = useRef<number>(0);
+  const touchOriginXRef = useRef<number>(0);
+  const touchOriginYRef = useRef<number>(0);
   const touchScrollingRef = useRef<boolean>(false);
   const scrollPausedRef = useRef(false);
   const dragCountRef = useRef(0);
@@ -108,8 +125,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const sendShiftEnterRef = useRef<() => void>(() => {});
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [kbVisible, setKbVisible] = useState(false);
-  const mobileNav = useMobileNav();
   const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
+
+  useEffect(() => {
+    onKeyboardVisibilityChange?.(customKb && kbVisible);
+  }, [customKb, kbVisible, onKeyboardVisibilityChange]);
   const scrollbarDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
 
   // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
@@ -560,47 +580,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       {toolbarPortal?.current
         ? createPortal(toolbarContent, toolbarPortal.current)
         : toolbarContent}
-      {/* Mobile controls — portalled into header slot to merge the two bars */}
-      {mobileNav?.headerControlsRef?.current && createPortal(
-        <div className="terminal-mobile-controls terminal-mobile-controls-inline">
-          {connected && (
-            <button
-              className="terminal-mobile-btn terminal-mobile-esc"
-              onClick={() => sendInput("\x1b")}
-            >
-              Stop
-            </button>
-          )}
-          {lastContent && (
-            <button
-              className="terminal-mobile-btn"
-              onClick={() => {
-                const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-                navigator.clipboard.writeText(clean.trim());
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? "✓" : "Copy"}
-            </button>
-          )}
-          {customKb && (
-            <button
-              className="terminal-mobile-btn"
-              onClick={() => setKbVisible((v) => !v)}
-            >
-              {kbVisible ? "⌨ hide" : "⌨ write"}
-            </button>
-          )}
-          <button
-            className="terminal-mobile-btn"
-            onClick={() => setFullscreen((f) => !f)}
-          >
-            {fullscreen ? "↙" : "↗"}
-          </button>
-        </div>,
-        mobileNav.headerControlsRef.current
-      )}
       {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
       <div className="term-scrollbar-area">
         {scrollThumb.size < 0.99 && (
@@ -645,22 +624,38 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         onTouchStart={(e) => {
           const touch = e.touches[0];
           touchStartYRef.current = touch.clientY;
+          touchOriginXRef.current = touch.clientX;
+          touchOriginYRef.current = touch.clientY;
           touchScrollingRef.current = false;
           longPressTimer.current = setTimeout(() => {
             setContextMenu({ x: touch.clientX, y: touch.clientY });
           }, 500);
         }}
-        onTouchEnd={() => {
+        onTouchEnd={(e) => {
           if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
+          }
+          // Swipe right from left edge → go back
+          if (onSwipeBack) {
+            const t = e.changedTouches[0];
+            const dx = t.clientX - touchOriginXRef.current;
+            const dy = t.clientY - touchOriginYRef.current;
+            if (dx > 80 && Math.abs(dy) < 60 && touchOriginXRef.current < 50) {
+              onSwipeBack();
+            }
           }
           touchScrollingRef.current = false;
         }}
         onTouchMove={(e) => {
           if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
+            const t = e.touches[0];
+            const dx = t.clientX - touchOriginXRef.current;
+            const dy = t.clientY - touchOriginYRef.current;
+            if (Math.sqrt(dx * dx + dy * dy) > 10) {
+              clearTimeout(longPressTimer.current);
+              longPressTimer.current = null;
+            }
           }
           const dy = touchStartYRef.current - e.touches[0].clientY;
           if (Math.abs(dy) < 5) return; // ignore tiny jitter
@@ -711,14 +706,21 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           />
           <div
             className="terminal-context-menu"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
+            style={{
+              top: Math.min(contextMenu.y, window.innerHeight - 120),
+              left: Math.min(contextMenu.x, window.innerWidth - 160),
+            }}
           >
             <button
               onClick={() => {
                 setContextMenu(null);
+                // Show paste bar immediately (synchronous) so iOS can focus it
+                // within the user gesture context, then try clipboard API in background
                 setShowPasteInput(true);
-                // Focus the paste input after it renders
                 requestAnimationFrame(() => pasteInputRef.current?.focus());
+                navigator.clipboard.readText().then((text) => {
+                  if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+                }).catch(() => {});
               }}
             >
               Paste
@@ -746,40 +748,62 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           </div>
         </>
       )}
-      {showPasteInput && (
-        <>
-          <div
-            className="terminal-context-backdrop"
-            onClick={() => setShowPasteInput(false)}
-          />
-          <div className="terminal-paste-overlay">
-            <textarea
-              ref={pasteInputRef}
-              className="terminal-paste-input"
-              placeholder="Long-press here and paste"
-              rows={3}
-              onPaste={(e) => {
-                e.preventDefault();
-                const text = e.clipboardData.getData("text");
-                if (text) {
-                  sendInputRef.current(text);
-                  setShowPasteInput(false);
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setShowPasteInput(false);
-              }}
-            />
-            <button
-              className="terminal-paste-cancel"
-              onClick={() => setShowPasteInput(false)}
-            >
-              cancel
-            </button>
-          </div>
-        </>
+      {pasteError && (
+        <div className="terminal-paste-error">{pasteError}</div>
       )}
-      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={() => { setShowPasteInput(true); requestAnimationFrame(() => pasteInputRef.current?.focus()); }} />}
+      {showPasteInput && (
+        <div className="terminal-paste-bar">
+          <textarea
+            ref={pasteInputRef}
+            className="terminal-paste-bar-input"
+            placeholder="Clipboard access denied — long-press here to paste manually"
+            rows={1}
+            autoFocus
+            onPaste={(e) => {
+              e.preventDefault();
+              const text = e.clipboardData.getData("text");
+              if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+            }}
+          />
+          <button className="terminal-paste-bar-cancel" onClick={() => setShowPasteInput(false)}>✕</button>
+        </div>
+      )}
+      {/* Mobile bottom toolbar — Stop / Copy / Keyboard toggle */}
+      <div className="mobile-terminal-toolbar">
+        {connected ? (
+          <button className="mobile-term-btn mobile-term-btn-stop" onClick={() => sendInput("\x1b")}>
+            ESC
+          </button>
+        ) : (
+          <div className="mobile-term-btn mobile-term-btn-placeholder" />
+        )}
+        {lastContent && (
+          <button className="mobile-term-btn" onClick={() => {
+            const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+            navigator.clipboard.writeText(clean.trim());
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}>
+            {copied ? "✓ Copied" : "⎘ Copy"}
+          </button>
+        )}
+        <button className={`mobile-term-btn${showPasteInput ? " mobile-term-btn-active" : ""}`} onClick={handlePaste}>
+          ⊕ Paste
+        </button>
+        <button className="mobile-term-btn" onClick={() => {
+          if (!customKb) {
+            setCustomKb(true);
+            localStorage.setItem("agentdock-kb", "custom");
+            window.dispatchEvent(new CustomEvent("agentdock-toggle-kb"));
+            setKbVisible(true);
+          } else {
+            setKbVisible((v) => !v);
+          }
+        }}>
+          {customKb && kbVisible ? "⌨ hide" : "⌨ write"}
+        </button>
+      </div>
+      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={handlePaste} />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 
 export type Tab = "terminal" | "plan" | "changes" | "sub-agents";
 
@@ -9,7 +9,8 @@ interface MobileNav {
   setActiveTab: (tab: Tab) => void;
   goBack: () => void;
   setGoBack: (fn: () => void) => void;
-  headerControlsRef: RefObject<HTMLDivElement | null>;
+  sessionTitle: string;
+  setSessionTitle: (title: string) => void;
 }
 
 const MobileNavContext = createContext<MobileNav | null>(null);
@@ -18,7 +19,7 @@ export function MobileNavProvider({ children }: { children: ReactNode }) {
   const [inSession, setInSession] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("terminal");
   const [goBackFn, setGoBackFn] = useState<() => void>(() => () => {});
-  const headerControlsRef = useRef<HTMLDivElement | null>(null);
+  const [sessionTitle, setSessionTitle] = useState("");
 
   const setGoBack = useCallback((fn: () => void) => {
     setGoBackFn(() => fn);
@@ -26,7 +27,7 @@ export function MobileNavProvider({ children }: { children: ReactNode }) {
 
   return (
     <MobileNavContext.Provider
-      value={{ inSession, setInSession, activeTab, setActiveTab, goBack: goBackFn, setGoBack, headerControlsRef }}
+      value={{ inSession, setInSession, activeTab, setActiveTab, goBack: goBackFn, setGoBack, sessionTitle, setSessionTitle }}
     >
       {children}
     </MobileNavContext.Provider>

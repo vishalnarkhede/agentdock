@@ -156,6 +156,8 @@ API: `GET /api/settings/preferences`, `PATCH /api/settings/preferences`
 9 themes via `data-theme` attribute on `<html>`. All colors use CSS variables:
 `--bg`, `--bg-card`, `--text`, `--text-dim`, `--accent`, `--border`, `--red`, `--green`, `--cyan`, etc.
 
+**Important**: Several themes (especially glass) use semi-transparent rgba values for `--bg-card`, `--bg-input`, and `--border`. See the **UI & CSS Guidelines** section before using these variables.
+
 ## Key Types
 
 ```typescript
@@ -187,6 +189,60 @@ interface CreateSessionRequest {
   meta?: Record<string, string>;
 }
 ```
+
+## UI & CSS Guidelines
+
+### Before touching any CSS or component
+
+1. **Search styles.css first** — it's 5000+ lines. The class you need likely already exists. `grep` before adding.
+2. **Read the full component + its CSS section** before making any change. Understand what's already there.
+3. **Check CSS variable resolution** before using a variable as a background, especially on the glass theme:
+
+| Variable | Glass theme value | Safe for floating elements? |
+|----------|------------------|----------------------------|
+| `--bg` | `#0f0f1a` (solid) | ✅ yes |
+| `--bg-modal` | `#1a1a2e` (solid) | ✅ yes |
+| `--bg-card` | `rgba(255,255,255,0.05)` — **5% opacity** | ❌ NO |
+| `--bg-input` | `rgba(255,255,255,0.07)` — **7% opacity** | ❌ NO |
+| `--bg-hover` | `rgba(255,255,255,0.10)` | ❌ NO |
+| `--border` | `rgba(255,255,255,0.08)` | ❌ NO |
+
+**Rule**: Any element that floats above other content (modal, dropdown, tooltip, context menu, popover) must use a solid background. Use `var(--bg-modal, var(--bg-input))` — never `var(--bg-card)` alone.
+
+### Floating elements (modals, dropdowns, menus)
+
+- Always use `var(--bg-modal, var(--bg-input))` as the background — not `--bg-card`
+- If a dropdown is clipped by a parent with `overflow: hidden` or `overflow: auto`, it needs `createPortal(el, document.body)` + `position: fixed` + `getBoundingClientRect()` to position
+- Never rely on `z-index` alone to fix transparency — a transparent background shows through regardless of stacking order
+
+### Layout side effects to check before changing
+
+- **`body` padding-bottom on mobile** — must stay at `52px` (the fixed bottom nav height). Removing it hides the terminal toolbar behind the nav bar.
+- **`overflow: hidden/auto` on parents** — clips `position: absolute` children. Check parent chain before using absolute positioning for dropdowns.
+- **Fixed bottom nav** — any full-height content needs `padding-bottom: 52px` on mobile.
+- **`body.mobile-kb-open`** — when keyboard is open, header and nav are hidden, body padding is 0. Don't assume nav/header are visible when in terminal.
+
+### Mobile UX
+
+- **Tap targets**: minimum 44×44px. Use padding to achieve this without enlarging the visual element.
+- **Safe area insets**: use `env(safe-area-inset-bottom)` only inside elements that sit at the physical bottom edge of the screen (e.g., the nav bar itself). Do NOT apply it to `body` padding — it causes double-counting.
+- **Keyboard visibility**: handled via `body.mobile-kb-open` class. Terminal fills screen when keyboard is open.
+
+### Redesign requests
+
+When asked to redesign a component or "fix UX":
+1. **Understand the problem first** — what exactly is broken? Read the component, see what CSS applies.
+2. **Plan the layout** — what elements exist, how should they be arranged, what are the constraints (mobile vs desktop, fixed heights, overflow)?
+3. **Design holistically** — don't patch one line. Consider the full component layout before touching code.
+4. **Don't create new patterns** — reuse existing CSS classes and variables. Check if a similar component already exists.
+
+### Existing patterns to reuse
+
+- `settings-overlay` + `settings-modal` — standard modal shell (already correct background)
+- `createPortal` + `getBoundingClientRect` — pattern for dropdowns that must escape overflow containers (see `MetaSelect` in Dashboard.tsx)
+- `var(--bg-modal, var(--bg-card))` — safe popup background across all themes
+
+---
 
 ## Common Gotchas
 

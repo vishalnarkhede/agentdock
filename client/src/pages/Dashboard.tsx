@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { MetaSelect } from "../components/MetaSelect";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta, restoreSession, createSession } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
@@ -297,6 +298,7 @@ function SessionRow({
   );
 }
 
+
 function SessionEditModal({
   session,
   presets,
@@ -305,7 +307,7 @@ function SessionEditModal({
 }: {
   session: SessionInfo;
   presets: MetaPropertyPreset[];
-  onSave: (meta: Record<string, string>) => void;
+  onSave: (meta: Record<string, string>, updatedPresets: MetaPropertyPreset[]) => void;
   onClose: () => void;
 }) {
   const [meta, setMeta] = useState<Record<string, string>>(session.meta || {});
@@ -330,16 +332,16 @@ function SessionEditModal({
             <div key={preset.key} className="session-edit-field">
               <label className="session-edit-label">{preset.label}</label>
               {preset.values.length > 0 ? (
-                <select
-                  className="form-input"
+                <MetaSelect
+                  values={preset.values}
                   value={meta[preset.key] || ""}
-                  onChange={(e) => setMeta(prev => ({ ...prev, [preset.key]: e.target.value }))}
-                >
-                  <option value="">—</option>
-                  {preset.values.map((v) => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setMeta(prev => ({ ...prev, [preset.key]: v }))}
+                  onAddNew={(v) => {
+                    preset.values.push(v);
+                    setMeta(prev => ({ ...prev, [preset.key]: v }));
+                  }}
+                  placeholder="—"
+                />
               ) : (
                 <input
                   type="text"
@@ -353,7 +355,7 @@ function SessionEditModal({
           ))}
         </div>
         <div className="session-edit-footer">
-          <button className="btn btn-primary" onClick={() => onSave(meta)}>Save</button>
+          <button className="btn btn-primary" onClick={() => onSave(meta, presets)}>Save</button>
           <button className="btn" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -680,7 +682,13 @@ export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const mobileNav = useMobileNav();
   const [mobileShowTerminal, setMobileShowTerminal] = useState(false);
-  const isMobile = typeof window !== "undefined" && window.innerWidth <= 768;
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const activeTab = mobileNav?.activeTab ?? "terminal";
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
@@ -836,6 +844,9 @@ export function Dashboard() {
       if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
     });
     fetchMetaPropertyPresets().then(setMetaPresets);
+    const handler = () => fetchMetaPropertyPresets().then(setMetaPresets);
+    window.addEventListener("agentdock-meta-presets-changed", handler);
+    return () => window.removeEventListener("agentdock-meta-presets-changed", handler);
   }, []);
 
   const togglePin = useCallback((name: string) => {
@@ -1142,7 +1153,7 @@ export function Dashboard() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync mobile nav context
-  const { setInSession, setGoBack } = mobileNav ?? {};
+  const { setInSession, setGoBack, setSessionTitle } = mobileNav ?? {};
   useEffect(() => {
     setInSession?.(!!(mobileShowTerminal && activeSession));
   }, [mobileShowTerminal, activeSession, setInSession]);
@@ -1151,8 +1162,27 @@ export function Dashboard() {
     setGoBack?.(() => setMobileShowTerminal(false));
   }, [setGoBack]);
 
+  const mobileInSession = mobileShowTerminal && !!activeSession;
+
+  // Sync session title for mobile header
+  useEffect(() => {
+    if (mobileInSession && activeSessionInfo) {
+      setSessionTitle?.(activeSessionInfo.displayName);
+    } else {
+      setSessionTitle?.("");
+    }
+  }, [mobileInSession, activeSessionInfo, setSessionTitle]);
+
+  // Keyboard open state — hides bottom nav
+  const [kbOpen, setKbOpen] = useState(false);
+  useEffect(() => {
+    document.body.classList.toggle("mobile-kb-open", kbOpen);
+    return () => { document.body.classList.remove("mobile-kb-open"); };
+  }, [kbOpen]);
+
   return (
-    <div className={`split-layout ${mobileShowTerminal && activeSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <>
+    <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div className="split-sidebar">
         <div className="sidebar-header">
           <span className="sidebar-title">sessions</span>
@@ -1445,6 +1475,8 @@ export function Dashboard() {
                     onClosed={handleSessionClosed}
                     onAgentSwitched={refresh}
                     toolbarPortal={toolbarRef}
+                    onSwipeBack={() => setMobileShowTerminal(false)}
+                    onKeyboardVisibilityChange={setKbOpen}
                   />
                 )}
               </div>
@@ -1635,8 +1667,10 @@ export function Dashboard() {
           session={editingSession}
           presets={metaPresets}
           onClose={() => setEditingSession(null)}
-          onSave={async (meta) => {
+          onSave={async (meta, updatedPresets) => {
             await updateSessionMeta(editingSession.name, meta);
+            await saveMetaPropertyPresets(updatedPresets);
+            setMetaPresets([...updatedPresets]);
             setEditingSession(null);
             refresh();
           }}
@@ -1644,5 +1678,49 @@ export function Dashboard() {
       )}
       {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
     </div>
+
+    {/* FAB: new session, only on session list */}
+    {!mobileInSession && (
+      <button className="session-fab" onClick={() => navigate("/create")} aria-label="New session">
+        +
+      </button>
+    )}
+
+    {/* Bottom navigation bar */}
+    <nav className="mobile-bottom-nav">
+      <button
+        className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
+        onClick={() => setMobileShowTerminal(false)}
+      >
+        <span className="mobile-nav-icon">⊟</span>
+        <span className="mobile-nav-label">Sessions</span>
+      </button>
+      {mobileInSession && (
+        <>
+          <button
+            className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
+          >
+            <span className="mobile-nav-icon">▶</span>
+            <span className="mobile-nav-label">Terminal</span>
+          </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">≡</span>
+            <span className="mobile-nav-label">Plan</span>
+          </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">±</span>
+            <span className="mobile-nav-label">Changes</span>
+          </button>
+        </>
+      )}
+    </nav>
+    </>
   );
 }

@@ -26,33 +26,38 @@ app.get("/status", async (c) => {
 });
 
 app.post("/start", async (c) => {
-  // Already running (externally or via us)
-  const existingUrl = await fetchNgrokUrl();
-  if (existingUrl) {
-    return c.json({ running: true, url: existingUrl });
+  try {
+    // Already running (externally or via us)
+    const existingUrl = await fetchNgrokUrl();
+    if (existingUrl) {
+      return c.json({ running: true, url: existingUrl });
+    }
+
+    const port = process.env.NGROK_PORT || "5173";
+    // Vite uses basicSsl (HTTPS), so ngrok must connect via https and rewrite the host header
+    const args = ["http", `https://localhost:${port}`, "--host-header=rewrite"];
+    const basicAuth = getNgrokBasicAuth();
+    if (basicAuth) args.push("--basic-auth", basicAuth);
+    const proc = spawn("ngrok", args, { detached: false });
+
+    proc.on("exit", () => {
+      if (ngrokProcess === proc) ngrokProcess = null;
+    });
+
+    ngrokProcess = proc;
+
+    // Poll until tunnel is up (max 8s)
+    let url: string | null = null;
+    for (let i = 0; i < 16; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      url = await fetchNgrokUrl();
+      if (url) break;
+    }
+
+    return c.json({ running: url !== null, url });
+  } catch (err: any) {
+    return c.json({ running: false, url: null, error: err?.message ?? "failed to start ngrok" }, 500);
   }
-
-  const port = process.env.NGROK_PORT || "5173";
-  const args = ["http", port];
-  const basicAuth = getNgrokBasicAuth();
-  if (basicAuth) args.push("--basic-auth", basicAuth);
-  const proc = spawn("ngrok", args, { detached: false });
-
-  proc.on("exit", () => {
-    if (ngrokProcess === proc) ngrokProcess = null;
-  });
-
-  ngrokProcess = proc;
-
-  // Poll until tunnel is up (max 8s)
-  let url: string | null = null;
-  for (let i = 0; i < 16; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    url = await fetchNgrokUrl();
-    if (url) break;
-  }
-
-  return c.json({ running: url !== null, url });
 });
 
 app.post("/stop", async (c) => {

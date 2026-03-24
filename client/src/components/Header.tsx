@@ -2,10 +2,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsModal } from "./SettingsModal";
 import { createSession, fetchPreferences, updatePreferences, fetchNgrokStatus, startNgrok, stopNgrok } from "../api";
-import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
-import type { Tab } from "../MobileNavContext";
 import { isDemo } from "../demo";
+import { useMobileNav } from "../MobileNavContext";
 import type { NgrokStatus } from "../api";
 
 export interface QuickLaunch {
@@ -16,15 +15,13 @@ export interface QuickLaunch {
   agentType?: string;
 }
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "terminal", label: "terminal" },
-  { id: "plan", label: "plan" },
-  { id: "changes", label: "changes" },
-];
 
 export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
+  const mobileNav = useMobileNav();
+  const sessionTitle = mobileNav?.sessionTitle ?? "";
+  const inSession = mobileNav?.inSession ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -35,7 +32,6 @@ export function Header() {
   const [quickLaunches, setQuickLaunches] = useState<QuickLaunch[]>([]);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const mobileNav = useMobileNav();
   const { enabled: authEnabled, logout } = useAuth();
 
   const loadQuickLaunches = useCallback(() => {
@@ -159,28 +155,32 @@ export function Header() {
 
   return (
     <header className="header">
-      {mobileNav?.inSession && (
-        <button className="header-back-btn" onClick={mobileNav.goBack}>
-          &lt; sessions
+      {/* Back button — mobile only, non-root pages or when in session */}
+      {(location.pathname !== "/" || inSession) && (
+        <button
+          className="header-back-btn header-back-btn-mobile"
+          onClick={() => inSession ? mobileNav?.goBack() : navigate(-1)}
+          aria-label="Back"
+        >
+          ‹
         </button>
       )}
-      {/* On mobile in-session: show terminal controls slot instead of logo */}
-      {mobileNav?.inSession
-        ? <div ref={mobileNav.headerControlsRef} className="header-mobile-controls-slot" />
-        : (
-          <Link to="/" className="header-title header-title-desktop">
-            <svg className="header-logo" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" />
-              <polyline points="6 8 10 12 6 16" />
-              <line x1="14" y1="16" x2="18" y2="16" />
-              <circle cx="7" cy="21" r="1" fill="currentColor" stroke="none" />
-              <circle cx="12" cy="21" r="1" fill="currentColor" stroke="none" />
-              <circle cx="17" cy="21" r="1" fill="currentColor" stroke="none" />
-            </svg>
-            AgentDock
-          </Link>
-        )
-      }
+      {/* Session title — mobile only, shown when in session */}
+      {sessionTitle && (
+        <span className="header-session-title-mobile">{sessionTitle}</span>
+      )}
+      {/* Logo — desktop only */}
+      <Link to="/" className="header-title header-title-desktop">
+        <svg className="header-logo" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <polyline points="6 8 10 12 6 16" />
+          <line x1="14" y1="16" x2="18" y2="16" />
+          <circle cx="7" cy="21" r="1" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="21" r="1" fill="currentColor" stroke="none" />
+          <circle cx="17" cy="21" r="1" fill="currentColor" stroke="none" />
+        </svg>
+        AgentDock
+      </Link>
       <nav className="header-nav header-nav-desktop">
         <button
           className="header-fix-me-btn"
@@ -258,22 +258,6 @@ export function Header() {
         </button>
         {menuOpen && (
           <div className="header-mobile-menu">
-            {mobileNav?.inSession && (
-              <div className="header-mobile-tabs">
-                {TABS.map((tab) => (
-                  <button
-                    key={tab.id}
-                    className={`header-mobile-tab ${mobileNav.activeTab === tab.id ? "header-mobile-tab-active" : ""}`}
-                    onClick={() => {
-                      mobileNav.setActiveTab(tab.id);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            )}
             <button
               className="header-fix-me-btn"
               onClick={() => { handleFixMe(); setMenuOpen(false); }}
@@ -308,13 +292,30 @@ export function Header() {
               &#9881; Settings
             </button>
             {!isDemo() && (
-              <button
-                className={`header-ngrok-btn ${ngrok.running ? "header-ngrok-btn-on" : ""}`}
-                onClick={() => { handleNgrokToggle(); setMenuOpen(false); }}
-                disabled={ngrokLoading}
-              >
-                {ngrokLoading ? "..." : ngrok.running ? `ngrok on${ngrok.url ? ` — ${ngrok.url}` : ""}` : "ngrok off"}
-              </button>
+              <>
+                <button
+                  className={`header-ngrok-btn ${ngrok.running ? "header-ngrok-btn-on" : ""}`}
+                  onClick={() => { handleNgrokToggle(); setMenuOpen(false); }}
+                  disabled={ngrokLoading}
+                >
+                  {ngrokLoading ? "..." : ngrok.running ? "ngrok on" : "ngrok off"}
+                </button>
+                {ngrok.running && ngrok.url && (
+                  <a
+                    className="header-ngrok-url"
+                    href={ngrok.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigator.clipboard.writeText(ngrok.url!);
+                    }}
+                  >
+                    {ngrok.url.replace("https://", "")}
+                    <span className="header-ngrok-copy">⎘</span>
+                  </a>
+                )}
+              </>
             )}
             <button
               className={`header-fix-me-btn ${customKb ? "header-kb-active" : ""}`}

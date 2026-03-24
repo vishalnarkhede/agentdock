@@ -139,9 +139,17 @@ export function CustomKeyboard({ onInput, onAttach, onPasteRequest }: Props) {
         </button>
         <button
           className="ckb-key ckb-key-mod"
-          onPointerDown={(e) => { e.preventDefault(); tapSpecial("\t"); }}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            if (mode === "shift") {
+              tapSpecial("\x1b[Z");
+              setMode("normal");
+            } else {
+              tapSpecial("\t");
+            }
+          }}
         >
-          ⇥ tab
+          {mode === "shift" ? "⇧⇥" : "⇥ tab"}
         </button>
         <button
           className="ckb-key ckb-key-mod"
