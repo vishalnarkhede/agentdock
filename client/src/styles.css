@@ -653,6 +653,11 @@ h1 {
   border-bottom: 1px solid var(--border);
   border-left: 2px solid transparent;
   transition: all 0.1s;
+  touch-action: manipulation;
+}
+
+.session-row:active {
+  background: var(--green-dim);
 }
 
 .session-row[draggable="true"] {
@@ -856,7 +861,7 @@ h1 {
 
 .session-row-restore-btn {
   margin-left: 4px;
-  padding: 1px 7px;
+  padding: 6px 10px;
   font-size: calc(var(--fs-base) - 3px);
   border: 1px solid var(--accent);
   border-radius: 3px;
@@ -866,6 +871,8 @@ h1 {
   opacity: 0.85;
   white-space: nowrap;
   transition: opacity 0.15s, background 0.15s;
+  touch-action: manipulation;
+  min-height: 32px;
 }
 
 .session-row-restore-btn:hover:not(:disabled) {
@@ -937,7 +944,7 @@ h1 {
 
 .session-row-path {
   font-size: calc(var(--fs-base) - 2px);
-  color: #444;
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1017,8 +1024,8 @@ h1 {
   color: var(--text-dim);
   font-size: var(--fs-base);
   cursor: pointer;
-  width: 24px;
-  height: 24px;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1026,6 +1033,7 @@ h1 {
   transition: background 0.1s, color 0.1s;
   line-height: 1;
   letter-spacing: 1px;
+  touch-action: manipulation;
 }
 
 .session-row-menu-btn:hover {
@@ -1038,11 +1046,11 @@ h1 {
   right: 0;
   top: 100%;
   z-index: 100;
-  background: var(--card-bg, var(--bg));
+  background: var(--bg-modal, var(--bg));
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 160px;
   padding: 4px 0;
 }
 
@@ -1055,9 +1063,13 @@ h1 {
   font-family: var(--font-mono);
   font-size: calc(var(--fs-base) - 2px);
   text-align: left;
-  padding: 6px 12px;
+  padding: 11px 16px;
   cursor: pointer;
   transition: background 0.1s;
+  touch-action: manipulation;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
 }
 
 .session-row-menu-item:hover {
@@ -4319,6 +4331,81 @@ h1 {
   font-size: calc(var(--fs-base) - 2px);
 }
 
+/* ─── Ngrok URL toast ─── */
+.ngrok-toast {
+  position: fixed;
+  bottom: calc(70px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-modal, var(--bg-card));
+  border: 1px solid var(--green, #22c55e);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  max-width: 90vw;
+  animation: ngrok-toast-in 0.2s ease;
+}
+
+@keyframes ngrok-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.ngrok-toast-label {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--green, #22c55e);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ngrok-toast-url {
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ngrok-toast-url:hover {
+  color: var(--accent);
+}
+
+.ngrok-toast-copy {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: calc(var(--fs-base) - 1px);
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ngrok-toast-copy:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.ngrok-toast-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 /* ─── Custom keyboard ─── */
 .ckb {
   display: none; /* hidden on desktop */
@@ -5317,8 +5404,8 @@ h1 {
   }
 
   .session-row-menu-btn {
-    min-width: 32px;
-    min-height: 32px;
+    min-width: 44px;
+    min-height: 44px;
     font-size: 14px;
   }
 
@@ -5952,12 +6039,14 @@ h1 {
   color: var(--cyan);
   background: rgba(0, 255, 204, 0.06);
   border: 1px solid rgba(0, 255, 204, 0.15);
-  padding: 1px 8px;
+  padding: 5px 8px;
   border-radius: 10px;
   margin-left: 4px;
   white-space: nowrap;
   cursor: pointer;
   transition: all 0.15s;
+  touch-action: manipulation;
+  min-height: 32px;
 }
 
 .session-row-children-badge:hover {
