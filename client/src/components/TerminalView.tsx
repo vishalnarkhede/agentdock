@@ -81,9 +81,10 @@ interface Props {
   onAgentSwitched?: () => void;
   toolbarPortal?: React.RefObject<HTMLDivElement | null>;
   onSwipeBack?: () => void;
+  onKeyboardVisibilityChange?: (visible: boolean) => void;
 }
 
-export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack }: Props) {
+export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange }: Props) {
   const { settings } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -96,8 +97,22 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [switchStep, setSwitchStep] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showPasteInput, setShowPasteInput] = useState(false);
+  const [pasteError, setPasteError] = useState("");
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const handlePaste = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) { sendInputRef.current(text); return; }
+      setPasteError("clipboard is empty");
+      setTimeout(() => setPasteError(""), 2000);
+    } catch {
+      // Permission denied — show paste bar as last resort
+      setShowPasteInput(true);
+      requestAnimationFrame(() => pasteInputRef.current?.focus());
+    }
+  }, []);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartYRef = useRef<number>(0);
   const touchOriginXRef = useRef<number>(0);
@@ -111,6 +126,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [kbVisible, setKbVisible] = useState(false);
   const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
+
+  useEffect(() => {
+    onKeyboardVisibilityChange?.(customKb && kbVisible);
+  }, [customKb, kbVisible, onKeyboardVisibilityChange]);
   const scrollbarDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
 
   // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
@@ -630,8 +649,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         }}
         onTouchMove={(e) => {
           if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
+            const t = e.touches[0];
+            const dx = t.clientX - touchOriginXRef.current;
+            const dy = t.clientY - touchOriginYRef.current;
+            if (Math.sqrt(dx * dx + dy * dy) > 10) {
+              clearTimeout(longPressTimer.current);
+              longPressTimer.current = null;
+            }
           }
           const dy = touchStartYRef.current - e.touches[0].clientY;
           if (Math.abs(dy) < 5) return; // ignore tiny jitter
@@ -690,9 +714,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             <button
               onClick={() => {
                 setContextMenu(null);
+                // Show paste bar immediately (synchronous) so iOS can focus it
+                // within the user gesture context, then try clipboard API in background
                 setShowPasteInput(true);
-                // Focus the paste input after it renders
                 requestAnimationFrame(() => pasteInputRef.current?.focus());
+                navigator.clipboard.readText().then((text) => {
+                  if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+                }).catch(() => {});
               }}
             >
               Paste
@@ -720,38 +748,25 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           </div>
         </>
       )}
+      {pasteError && (
+        <div className="terminal-paste-error">{pasteError}</div>
+      )}
       {showPasteInput && (
-        <>
-          <div
-            className="terminal-context-backdrop"
-            onClick={() => setShowPasteInput(false)}
+        <div className="terminal-paste-bar">
+          <textarea
+            ref={pasteInputRef}
+            className="terminal-paste-bar-input"
+            placeholder="Clipboard access denied — long-press here to paste manually"
+            rows={1}
+            autoFocus
+            onPaste={(e) => {
+              e.preventDefault();
+              const text = e.clipboardData.getData("text");
+              if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+            }}
           />
-          <div className="terminal-paste-overlay">
-            <textarea
-              ref={pasteInputRef}
-              className="terminal-paste-input"
-              placeholder="Long-press here and paste"
-              rows={3}
-              onPaste={(e) => {
-                e.preventDefault();
-                const text = e.clipboardData.getData("text");
-                if (text) {
-                  sendInputRef.current(text);
-                  setShowPasteInput(false);
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setShowPasteInput(false);
-              }}
-            />
-            <button
-              className="terminal-paste-cancel"
-              onClick={() => setShowPasteInput(false)}
-            >
-              cancel
-            </button>
-          </div>
-        </>
+          <button className="terminal-paste-bar-cancel" onClick={() => setShowPasteInput(false)}>✕</button>
+        </div>
       )}
       {/* Mobile bottom toolbar — Stop / Copy / Keyboard toggle */}
       <div className="mobile-terminal-toolbar">
@@ -772,6 +787,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             {copied ? "✓ Copied" : "⎘ Copy"}
           </button>
         )}
+        <button className={`mobile-term-btn${showPasteInput ? " mobile-term-btn-active" : ""}`} onClick={handlePaste}>
+          ⊕ Paste
+        </button>
         <button className="mobile-term-btn" onClick={() => {
           if (!customKb) {
             setCustomKb(true);
@@ -785,7 +803,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           {customKb && kbVisible ? "⌨ hide" : "⌨ write"}
         </button>
       </div>
-      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={() => { setShowPasteInput(true); requestAnimationFrame(() => pasteInputRef.current?.focus()); }} />}
+      {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={handlePaste} />}
     </div>
   );
 }

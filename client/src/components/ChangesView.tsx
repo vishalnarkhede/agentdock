@@ -94,7 +94,7 @@ function DiffBlock({
   onMouseDown: (fileIdx: number, lineIdx: number) => void;
   onMouseMove: (fileIdx: number, lineIdx: number) => void;
   onMouseUp: () => void;
-  onTouchStart: (fileIdx: number, lineIdx: number) => void;
+  onTouchStart: (fileIdx: number, lineIdx: number, clientX: number, clientY: number) => void;
   isDragging: React.MutableRefObject<boolean>;
   onLineClick: (fileIdx: number, lineIdx: number, shiftKey: boolean) => void;
   onAddComment: (filePath: string, selectedCode: string, comment: string) => void;
@@ -190,7 +190,7 @@ function DiffBlock({
           }}
           onMouseMove={() => onMouseMove(fileIdx, i)}
           onMouseUp={() => onMouseUp()}
-          onTouchStart={() => onTouchStart(fileIdx, i)}
+          onTouchStart={(e) => { e.preventDefault(); onTouchStart(fileIdx, i, e.touches[0].clientX, e.touches[0].clientY); }}
           onClick={(e) => {
             if (e.shiftKey) onLineClick(fileIdx, i, true);
           }}
@@ -218,6 +218,12 @@ function DiffBlock({
                 disabled={!comment.trim()}
               >
                 add comment
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => { setComment(""); onLineClick(-1, -1, false); }}
+              >
+                cancel
               </button>
             </div>
           </div>,
@@ -348,6 +354,12 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
   const dragFileIdxRef = useRef(-1);
   const lastDragLineRef = useRef(-1);
 
+  // Long-press touch state
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPosRef = useRef({ x: 0, y: 0 });
+  const LONG_PRESS_DELAY = 400;
+  const MOVE_CANCEL_THRESHOLD = 8;
+
   const load = useCallback(() => {
     fetchGitChanges(sessionPath).then((data) => {
       setStatus(data.status);
@@ -378,7 +390,13 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
   // Global mouseup/touchend to end drag even if released outside diff area
   useEffect(() => {
     const onMouseUp = () => { isDraggingRef.current = false; };
-    const onTouchEnd = () => { isDraggingRef.current = false; };
+    const onTouchEnd = () => {
+      isDraggingRef.current = false;
+      if (touchTimerRef.current !== null) {
+        clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = null;
+      }
+    };
     window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("touchend", onTouchEnd);
     return () => {
@@ -407,11 +425,16 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
     isDraggingRef.current = false;
   }, []);
 
-  const handleTouchStart = useCallback((fileIdx: number, lineIdx: number) => {
-    isDraggingRef.current = true;
-    dragFileIdxRef.current = fileIdx;
-    lastDragLineRef.current = lineIdx;
-    setSelection({ fileIdx, startLine: lineIdx, endLine: lineIdx });
+  const handleTouchStart = useCallback((fileIdx: number, lineIdx: number, clientX: number, clientY: number) => {
+    touchStartPosRef.current = { x: clientX, y: clientY };
+    if (touchTimerRef.current !== null) clearTimeout(touchTimerRef.current);
+    touchTimerRef.current = setTimeout(() => {
+      touchTimerRef.current = null;
+      isDraggingRef.current = true;
+      dragFileIdxRef.current = fileIdx;
+      lastDragLineRef.current = lineIdx;
+      setSelection({ fileIdx, startLine: lineIdx, endLine: lineIdx });
+    }, LONG_PRESS_DELAY);
   }, []);
 
   const handleLineClick = useCallback((fileIdx: number, lineIdx: number, shiftKey: boolean) => {
@@ -496,6 +519,25 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
     }
   };
 
+  // Cancel long-press if finger moves (i.e. user is scrolling)
+  const diffContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = diffContainerRef.current;
+    if (!el) return;
+    const handleTouchMove = (e: TouchEvent) => {
+      if (touchTimerRef.current === null) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - touchStartPosRef.current.x;
+      const dy = touch.clientY - touchStartPosRef.current.y;
+      if (Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_THRESHOLD) {
+        clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = null;
+      }
+    };
+    el.addEventListener("touchmove", handleTouchMove, { passive: true });
+    return () => el.removeEventListener("touchmove", handleTouchMove);
+  }, []);
+
   const diffFiles = useMemo(() => parseDiff(diff), [diff]);
   const prDiffFiles = useMemo(() => parseDiff(prDiff), [prDiff]);
   const statusEntries = useMemo(() => parseStatus(status), [status]);
@@ -530,60 +572,56 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
   };
 
   return (
-    <div className="repo-changes">
+    <div className="repo-changes" ref={diffContainerRef}>
       <div className="changes-header">
-        <div className="changes-header-left">
-          {showRepoLabel && <span className="repo-changes-name">{repoLabel}</span>}
-          <span className="changes-branch">{branch || "unknown"}</span>
-          {(hasChanges || viewMode === "pr") && activeDiffFiles.length > 0 && (
-            <span className="changes-summary">
-              {activeDiffFiles.length} file{activeDiffFiles.length !== 1 ? "s" : ""}
-              {totalAdd > 0 && <span className="diff-stat-add"> +{totalAdd}</span>}
-              {totalDel > 0 && <span className="diff-stat-del"> -{totalDel}</span>}
-            </span>
-          )}
-        </div>
-        <div className="changes-actions">
-          {existingPrUrl && (
-            <>
-              <button
-                className={`btn btn-sm changes-view-toggle${viewMode === "local" ? " changes-view-toggle-active" : ""}`}
-                onClick={() => setViewMode("local")}
-              >
-                local
+        <div className="changes-header-row">
+          <div className="changes-header-left">
+            {showRepoLabel && <span className="repo-changes-name">{repoLabel}</span>}
+            {(hasChanges || viewMode === "pr") && activeDiffFiles.length > 0 && (
+              <span className="changes-summary">
+                {activeDiffFiles.length} file{activeDiffFiles.length !== 1 ? "s" : ""}
+                {totalAdd > 0 && <span className="diff-stat-add"> +{totalAdd}</span>}
+                {totalDel > 0 && <span className="diff-stat-del"> -{totalDel}</span>}
+              </span>
+            )}
+          </div>
+          <div className="changes-header-actions">
+            <button className="btn btn-sm changes-refresh-btn" onClick={load} title="Refresh">↻</button>
+            {hasChanges && existingPrUrl ? (
+              <button className="btn btn-primary btn-sm" onClick={handlePush} disabled={pushing}>
+                {pushing ? "..." : "push"}
               </button>
-              <button
-                className={`btn btn-sm changes-view-toggle${viewMode === "pr" ? " changes-view-toggle-active" : ""}`}
-                onClick={() => setViewMode("pr")}
-              >
-                pr
+            ) : hasChanges && !createdPrUrl ? (
+              <button className="btn btn-primary btn-sm" onClick={() => setShowPrForm(!showPrForm)}>
+                + pr
               </button>
-            </>
-          )}
-          <button className="btn btn-sm" onClick={load}>refresh</button>
-          {hasChanges && existingPrUrl ? (
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={handlePush}
-              disabled={pushing}
-            >
-              {pushing ? "pushing..." : "push"}
-            </button>
-          ) : hasChanges && !createdPrUrl ? (
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => setShowPrForm(!showPrForm)}
-            >
-              create pr
-            </button>
-          ) : null}
+            ) : null}
+          </div>
         </div>
+        <span className="changes-branch">{branch || "unknown"}</span>
+        {existingPrUrl && (
+          <div className="changes-view-switcher">
+            <button
+              className={`changes-switcher-btn${viewMode === "local" ? " changes-switcher-active" : ""}`}
+              onClick={() => setViewMode("local")}
+            >
+              local
+            </button>
+            <button
+              className={`changes-switcher-btn${viewMode === "pr" ? " changes-switcher-active" : ""}`}
+              onClick={() => setViewMode("pr")}
+            >
+              pr diff
+            </button>
+          </div>
+        )}
       </div>
 
       {existingPrUrl && (
-        <div className="changes-pr-link">
-          <a href={existingPrUrl} target="_blank" rel="noopener noreferrer">{existingPrUrl}</a>
-        </div>
+        <a className="changes-pr-chip" href={existingPrUrl} target="_blank" rel="noopener noreferrer">
+          <span className="changes-pr-chip-text">{existingPrUrl.replace("https://github.com/", "")}</span>
+          <span className="changes-pr-chip-icon">↗</span>
+        </a>
       )}
 
       {pushSuccess && <div className="changes-pr-success">pushed successfully</div>}

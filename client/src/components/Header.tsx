@@ -4,6 +4,7 @@ import { SettingsModal } from "./SettingsModal";
 import { createSession, fetchPreferences, updatePreferences, fetchNgrokStatus, startNgrok, stopNgrok } from "../api";
 import { useAuth } from "../hooks/useAuth";
 import { isDemo } from "../demo";
+import { useMobileNav } from "../MobileNavContext";
 import type { NgrokStatus } from "../api";
 
 export interface QuickLaunch {
@@ -18,6 +19,9 @@ export interface QuickLaunch {
 export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
+  const mobileNav = useMobileNav();
+  const sessionTitle = mobileNav?.sessionTitle ?? "";
+  const inSession = mobileNav?.inSession ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
   const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -151,11 +155,19 @@ export function Header() {
 
   return (
     <header className="header">
-      {/* Back button — mobile only, non-root pages */}
-      {location.pathname !== "/" && (
-        <button className="header-back-btn header-back-btn-mobile" onClick={() => navigate(-1)} aria-label="Back">
+      {/* Back button — mobile only, non-root pages or when in session */}
+      {(location.pathname !== "/" || inSession) && (
+        <button
+          className="header-back-btn header-back-btn-mobile"
+          onClick={() => inSession ? mobileNav?.goBack() : navigate(-1)}
+          aria-label="Back"
+        >
           ‹
         </button>
+      )}
+      {/* Session title — mobile only, shown when in session */}
+      {sessionTitle && (
+        <span className="header-session-title-mobile">{sessionTitle}</span>
       )}
       {/* Logo — desktop only */}
       <Link to="/" className="header-title header-title-desktop">
@@ -280,13 +292,30 @@ export function Header() {
               &#9881; Settings
             </button>
             {!isDemo() && (
-              <button
-                className={`header-ngrok-btn ${ngrok.running ? "header-ngrok-btn-on" : ""}`}
-                onClick={() => { handleNgrokToggle(); setMenuOpen(false); }}
-                disabled={ngrokLoading}
-              >
-                {ngrokLoading ? "..." : ngrok.running ? `ngrok on${ngrok.url ? ` — ${ngrok.url}` : ""}` : "ngrok off"}
-              </button>
+              <>
+                <button
+                  className={`header-ngrok-btn ${ngrok.running ? "header-ngrok-btn-on" : ""}`}
+                  onClick={() => { handleNgrokToggle(); setMenuOpen(false); }}
+                  disabled={ngrokLoading}
+                >
+                  {ngrokLoading ? "..." : ngrok.running ? "ngrok on" : "ngrok off"}
+                </button>
+                {ngrok.running && ngrok.url && (
+                  <a
+                    className="header-ngrok-url"
+                    href={ngrok.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigator.clipboard.writeText(ngrok.url!);
+                    }}
+                  >
+                    {ngrok.url.replace("https://", "")}
+                    <span className="header-ngrok-copy">⎘</span>
+                  </a>
+                )}
+              </>
             )}
             <button
               className={`header-fix-me-btn ${customKb ? "header-kb-active" : ""}`}

@@ -9,6 +9,8 @@ interface MobileNav {
   setActiveTab: (tab: Tab) => void;
   goBack: () => void;
   setGoBack: (fn: () => void) => void;
+  sessionTitle: string;
+  setSessionTitle: (title: string) => void;
 }
 
 const MobileNavContext = createContext<MobileNav | null>(null);
@@ -17,6 +19,7 @@ export function MobileNavProvider({ children }: { children: ReactNode }) {
   const [inSession, setInSession] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("terminal");
   const [goBackFn, setGoBackFn] = useState<() => void>(() => () => {});
+  const [sessionTitle, setSessionTitle] = useState("");
 
   const setGoBack = useCallback((fn: () => void) => {
     setGoBackFn(() => fn);
@@ -24,7 +27,7 @@ export function MobileNavProvider({ children }: { children: ReactNode }) {
 
   return (
     <MobileNavContext.Provider
-      value={{ inSession, setInSession, activeTab, setActiveTab, goBack: goBackFn, setGoBack }}
+      value={{ inSession, setInSession, activeTab, setActiveTab, goBack: goBackFn, setGoBack, sessionTitle, setSessionTitle }}
     >
       {children}
     </MobileNavContext.Provider>

@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { MetaSelect } from "../components/MetaSelect";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, updateSessionMeta, restoreSession, createSession } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
@@ -297,6 +298,7 @@ function SessionRow({
   );
 }
 
+
 function SessionEditModal({
   session,
   presets,
@@ -305,7 +307,7 @@ function SessionEditModal({
 }: {
   session: SessionInfo;
   presets: MetaPropertyPreset[];
-  onSave: (meta: Record<string, string>) => void;
+  onSave: (meta: Record<string, string>, updatedPresets: MetaPropertyPreset[]) => void;
   onClose: () => void;
 }) {
   const [meta, setMeta] = useState<Record<string, string>>(session.meta || {});
@@ -330,16 +332,16 @@ function SessionEditModal({
             <div key={preset.key} className="session-edit-field">
               <label className="session-edit-label">{preset.label}</label>
               {preset.values.length > 0 ? (
-                <select
-                  className="form-input"
+                <MetaSelect
+                  values={preset.values}
                   value={meta[preset.key] || ""}
-                  onChange={(e) => setMeta(prev => ({ ...prev, [preset.key]: e.target.value }))}
-                >
-                  <option value="">—</option>
-                  {preset.values.map((v) => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setMeta(prev => ({ ...prev, [preset.key]: v }))}
+                  onAddNew={(v) => {
+                    preset.values.push(v);
+                    setMeta(prev => ({ ...prev, [preset.key]: v }));
+                  }}
+                  placeholder="—"
+                />
               ) : (
                 <input
                   type="text"
@@ -353,7 +355,7 @@ function SessionEditModal({
           ))}
         </div>
         <div className="session-edit-footer">
-          <button className="btn btn-primary" onClick={() => onSave(meta)}>Save</button>
+          <button className="btn btn-primary" onClick={() => onSave(meta, presets)}>Save</button>
           <button className="btn" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -1151,7 +1153,7 @@ export function Dashboard() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync mobile nav context
-  const { setInSession, setGoBack } = mobileNav ?? {};
+  const { setInSession, setGoBack, setSessionTitle } = mobileNav ?? {};
   useEffect(() => {
     setInSession?.(!!(mobileShowTerminal && activeSession));
   }, [mobileShowTerminal, activeSession, setInSession]);
@@ -1161,6 +1163,22 @@ export function Dashboard() {
   }, [setGoBack]);
 
   const mobileInSession = mobileShowTerminal && !!activeSession;
+
+  // Sync session title for mobile header
+  useEffect(() => {
+    if (mobileInSession && activeSessionInfo) {
+      setSessionTitle?.(activeSessionInfo.displayName);
+    } else {
+      setSessionTitle?.("");
+    }
+  }, [mobileInSession, activeSessionInfo, setSessionTitle]);
+
+  // Keyboard open state — hides bottom nav
+  const [kbOpen, setKbOpen] = useState(false);
+  useEffect(() => {
+    document.body.classList.toggle("mobile-kb-open", kbOpen);
+    return () => { document.body.classList.remove("mobile-kb-open"); };
+  }, [kbOpen]);
 
   return (
     <>
@@ -1458,6 +1476,7 @@ export function Dashboard() {
                     onAgentSwitched={refresh}
                     toolbarPortal={toolbarRef}
                     onSwipeBack={() => setMobileShowTerminal(false)}
+                    onKeyboardVisibilityChange={setKbOpen}
                   />
                 )}
               </div>
@@ -1648,8 +1667,10 @@ export function Dashboard() {
           session={editingSession}
           presets={metaPresets}
           onClose={() => setEditingSession(null)}
-          onSave={async (meta) => {
+          onSave={async (meta, updatedPresets) => {
             await updateSessionMeta(editingSession.name, meta);
+            await saveMetaPropertyPresets(updatedPresets);
+            setMetaPresets([...updatedPresets]);
             setEditingSession(null);
             refresh();
           }}
