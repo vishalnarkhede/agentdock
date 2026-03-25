@@ -906,15 +906,18 @@ export function Dashboard() {
   }, []);
 
   // ─── MRU session switching ───
-  // mruList[0] = current session, mruList[1] = previous, etc.
+  // mruList[0] = most recently visited, mruList[1] = previous, etc.
   const mruList = useRef<string[]>([]);
   const [mruSwitcherVisible, setMruSwitcherVisible] = useState(false);
   const mruDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mruSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Flag: when navigating via shortcut, don't reorder the list (would cause flip-flop)
+  const mruNavigating = useRef(false);
 
-  // Update MRU whenever active session changes, persist to preferences (debounced)
+  // Update MRU order when active session changes — but NOT during shortcut navigation
   useEffect(() => {
     if (!activeSession) return;
+    if (mruNavigating.current) return;
     mruList.current = [
       activeSession,
       ...mruList.current.filter((s) => s !== activeSession),
@@ -936,12 +939,17 @@ export function Dashboard() {
       if (list.length < 2) return;
 
       const currentIdx = list.indexOf(activeSession ?? "");
-      // BracketRight = ] = forward (more recent), BracketLeft = [ = back (older)
+      // BracketLeft = [ = go back (older), BracketRight = ] = go forward (more recent)
       const delta = e.code === "BracketLeft" ? 1 : -1;
       const nextIdx = Math.max(0, Math.min(list.length - 1, currentIdx + delta));
       if (nextIdx === currentIdx) return;
+
+      // Set flag so the MRU update effect doesn't reorder the list during navigation
+      mruNavigating.current = true;
       setActiveSession(list[nextIdx]);
       setMobileShowTerminal(true);
+      // Clear flag after state update has been processed
+      setTimeout(() => { mruNavigating.current = false; }, 100);
 
       // Show switcher popup, auto-dismiss after 1.5s of inactivity
       setMruSwitcherVisible(true);
