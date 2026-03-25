@@ -184,9 +184,28 @@ const SKIP_DIRS = new Set([
   ".turbo", "coverage", ".nyc_output",
 ]);
 
+/**
+ * Match a file/dir against the search query.
+ * Supports path-aware queries like "types/moderation.go":
+ *   - Split query by "/" into parts
+ *   - Each part must appear as a substring in the relative path, in order
+ *   - e.g. "types/mod" matches "services/types/moderation.go"
+ */
+function matchesQuery(relativePath: string, parts: string[]): boolean {
+  const lower = relativePath.toLowerCase();
+  let pos = 0;
+  for (const part of parts) {
+    const idx = lower.indexOf(part, pos);
+    if (idx === -1) return false;
+    pos = idx + part.length;
+  }
+  return true;
+}
+
 async function searchFiles(
   dir: string,
-  query: string,
+  root: string,
+  parts: string[],
   results: Array<{ path: string; name: string; type: "file" | "dir" }>,
   maxResults: number
 ): Promise<void> {
@@ -208,11 +227,13 @@ async function searchFiles(
     }
     const isDir = s.isDirectory();
     if (isDir && SKIP_DIRS.has(name)) continue;
-    if (name.toLowerCase().includes(query.toLowerCase())) {
+    // Compute relative path from search root for path-aware matching
+    const relativePath = fullPath.slice(root.length + 1);
+    if (matchesQuery(relativePath, parts)) {
       results.push({ path: fullPath, name, type: isDir ? "dir" : "file" });
     }
     if (isDir) {
-      await searchFiles(fullPath, query, results, maxResults);
+      await searchFiles(fullPath, root, parts, results, maxResults);
     }
   }
 }
@@ -236,9 +257,12 @@ app.get("/search", async (c) => {
     }
   }
 
+  // Split query by "/" so "types/moderation.go" matches path segments in order
+  const parts = q.toLowerCase().split("/").map((p) => p.trim()).filter(Boolean);
+
   const results: Array<{ path: string; name: string; type: "file" | "dir" }> = [];
   for (const root of searchRoots) {
-    await searchFiles(root, q, results, 100);
+    await searchFiles(root, root, parts, results, 100);
     if (results.length >= 100) break;
   }
 
