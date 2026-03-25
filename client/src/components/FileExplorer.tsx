@@ -153,6 +153,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   }, [searchResults]);
 
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      if (searchQuery) {
+        setSearchQuery("");
+      } else {
+        onClose?.();
+      }
+      return;
+    }
     if (!searchResults || searchResults.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -168,14 +176,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         if (result.type === "file") handleOpenFile(result.path);
         else handleToggleDir(result.path);
       }
-    } else if (e.key === "Escape") {
-      if (searchQuery) {
-        setSearchQuery("");
-      } else {
-        onClose?.();
-      }
     }
-  }, [searchResults, focusedResultIdx]);
+  }, [searchQuery, searchResults, focusedResultIdx, onClose]);
 
   const handleToggleDir = useCallback(async (path: string) => {
     setExpandedDirs((prev) => {

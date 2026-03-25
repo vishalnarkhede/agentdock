@@ -1621,7 +1621,10 @@ export function Dashboard() {
                       key={activeSession}
                       ref={fileExplorerRef}
                       roots={activeSessionPaths}
-                      onClose={() => setBottomTab(null)}
+                      onClose={() => {
+                        setBottomTab(null);
+                        setTimeout(() => window.dispatchEvent(new Event("agentdock-focus-terminal")), 50);
+                      }}
                     />
                   ) : (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
