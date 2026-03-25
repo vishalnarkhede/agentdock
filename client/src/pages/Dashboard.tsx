@@ -920,17 +920,18 @@ export function Dashboard() {
   }, [activeSession]);
 
   // Ctrl+Shift+[ / Ctrl+Shift+] to navigate MRU sessions
+  // Use e.code (physical key) not e.key — Shift changes [ to { and ] to }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.metaKey || !e.shiftKey) return;
-      if (e.key !== "[" && e.key !== "]") return;
+      if (e.code !== "BracketLeft" && e.code !== "BracketRight") return;
       e.preventDefault();
       const list = mruList.current.filter((s) => sessions.some((sess) => sess.name === s));
       if (list.length < 2) return;
 
       const currentIdx = list.indexOf(activeSession ?? "");
-      // ] = forward (more recent), [ = back (older)
-      const delta = e.key === "[" ? 1 : -1;
+      // BracketRight = ] = forward (more recent), BracketLeft = [ = back (older)
+      const delta = e.code === "BracketLeft" ? 1 : -1;
       const nextIdx = Math.max(0, Math.min(list.length - 1, currentIdx + delta));
       if (nextIdx === currentIdx) return;
       setActiveSession(list[nextIdx]);

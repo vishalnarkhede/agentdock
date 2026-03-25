@@ -146,7 +146,15 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Search state
+  // File search (Cmd+F)
+  const [fileSearchActive, setFileSearchActive] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [fileSearchMatchCount, setFileSearchMatchCount] = useState(0);
+  const [fileSearchIdx, setFileSearchIdx] = useState(0);
+  const fileContentRef = useRef<HTMLPreElement>(null);
+  const fileSearchInputRef = useRef<HTMLInputElement>(null);
+
+  // Filename search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -160,6 +168,112 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       searchInputRef.current?.select();
     },
   }));
+
+  // Cmd+F to open in-file search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && openFile) {
+        e.preventDefault();
+        setFileSearchActive(true);
+        setTimeout(() => {
+          fileSearchInputRef.current?.focus();
+          fileSearchInputRef.current?.select();
+        }, 30);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openFile]);
+
+  // Apply/clear in-file search marks in DOM
+  useEffect(() => {
+    const pre = fileContentRef.current;
+    if (!pre) return;
+
+    // Clear existing marks
+    pre.querySelectorAll("mark.fe-match").forEach((el) => {
+      const parent = el.parentNode;
+      if (parent) {
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        parent.removeChild(el);
+        parent.normalize();
+      }
+    });
+
+    if (!fileSearchQuery.trim() || !fileSearchActive) {
+      setFileSearchMatchCount(0);
+      return;
+    }
+
+    const query = fileSearchQuery.toLowerCase();
+    const marks: HTMLElement[] = [];
+    const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      textNodes.push(node);
+    }
+
+    for (const textNode of textNodes) {
+      const text = textNode.textContent || "";
+      const lower = text.toLowerCase();
+      let start = 0;
+      let idx: number;
+      const parts: (string | HTMLElement)[] = [];
+      while ((idx = lower.indexOf(query, start)) !== -1) {
+        if (idx > start) parts.push(text.slice(start, idx));
+        const mark = document.createElement("mark");
+        mark.className = "fe-match";
+        mark.textContent = text.slice(idx, idx + query.length);
+        parts.push(mark);
+        marks.push(mark);
+        start = idx + query.length;
+      }
+      if (parts.length > 0) {
+        if (start < text.length) parts.push(text.slice(start));
+        const frag = document.createDocumentFragment();
+        for (const p of parts) {
+          frag.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
+        }
+        textNode.parentNode?.replaceChild(frag, textNode);
+      }
+    }
+
+    setFileSearchMatchCount(marks.length);
+    const clampedIdx = Math.min(fileSearchIdx, Math.max(marks.length - 1, 0));
+    setFileSearchIdx(clampedIdx);
+    marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === clampedIdx));
+    marks[clampedIdx]?.scrollIntoView({ block: "nearest" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openFile, fileSearchQuery, fileSearchActive]);
+
+  // Sync active mark when index changes
+  useEffect(() => {
+    const pre = fileContentRef.current;
+    if (!pre) return;
+    const marks = Array.from(pre.querySelectorAll<HTMLElement>("mark.fe-match"));
+    marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === fileSearchIdx));
+    marks[fileSearchIdx]?.scrollIntoView({ block: "nearest" });
+  }, [fileSearchIdx]);
+
+  const closeFileSearch = useCallback(() => {
+    setFileSearchActive(false);
+    setFileSearchQuery("");
+  }, []);
+
+  const handleFileSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeFileSearch();
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (fileSearchMatchCount === 0) return;
+      const delta = e.shiftKey ? -1 : 1;
+      setFileSearchIdx((i) => (i + delta + fileSearchMatchCount) % fileSearchMatchCount);
+    }
+  }, [fileSearchMatchCount, closeFileSearch]);
 
   // Debounced search
   useEffect(() => {
@@ -370,8 +484,28 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             <div className="fe-file-header">
               <span className="fe-file-breadcrumb">{getBreadcrumb(openFile.path)}</span>
               <span className="fe-file-size">{Math.round(openFile.size / 1024 * 10) / 10}KB</span>
+              <span className="fe-file-search-hint">⌘F</span>
             </div>
-            <pre className="fe-file-content"><code
+            {fileSearchActive && (
+              <div className="fe-file-search-bar">
+                <input
+                  ref={fileSearchInputRef}
+                  className="fe-file-search-input"
+                  type="text"
+                  placeholder="search in file…"
+                  value={fileSearchQuery}
+                  onChange={(e) => setFileSearchQuery(e.target.value)}
+                  onKeyDown={handleFileSearchKeyDown}
+                />
+                <span className="fe-file-search-count">
+                  {fileSearchMatchCount === 0
+                    ? (fileSearchQuery ? "no matches" : "")
+                    : `${fileSearchIdx + 1}/${fileSearchMatchCount}`}
+                </span>
+                <button className="fe-file-search-close" onClick={closeFileSearch} title="Close (Esc)">×</button>
+              </div>
+            )}
+            <pre ref={fileContentRef} className="fe-file-content"><code
               className={`hljs language-${openFile.language}`}
               dangerouslySetInnerHTML={{ __html: highlight(openFile.content, openFile.language) }}
             /></pre>

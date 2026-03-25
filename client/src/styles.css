@@ -3132,6 +3132,74 @@ h1 {
   line-height: inherit;
 }
 
+.fe-file-search-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.fe-file-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  flex-shrink: 0;
+}
+
+.fe-file-search-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  padding: 3px 7px;
+  outline: none;
+}
+
+.fe-file-search-input:focus {
+  border-color: var(--accent);
+}
+
+.fe-file-search-count {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: right;
+}
+
+.fe-file-search-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.fe-file-search-close:hover {
+  color: var(--text);
+}
+
+mark.fe-match {
+  background: rgba(255, 200, 0, 0.35);
+  color: inherit;
+  border-radius: 2px;
+}
+
+mark.fe-match-active {
+  background: rgba(255, 140, 0, 0.7);
+  color: #000;
+  border-radius: 2px;
+  outline: 1px solid rgba(255, 180, 0, 0.9);
+}
+
 .fe-file-empty {
   flex: 1;
   display: flex;

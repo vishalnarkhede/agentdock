@@ -872,6 +872,10 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["↑", "↓"], description: "Navigate search results" },
       { keys: ["Enter"], description: "Open selected file" },
       { keys: ["Esc"], description: "Clear file search query, or close explorer" },
+      { keys: ["⌘F"], description: "Search text in open file" },
+      { keys: ["Enter"], description: "Next match in file" },
+      { keys: ["Shift", "Enter"], description: "Previous match in file" },
+      { keys: ["Esc"], description: "Close in-file search" },
     ],
   },
   {
