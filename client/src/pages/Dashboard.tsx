@@ -238,10 +238,18 @@ function SessionRow({
   const handleSwipeTouchEnd = () => {
     setIsSwiping(false);
     if (swipeDirRef.current === "h") {
-      const snapOpen = swipeX < -SWIPE_THRESHOLD;
-      setSwipeX(snapOpen ? -SWIPE_REVEAL : 0);
-      if (snapOpen) {
-        window.dispatchEvent(new CustomEvent("agentdock-row-swiped", { detail: session.name }));
+      const startedOpen = swipeBaseXRef.current < 0;
+      if (startedOpen) {
+        // Row was already open — close if user swiped right by ≥15px, else snap back open
+        const swipedRight = swipeX - swipeBaseXRef.current;
+        setSwipeX(swipedRight > 15 ? 0 : -SWIPE_REVEAL);
+      } else {
+        // Row was closed — open if user swiped left past threshold, else snap closed
+        const snapOpen = swipeX < -SWIPE_THRESHOLD;
+        setSwipeX(snapOpen ? -SWIPE_REVEAL : 0);
+        if (snapOpen) {
+          window.dispatchEvent(new CustomEvent("agentdock-row-swiped", { detail: session.name }));
+        }
       }
     }
     swipeStartXRef.current = null;
