@@ -861,8 +861,8 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: ["⌘K"], description: "Focus session search" },
       { keys: ["⌘P"], description: "Open file explorer / focus file search" },
-      { keys: ["⌘", "Shift", "["], description: "Go back to previous session (MRU)" },
-      { keys: ["⌘", "Shift", "]"], description: "Go forward to next session (MRU)" },
+      { keys: ["Ctrl", "Shift", "["], description: "Go back to previous session (MRU)" },
+      { keys: ["Ctrl", "Shift", "]"], description: "Go forward to next session (MRU)" },
       { keys: ["Esc"], description: "Close bottom pane (plan / changes / files)" },
     ],
   },

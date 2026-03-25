@@ -919,10 +919,10 @@ export function Dashboard() {
     ].slice(0, 8);
   }, [activeSession]);
 
-  // Cmd+Shift+[ / Cmd+Shift+] to navigate MRU sessions (like VS Code tabs)
+  // Ctrl+Shift+[ / Ctrl+Shift+] to navigate MRU sessions
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (!e.ctrlKey || e.metaKey || !e.shiftKey) return;
       if (e.key !== "[" && e.key !== "]") return;
       e.preventDefault();
       const list = mruList.current.filter((s) => sessions.some((sess) => sess.name === s));
