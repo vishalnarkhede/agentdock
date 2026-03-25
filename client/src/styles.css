@@ -3149,6 +3149,72 @@ h1 {
   font-size: 12px;
 }
 
+/* ─── MRU Session Switcher ─── */
+.mru-switcher {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-modal, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 240px;
+  z-index: 9999;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  animation: mru-fadein 0.1s ease;
+}
+
+@keyframes mru-fadein {
+  from { opacity: 0; transform: translate(-50%, -48%); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.mru-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.mru-switcher-item-active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.mru-switcher-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-dim);
+}
+
+.mru-status-waiting  { background: var(--green,  #98c379); }
+.mru-status-working  { background: var(--accent,  #61afef); }
+.mru-status-stopped  { background: var(--red,    #e06c75); }
+.mru-status-shell    { background: var(--cyan,   #56b6c2); }
+
+.mru-switcher-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mru-switcher-badge {
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--bg-input, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
 .fe-error {
   padding: 8px 12px;
   color: var(--red, #e06c75);

@@ -904,6 +904,49 @@ export function Dashboard() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // ─── MRU session switching ───
+  // mruList[0] = current session, mruList[1] = previous, etc.
+  const mruList = useRef<string[]>([]);
+  const [mruSwitcherVisible, setMruSwitcherVisible] = useState(false);
+  const mruDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Update MRU whenever active session changes
+  useEffect(() => {
+    if (!activeSession) return;
+    mruList.current = [
+      activeSession,
+      ...mruList.current.filter((s) => s !== activeSession),
+    ].slice(0, 8);
+  }, [activeSession]);
+
+  // Ctrl+` to cycle through MRU sessions
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key !== "`") return;
+      e.preventDefault();
+      const list = mruList.current.filter((s) => sessions.some((sess) => sess.name === s));
+      if (list.length < 2) return;
+
+      // Find current position in MRU and advance by 1
+      const currentIdx = list.indexOf(activeSession ?? "");
+      const nextIdx = (currentIdx + 1) % list.length;
+      setActiveSession(list[nextIdx]);
+      setMobileShowTerminal(true);
+
+      // Show switcher popup, auto-dismiss after 1.5s of inactivity
+      setMruSwitcherVisible(true);
+      if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
+      mruDismissTimer.current = setTimeout(() => setMruSwitcherVisible(false), 1500);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeSession, sessions, setActiveSession]);
+
+  // Cleanup dismiss timer on unmount
+  useEffect(() => () => {
+    if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
+  }, []);
+
   // Build ordered session list: pinned first, then parents, then their children indented below
   const orderedSessions = useMemo(() => {
     const childNames = new Set<string>();
@@ -1780,6 +1823,25 @@ export function Dashboard() {
         </>
       )}
     </nav>
+    {mruSwitcherVisible && createPortal(
+      <div className="mru-switcher">
+        {mruList.current
+          .filter((s) => sessions.some((sess) => sess.name === s))
+          .slice(0, 6)
+          .map((name, idx) => {
+            const sess = sessions.find((s) => s.name === name);
+            const display = name.replace(/^claude-/, "");
+            return (
+              <div key={name} className={`mru-switcher-item${name === activeSession ? " mru-switcher-item-active" : ""}`}>
+                <span className={`mru-switcher-status mru-status-${sess?.status ?? "unknown"}`} />
+                <span className="mru-switcher-name">{display}</span>
+                {idx === 0 && <span className="mru-switcher-badge">now</span>}
+              </div>
+            );
+          })}
+      </div>,
+      document.body
+    )}
     </>
   );
 }
