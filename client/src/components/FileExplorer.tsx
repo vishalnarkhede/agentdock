@@ -1,6 +1,46 @@
-import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
 import { fetchFsDir, fetchFsFile, searchFsFiles } from "../api";
 import type { FsEntry } from "../api";
+import "highlight.js/styles/atom-one-dark.css";
+import hljs from "highlight.js/lib/core";
+// Register only the languages we actually need — keeps bundle lean
+import typescript from "highlight.js/lib/languages/typescript";
+import javascript from "highlight.js/lib/languages/javascript";
+import python from "highlight.js/lib/languages/python";
+import go from "highlight.js/lib/languages/go";
+import rust from "highlight.js/lib/languages/rust";
+import bash from "highlight.js/lib/languages/bash";
+import json from "highlight.js/lib/languages/json";
+import yaml from "highlight.js/lib/languages/yaml";
+import css from "highlight.js/lib/languages/css";
+import xml from "highlight.js/lib/languages/xml"; // html
+import sql from "highlight.js/lib/languages/sql";
+import markdown from "highlight.js/lib/languages/markdown";
+import plaintext from "highlight.js/lib/languages/plaintext";
+
+hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("go", go);
+hljs.registerLanguage("rust", rust);
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("yaml", yaml);
+hljs.registerLanguage("css", css);
+hljs.registerLanguage("xml", xml);
+hljs.registerLanguage("html", xml);
+hljs.registerLanguage("sql", sql);
+hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("plaintext", plaintext);
+
+function highlight(content: string, language: string): string {
+  try {
+    const lang = hljs.getLanguage(language) ? language : "plaintext";
+    return hljs.highlight(content, { language: lang }).value;
+  } catch {
+    return content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+}
 
 interface Props {
   roots: string[]; // absolute paths to repo root(s)
@@ -331,7 +371,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               <span className="fe-file-breadcrumb">{getBreadcrumb(openFile.path)}</span>
               <span className="fe-file-size">{Math.round(openFile.size / 1024 * 10) / 10}KB</span>
             </div>
-            <pre className={`fe-file-content language-${openFile.language}`}><code>{openFile.content}</code></pre>
+            <pre className="fe-file-content"><code
+              className={`hljs language-${openFile.language}`}
+              dangerouslySetInnerHTML={{ __html: highlight(openFile.content, openFile.language) }}
+            /></pre>
           </>
         ) : (
           <div className="fe-file-empty">
