@@ -130,6 +130,24 @@ function SessionRow({
     };
   }, [menuOpen]);
 
+  // Close swipe when another row is swiped open
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      if (e.detail !== session.name) setSwipeX(0);
+    };
+    window.addEventListener("agentdock-row-swiped", handler as EventListener);
+    return () => window.removeEventListener("agentdock-row-swiped", handler as EventListener);
+  }, [session.name]);
+
+  // Close swipe when the session list is scrolled
+  useEffect(() => {
+    const list = document.querySelector(".session-list");
+    if (!list) return;
+    const handler = () => setSwipeX(0);
+    list.addEventListener("scroll", handler, { passive: true });
+    return () => list.removeEventListener("scroll", handler);
+  }, []);
+
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(session.name);
@@ -157,6 +175,7 @@ function SessionRow({
 
   const handleKill = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    setSwipeX(0);
     if (!confirm(`Kill session "${session.displayName}"?`)) return;
     setMenuOpen(false);
     try {
@@ -219,8 +238,19 @@ function SessionRow({
   const handleSwipeTouchEnd = () => {
     setIsSwiping(false);
     if (swipeDirRef.current === "h") {
-      setSwipeX(swipeX < -SWIPE_THRESHOLD ? -SWIPE_REVEAL : 0);
+      const snapOpen = swipeX < -SWIPE_THRESHOLD;
+      setSwipeX(snapOpen ? -SWIPE_REVEAL : 0);
+      if (snapOpen) {
+        window.dispatchEvent(new CustomEvent("agentdock-row-swiped", { detail: session.name }));
+      }
     }
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+  };
+
+  const handleSwipeTouchCancel = () => {
+    setIsSwiping(false);
+    setSwipeX(0);
     swipeStartXRef.current = null;
     swipeStartYRef.current = null;
   };
@@ -282,6 +312,7 @@ function SessionRow({
         onTouchStart={handleSwipeTouchStart}
         onTouchMove={handleSwipeTouchMove}
         onTouchEnd={handleSwipeTouchEnd}
+        onTouchCancel={handleSwipeTouchCancel}
         style={{ transform: swipeX ? `translateX(${swipeX}px)` : undefined, transition: isSwiping ? "none" : "transform 0.2s ease" }}
         draggable={draggable}
         onDragStart={onDragStart}
