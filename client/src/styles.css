@@ -2868,6 +2868,74 @@ h1 {
 }
 
 /* ─── File Explorer ─── */
+
+.fe-search-bar {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fe-search-input {
+  flex: 1;
+  background: var(--bg-input, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+  font-family: inherit;
+}
+
+.fe-search-input:focus {
+  border-color: var(--accent);
+}
+
+.fe-search-clear {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.fe-search-clear:hover {
+  color: var(--text);
+}
+
+.fe-search-results {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.fe-search-result {
+  flex-direction: row;
+  align-items: flex-start !important;
+  padding: 4px 8px !important;
+  gap: 6px;
+}
+
+.fe-search-result-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.fe-search-result-path {
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
 .fe-container {
   display: flex;
   height: 100%;
@@ -2880,9 +2948,23 @@ h1 {
   min-width: 160px;
   max-width: 320px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.fe-tree-body {
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  border-right: 1px solid var(--border);
+  padding: 4px 0;
+}
+
+.fe-search-results {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px 0;
 }
 

@@ -1,10 +1,13 @@
-import { useState, useCallback } from "react";
-import { fetchFsDir, fetchFsFile } from "../api";
+import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import { fetchFsDir, fetchFsFile, searchFsFiles } from "../api";
 import type { FsEntry } from "../api";
 
 interface Props {
-  sessionName: string;
   roots: string[]; // absolute paths to repo root(s)
+}
+
+export interface FileExplorerHandle {
+  focusSearch: () => void;
 }
 
 interface OpenFile {
@@ -14,6 +17,12 @@ interface OpenFile {
   size: number;
 }
 
+interface SearchResult {
+  path: string;
+  name: string;
+  type: "file" | "dir";
+}
+
 // Map of dirPath → entries (only what's been expanded)
 type DirContents = Map<string, FsEntry[]>;
 
@@ -21,25 +30,11 @@ function getBasename(path: string): string {
   return path.split("/").filter(Boolean).pop() || path;
 }
 
-function FileIcon({ type, ext }: { type: "file" | "dir"; ext?: string }) {
-  if (type === "dir") return <span className="fe-icon fe-icon-dir">▶</span>;
-  const icons: Record<string, string> = {
-    ".ts": "TS", ".tsx": "TS", ".js": "JS", ".jsx": "JS",
-    ".py": "PY", ".go": "GO", ".rs": "RS",
-    ".json": "{}", ".md": "MD", ".css": "CSS",
-    ".html": "HT", ".yml": "YL", ".yaml": "YL",
-    ".sh": "SH", ".env": "EV",
-  };
-  const label = ext ? (icons[ext] || "··") : "··";
-  return <span className="fe-icon fe-icon-file">{label}</span>;
-}
-
 interface TreeNodeProps {
   path: string;
   name: string;
   type: "file" | "dir";
   ext?: string;
-  sessionName: string;
   dirContents: DirContents;
   expandedDirs: Set<string>;
   loadingPath: string | null;
@@ -50,7 +45,7 @@ interface TreeNodeProps {
 }
 
 function TreeNode({
-  path, name, type, ext, sessionName,
+  path, name, type, ext,
   dirContents, expandedDirs, loadingPath, openFilePath,
   onToggleDir, onOpenFile, depth,
 }: TreeNodeProps) {
@@ -69,7 +64,7 @@ function TreeNode({
         {type === "dir" ? (
           <span className={`fe-dir-arrow${isExpanded ? " fe-dir-arrow-open" : ""}`}>▶</span>
         ) : (
-          <FileIcon type={type} ext={ext} />
+          <span className="fe-icon fe-icon-file">{ext ? ext.slice(1, 3).toUpperCase() : "··"}</span>
         )}
         <span className="fe-tree-name">{name}</span>
         {isLoading && <span className="fe-spinner">…</span>}
@@ -83,7 +78,6 @@ function TreeNode({
               name={entry.name}
               type={entry.type}
               ext={entry.ext}
-              sessionName={sessionName}
               dirContents={dirContents}
               expandedDirs={expandedDirs}
               loadingPath={loadingPath}
@@ -104,12 +98,78 @@ function TreeNode({
   );
 }
 
-export function FileExplorer({ sessionName, roots }: Props) {
+export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({ roots }, ref) {
   const [dirContents, setDirContents] = useState<DirContents>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [openFile, setOpenFile] = useState<OpenFile | null>(null);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [focusedResultIdx, setFocusedResultIdx] = useState<number>(-1);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusSearch: () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    },
+  }));
+
+  // Debounced search
+  useEffect(() => {
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    searchTimeout.current = setTimeout(async () => {
+      setSearchLoading(true);
+      setError(null);
+      try {
+        const results = await searchFsFiles(searchQuery.trim(), roots);
+        setSearchResults(results);
+      } catch (err: any) {
+        setError(err.message || "Search failed");
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    };
+  }, [searchQuery, roots]);
+
+  // Reset focused result when results change
+  useEffect(() => {
+    setFocusedResultIdx(-1);
+  }, [searchResults]);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!searchResults || searchResults.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedResultIdx((i) => Math.min(i + 1, searchResults.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedResultIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const idx = focusedResultIdx >= 0 ? focusedResultIdx : 0;
+      const result = searchResults[idx];
+      if (result) {
+        if (result.type === "file") handleOpenFile(result.path);
+        else handleToggleDir(result.path);
+      }
+    } else if (e.key === "Escape") {
+      setSearchQuery("");
+    }
+  }, [searchResults, focusedResultIdx]);
 
   const handleToggleDir = useCallback(async (path: string) => {
     setExpandedDirs((prev) => {
@@ -127,7 +187,7 @@ export function FileExplorer({ sessionName, roots }: Props) {
       setLoadingPath(path);
       setError(null);
       try {
-        const entries = await fetchFsDir(path, sessionName);
+        const entries = await fetchFsDir(path, roots);
         setDirContents((prev) => new Map(prev).set(path, entries));
       } catch (err: any) {
         setError(err.message || "Failed to list directory");
@@ -140,21 +200,21 @@ export function FileExplorer({ sessionName, roots }: Props) {
         setLoadingPath(null);
       }
     }
-  }, [dirContents, sessionName]);
+  }, [dirContents, roots]);
 
   const handleOpenFile = useCallback(async (path: string) => {
     if (openFile?.path === path) return;
     setLoadingPath(path);
     setError(null);
     try {
-      const data = await fetchFsFile(path, sessionName);
+      const data = await fetchFsFile(path, roots);
       setOpenFile({ path, ...data });
     } catch (err: any) {
       setError(err.message || "Failed to read file");
     } finally {
       setLoadingPath(null);
     }
-  }, [openFile, sessionName]);
+  }, [openFile, roots]);
 
   const openFilePath = openFile?.path ?? null;
 
@@ -171,42 +231,86 @@ export function FileExplorer({ sessionName, roots }: Props) {
   return (
     <div className="fe-container">
       <div className="fe-tree-panel">
-        {roots.map((root) => (
-          <div key={root} className="fe-root-section">
-            <div
-              className="fe-root-header"
-              onClick={() => handleToggleDir(root)}
-            >
-              <span className={`fe-dir-arrow${expandedDirs.has(root) ? " fe-dir-arrow-open" : ""}`}>▶</span>
-              <span className="fe-root-name">{getBasename(root)}</span>
-              {loadingPath === root && <span className="fe-spinner">…</span>}
-            </div>
-            {expandedDirs.has(root) && dirContents.has(root) && (
-              <div className="fe-tree-children">
-                {dirContents.get(root)!.map((entry) => (
-                  <TreeNode
-                    key={entry.name}
-                    path={`${root}/${entry.name}`}
-                    name={entry.name}
-                    type={entry.type}
-                    ext={entry.ext}
-                    sessionName={sessionName}
-                    dirContents={dirContents}
-                    expandedDirs={expandedDirs}
-                    loadingPath={loadingPath}
-                    openFilePath={openFilePath}
-                    onToggleDir={handleToggleDir}
-                    onOpenFile={handleOpenFile}
-                    depth={1}
-                  />
-                ))}
-                {dirContents.get(root)!.length === 0 && (
-                  <div className="fe-tree-empty" style={{ paddingLeft: "24px" }}>empty</div>
-                )}
+        <div className="fe-search-bar">
+          <input
+            ref={searchInputRef}
+            className="fe-search-input"
+            type="text"
+            placeholder="⌘P — search files…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+          />
+          {searchQuery && (
+            <button className="fe-search-clear" onClick={() => setSearchQuery("")}>×</button>
+          )}
+        </div>
+
+        {searchQuery ? (
+          <div className="fe-search-results">
+            {searchLoading && <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>searching…</div>}
+            {!searchLoading && searchResults !== null && searchResults.length === 0 && (
+              <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>no matches</div>
+            )}
+            {searchResults?.map((result, idx) => (
+              <div
+                key={result.path}
+                className={`fe-tree-item fe-search-result${openFilePath === result.path || focusedResultIdx === idx ? " fe-tree-item-active" : ""}`}
+                onClick={() => result.type === "file" ? handleOpenFile(result.path) : handleToggleDir(result.path)}
+                title={result.path}
+              >
+                <span className="fe-icon fe-icon-file" style={{ color: result.type === "dir" ? "var(--accent)" : undefined }}>
+                  {result.type === "dir" ? "DIR" : result.name.includes(".") ? result.name.split(".").pop()!.slice(0, 2).toUpperCase() : "··"}
+                </span>
+                <div className="fe-search-result-text">
+                  <span className="fe-tree-name">{result.name}</span>
+                  <span className="fe-search-result-path">{getBreadcrumb(result.path)}</span>
+                </div>
               </div>
+            ))}
+            {searchResults && searchResults.length === 100 && (
+              <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 100 results</div>
             )}
           </div>
-        ))}
+        ) : (
+          <div className="fe-tree-body">
+            {roots.map((root) => (
+              <div key={root} className="fe-root-section">
+                <div
+                  className="fe-root-header"
+                  onClick={() => handleToggleDir(root)}
+                >
+                  <span className={`fe-dir-arrow${expandedDirs.has(root) ? " fe-dir-arrow-open" : ""}`}>▶</span>
+                  <span className="fe-root-name">{getBasename(root)}</span>
+                  {loadingPath === root && <span className="fe-spinner">…</span>}
+                </div>
+                {expandedDirs.has(root) && dirContents.has(root) && (
+                  <div className="fe-tree-children">
+                    {dirContents.get(root)!.map((entry) => (
+                      <TreeNode
+                        key={entry.name}
+                        path={`${root}/${entry.name}`}
+                        name={entry.name}
+                        type={entry.type}
+                        ext={entry.ext}
+                        dirContents={dirContents}
+                        expandedDirs={expandedDirs}
+                        loadingPath={loadingPath}
+                        openFilePath={openFilePath}
+                        onToggleDir={handleToggleDir}
+                        onOpenFile={handleOpenFile}
+                        depth={1}
+                      />
+                    ))}
+                    {dirContents.get(root)!.length === 0 && (
+                      <div className="fe-tree-empty" style={{ paddingLeft: "24px" }}>empty</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="fe-file-panel">
@@ -232,4 +336,4 @@ export function FileExplorer({ sessionName, roots }: Props) {
       </div>
     </div>
   );
-}
+});

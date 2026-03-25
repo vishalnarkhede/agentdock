@@ -12,6 +12,7 @@ import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
 import { FileExplorer } from "../components/FileExplorer";
+import type { FileExplorerHandle } from "../components/FileExplorer";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo, MetaPropertyPreset } from "../types";
 import type { QuickLaunch } from "../components/Header";
@@ -876,6 +877,22 @@ export function Dashboard() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // Cmd+P to open file explorer and focus search
+  const fileExplorerRef = useRef<FileExplorerHandle>(null);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        setBottomTab("files");
+        setBottomMaximized(false);
+        // Focus search after tab switch renders
+        setTimeout(() => fileExplorerRef.current?.focusSearch(), 50);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // Build ordered session list: pinned first, then parents, then their children indented below
   const orderedSessions = useMemo(() => {
     const childNames = new Set<string>();
@@ -1591,7 +1608,7 @@ export function Dashboard() {
                   ) : bottomTab === "files" ? (
                     <FileExplorer
                       key={activeSession}
-                      sessionName={activeSession!}
+                      ref={fileExplorerRef}
                       roots={activeSessionPaths}
                     />
                   ) : (

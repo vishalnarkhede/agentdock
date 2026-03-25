@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, resolve, extname, basename } from "path";
-
+import { getBasePath } from "../services/config";
 
 const app = new Hono();
 
@@ -53,31 +53,13 @@ function getLanguage(filePath: string): string {
 }
 
 /**
- * Get allowed root paths for a session.
- * Returns the worktree/repo paths the session is working in.
+ * Validate that a path is within the configured base path (projects dir).
+ * This prevents the API from serving files outside the user's project directory.
  */
-async function getAllowedRoots(sessionName: string): Promise<string[]> {
-  // Read session worktree metadata from config
-  const configDir = process.env.AGENTDOCK_CONFIG_DIR || `${process.env.HOME}/.config/agentdock`;
-  const sessionFile = join(configDir, "sessions", sessionName);
-  try {
-    const { readFileSync } = await import("fs");
-    const content = readFileSync(sessionFile, "utf-8").trim();
-    // Format: repoPath|wtDir (pipe-delimited, one per line for multi-repo)
-    const roots: string[] = [];
-    for (const line of content.split("\n")) {
-      const parts = line.trim().split("|");
-      if (parts.length >= 2 && parts[1]) {
-        roots.push(resolve(parts[1]));
-      } else if (parts[0]) {
-        roots.push(resolve(parts[0]));
-      }
-    }
-    if (roots.length > 0) return roots;
-  } catch {
-    // session file not found — fall through
-  }
-  return [];
+function isWithinBasePath(targetPath: string): boolean {
+  const base = resolve(getBasePath());
+  const resolved = resolve(targetPath);
+  return resolved === base || resolved.startsWith(base + "/");
 }
 
 function isWithinRoots(targetPath: string, roots: string[]): boolean {
@@ -85,24 +67,36 @@ function isWithinRoots(targetPath: string, roots: string[]): boolean {
   return roots.some((root) => resolved === root || resolved.startsWith(root + "/"));
 }
 
-// GET /api/fs/list?path=<abs-path>&session=<name>
+function parseRoots(rootsParam: string | undefined): string[] {
+  if (!rootsParam) return [];
+  return rootsParam
+    .split(",")
+    .map((r) => resolve(r.trim()))
+    .filter(Boolean);
+}
+
+// GET /api/fs/list?path=<abs-path>&roots=<comma-separated-abs-paths>
 app.get("/list", async (c) => {
   const path = c.req.query("path");
-  const session = c.req.query("session");
+  const rootsParam = c.req.query("roots");
 
-  if (!path || !session) {
-    return c.json({ error: "path and session are required" }, 400);
+  if (!path) {
+    return c.json({ error: "path is required" }, 400);
   }
 
   const resolvedPath = resolve(path);
-  const roots = await getAllowedRoots(session);
 
-  if (roots.length === 0) {
-    return c.json({ error: "session not found or has no repos" }, 404);
+  // Validate path is within base path (e.g. ~/projects)
+  if (!isWithinBasePath(resolvedPath)) {
+    return c.json({ error: "path is outside allowed directory" }, 403);
   }
 
-  if (!isWithinRoots(resolvedPath, roots)) {
-    return c.json({ error: "path is outside allowed repo roots" }, 403);
+  // If roots are provided, also validate path is within those roots
+  if (rootsParam) {
+    const roots = parseRoots(rootsParam);
+    if (roots.length > 0 && !isWithinRoots(resolvedPath, roots)) {
+      return c.json({ error: "path is outside session repo roots" }, 403);
+    }
   }
 
   try {
@@ -135,24 +129,26 @@ app.get("/list", async (c) => {
   }
 });
 
-// GET /api/fs/read?path=<abs-path>&session=<name>
+// GET /api/fs/read?path=<abs-path>&roots=<comma-separated-abs-paths>
 app.get("/read", async (c) => {
   const path = c.req.query("path");
-  const session = c.req.query("session");
+  const rootsParam = c.req.query("roots");
 
-  if (!path || !session) {
-    return c.json({ error: "path and session are required" }, 400);
+  if (!path) {
+    return c.json({ error: "path is required" }, 400);
   }
 
   const resolvedPath = resolve(path);
-  const roots = await getAllowedRoots(session);
 
-  if (roots.length === 0) {
-    return c.json({ error: "session not found or has no repos" }, 404);
+  if (!isWithinBasePath(resolvedPath)) {
+    return c.json({ error: "path is outside allowed directory" }, 403);
   }
 
-  if (!isWithinRoots(resolvedPath, roots)) {
-    return c.json({ error: "path is outside allowed repo roots" }, 403);
+  if (rootsParam) {
+    const roots = parseRoots(rootsParam);
+    if (roots.length > 0 && !isWithinRoots(resolvedPath, roots)) {
+      return c.json({ error: "path is outside session repo roots" }, 403);
+    }
   }
 
   const ext = extname(resolvedPath).toLowerCase();
@@ -180,6 +176,73 @@ app.get("/read", async (c) => {
   } catch (err: any) {
     return c.json({ error: err.message || "failed to read file" }, 500);
   }
+});
+
+const SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", ".next", ".nuxt",
+  "__pycache__", ".cache", ".parcel-cache", "vendor", "target",
+  ".turbo", "coverage", ".nyc_output",
+]);
+
+async function searchFiles(
+  dir: string,
+  query: string,
+  results: Array<{ path: string; name: string; type: "file" | "dir" }>,
+  maxResults: number
+): Promise<void> {
+  if (results.length >= maxResults) return;
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (results.length >= maxResults) return;
+    const fullPath = join(dir, name);
+    let s;
+    try {
+      s = await stat(fullPath);
+    } catch {
+      continue;
+    }
+    const isDir = s.isDirectory();
+    if (isDir && SKIP_DIRS.has(name)) continue;
+    if (name.toLowerCase().includes(query.toLowerCase())) {
+      results.push({ path: fullPath, name, type: isDir ? "dir" : "file" });
+    }
+    if (isDir) {
+      await searchFiles(fullPath, query, results, maxResults);
+    }
+  }
+}
+
+// GET /api/fs/search?q=<query>&roots=<comma-separated-abs-paths>
+app.get("/search", async (c) => {
+  const q = c.req.query("q");
+  const rootsParam = c.req.query("roots");
+
+  if (!q || q.length < 1) {
+    return c.json({ results: [] });
+  }
+
+  const roots = parseRoots(rootsParam);
+  const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
+
+  // Validate all roots are within base path
+  for (const root of searchRoots) {
+    if (!isWithinBasePath(root)) {
+      return c.json({ error: "roots outside allowed directory" }, 403);
+    }
+  }
+
+  const results: Array<{ path: string; name: string; type: "file" | "dir" }> = [];
+  for (const root of searchRoots) {
+    await searchFiles(root, q, results, 100);
+    if (results.length >= 100) break;
+  }
+
+  return c.json({ results });
 });
 
 export default app;

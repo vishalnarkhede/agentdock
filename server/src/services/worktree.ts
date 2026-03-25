@@ -134,17 +134,32 @@ export async function createWorktree(
   }
 
   await copyEnvFiles(repoPath, wtDir);
-  linkHiddenEntries(repoPath, wtDir);
+  await linkHiddenEntries(repoPath, wtDir);
+
+  // Symlink node_modules from the main repo to avoid reinstalling deps.
+  // If the worktree needs different deps, the agent can run npm install
+  // which will replace the symlink with a real directory.
+  const mainNodeModules = join(repoPath, "node_modules");
+  const wtNodeModules = join(wtDir, "node_modules");
+  if (existsSync(mainNodeModules) && !existsSync(wtNodeModules)) {
+    try {
+      symlinkSync(mainNodeModules, wtNodeModules);
+    } catch {
+      // best effort
+    }
+  }
 
   return wtDir;
 }
 
 /**
- * Symlink all hidden files/dirs (dot-prefixed) from the main repo into the
- * worktree, skipping .git (managed by git itself) and anything that already
- * exists in the worktree.
+ * Symlink hidden files/dirs (dot-prefixed) from the main repo into the
+ * worktree, but only if git tracks at least one file under that entry.
+ * This avoids symlinking tool/IDE dirs (.claude, .tanstack, .cursor, etc.)
+ * that are gitignored or untracked — which would create unexpected files
+ * in the worktree that could be accidentally committed.
  */
-function linkHiddenEntries(repoPath: string, wtDir: string): void {
+async function linkHiddenEntries(repoPath: string, wtDir: string): Promise<void> {
   let entries: string[];
   try {
     entries = readdirSync(repoPath).filter(
@@ -154,9 +169,19 @@ function linkHiddenEntries(repoPath: string, wtDir: string): void {
     return;
   }
   for (const entry of entries) {
-    const src = join(repoPath, entry);
     const dest = join(wtDir, entry);
     if (existsSync(dest)) continue;
+
+    // Only link if git tracks files at this path in the main repo
+    const proc = Bun.spawn(["git", "-C", repoPath, "ls-files", "--", entry], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    await proc.exited;
+    if (!stdout.trim()) continue; // nothing tracked — skip
+
+    const src = join(repoPath, entry);
     try {
       symlinkSync(src, dest);
     } catch {
