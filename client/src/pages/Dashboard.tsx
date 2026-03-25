@@ -844,6 +844,7 @@ export function Dashboard() {
       if (p.pinnedSessions) setPinnedSessions(new Set(p.pinnedSessions));
       if (p.groupBy) setGroupBy(p.groupBy);
       if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
+      if (p.mruSessions) mruList.current = p.mruSessions;
     });
     fetchMetaPropertyPresets().then(setMetaPresets);
     const handler = () => fetchMetaPropertyPresets().then(setMetaPresets);
@@ -909,14 +910,19 @@ export function Dashboard() {
   const mruList = useRef<string[]>([]);
   const [mruSwitcherVisible, setMruSwitcherVisible] = useState(false);
   const mruDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mruSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Update MRU whenever active session changes
+  // Update MRU whenever active session changes, persist to preferences (debounced)
   useEffect(() => {
     if (!activeSession) return;
     mruList.current = [
       activeSession,
       ...mruList.current.filter((s) => s !== activeSession),
     ].slice(0, 8);
+    if (mruSaveTimer.current) clearTimeout(mruSaveTimer.current);
+    mruSaveTimer.current = setTimeout(() => {
+      updatePreferences({ mruSessions: mruList.current });
+    }, 1000);
   }, [activeSession]);
 
   // Ctrl+Shift+[ / Ctrl+Shift+] to navigate MRU sessions
@@ -946,9 +952,10 @@ export function Dashboard() {
     return () => window.removeEventListener("keydown", handler);
   }, [activeSession, sessions, setActiveSession]);
 
-  // Cleanup dismiss timer on unmount
+  // Cleanup timers on unmount
   useEffect(() => () => {
     if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
+    if (mruSaveTimer.current) clearTimeout(mruSaveTimer.current);
   }, []);
 
   // Build ordered session list: pinned first, then parents, then their children indented below
