@@ -1132,12 +1132,20 @@ h1 {
   background: var(--bg);
   position: relative;
   z-index: 1;
+  overflow: hidden; /* prevent transparent children bleeding into kill zone */
 }
 .session-row-swipe-wrap .session-row:hover {
   background: var(--green-dim);
 }
 .session-row-swipe-wrap .session-row.session-row-active {
   background: rgba(51, 255, 51, 0.07);
+}
+
+/* Hide ⋯ menu when row is swiped — matches native iOS swipe-to-delete UX */
+.session-row-swiped .session-row-menu-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
 }
 
 /* ─── Context menu portal (fixed position, viewport-relative) ─── */

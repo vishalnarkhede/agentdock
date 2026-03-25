@@ -314,7 +314,7 @@ function SessionRow({
         {session.status === "stopped" ? "delete" : "kill"}
       </div>
       <div
-        className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
+        className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""} ${swipeX < 0 ? "session-row-swiped" : ""}`}
         data-tutorial={dataTutorial}
         onClick={handleRowClick}
         onTouchStart={handleSwipeTouchStart}
