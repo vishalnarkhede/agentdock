@@ -1610,6 +1610,7 @@ export function Dashboard() {
                       key={activeSession}
                       ref={fileExplorerRef}
                       roots={activeSessionPaths}
+                      onClose={() => setBottomTab(null)}
                     />
                   ) : (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />

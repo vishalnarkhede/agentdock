@@ -4,6 +4,7 @@ import type { FsEntry } from "../api";
 
 interface Props {
   roots: string[]; // absolute paths to repo root(s)
+  onClose?: () => void;
 }
 
 export interface FileExplorerHandle {
@@ -98,7 +99,7 @@ function TreeNode({
   );
 }
 
-export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({ roots }, ref) {
+export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({ roots, onClose }, ref) {
   const [dirContents, setDirContents] = useState<DirContents>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [openFile, setOpenFile] = useState<OpenFile | null>(null);
@@ -167,7 +168,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         else handleToggleDir(result.path);
       }
     } else if (e.key === "Escape") {
-      setSearchQuery("");
+      if (searchQuery) {
+        setSearchQuery("");
+      } else {
+        onClose?.();
+      }
     }
   }, [searchResults, focusedResultIdx]);
 
