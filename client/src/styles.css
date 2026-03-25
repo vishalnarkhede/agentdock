@@ -4933,6 +4933,66 @@ h1 {
   color: var(--red);
 }
 
+/* ─── Shortcuts settings ─── */
+.shortcuts-group {
+  margin-bottom: 20px;
+}
+
+.shortcuts-group-title {
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shortcuts-row td {
+  padding: 5px 0;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts-row:last-child td {
+  border-bottom: none;
+}
+
+.shortcuts-keys {
+  white-space: nowrap;
+  padding-right: 16px;
+  width: 1%;
+}
+
+.shortcuts-kbd {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  line-height: 1.5;
+}
+
+.shortcuts-plus {
+  display: inline-block;
+  margin: 0 3px;
+  color: var(--text-dim);
+  font-size: calc(var(--fs-base) - 2px);
+}
+
+.shortcuts-desc {
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-dim);
+}
+
 /* ─── Settings modal ─── */
 .settings-overlay {
   position: fixed;
