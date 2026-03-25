@@ -139,12 +139,63 @@ function TreeNode({
   );
 }
 
+/** Scroll the pre container so the mark is vertically centered in the viewport. */
+function scrollMarkIntoView(pre: HTMLElement, mark: HTMLElement | undefined): void {
+  if (!mark) return;
+  const preRect = pre.getBoundingClientRect();
+  const markRect = mark.getBoundingClientRect();
+  // markRect is relative to viewport; convert to position within the pre's scroll content
+  const markTopInPre = markRect.top - preRect.top + pre.scrollTop;
+  pre.scrollTop = markTopInPre - pre.clientHeight / 3;
+}
+
+type PerRootsState = {
+  openFile: OpenFile | null;
+  expandedDirs: Set<string>;
+  dirContents: DirContents;
+};
+
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({ roots, onClose }, ref) {
   const [dirContents, setDirContents] = useState<DirContents>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [openFile, setOpenFile] = useState<OpenFile | null>(null);
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-roots state cache — preserves open file + tree when switching sessions
+  const stateCache = useRef<Map<string, PerRootsState>>(new Map());
+  const prevRootsKey = useRef<string>("");
+  // Always-current snapshot of state for saving (avoids stale closure)
+  const liveState = useRef<PerRootsState>({ openFile: null, expandedDirs: new Set(), dirContents: new Map() });
+  liveState.current = { openFile, expandedDirs, dirContents };
+
+  // When roots change (session switch): save current state, restore saved state for new roots
+  useEffect(() => {
+    const rootsKey = roots.join(",");
+    if (rootsKey === prevRootsKey.current) return;
+    // Save state for outgoing roots
+    if (prevRootsKey.current) {
+      stateCache.current.set(prevRootsKey.current, {
+        openFile: liveState.current.openFile,
+        expandedDirs: new Set(liveState.current.expandedDirs),
+        dirContents: new Map(liveState.current.dirContents),
+      });
+    }
+    // Restore state for incoming roots
+    const saved = stateCache.current.get(rootsKey);
+    if (saved) {
+      setOpenFile(saved.openFile);
+      setExpandedDirs(saved.expandedDirs);
+      setDirContents(saved.dirContents);
+    } else {
+      setOpenFile(null);
+      setExpandedDirs(new Set());
+      setDirContents(new Map());
+    }
+    setError(null);
+    prevRootsKey.current = rootsKey;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roots.join(",")]);
 
   // File search (Cmd+F)
   const [fileSearchActive, setFileSearchActive] = useState(false);
@@ -243,7 +294,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     const clampedIdx = Math.min(fileSearchIdx, Math.max(marks.length - 1, 0));
     setFileSearchIdx(clampedIdx);
     marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === clampedIdx));
-    marks[clampedIdx]?.scrollIntoView({ block: "nearest" });
+    scrollMarkIntoView(pre, marks[clampedIdx]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFile, fileSearchQuery, fileSearchActive]);
 
@@ -253,7 +304,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     if (!pre) return;
     const marks = Array.from(pre.querySelectorAll<HTMLElement>("mark.fe-match"));
     marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === fileSearchIdx));
-    marks[fileSearchIdx]?.scrollIntoView({ block: "nearest" });
+    scrollMarkIntoView(pre, marks[fileSearchIdx]);
   }, [fileSearchIdx]);
 
   const closeFileSearch = useCallback(() => {

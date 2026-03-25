@@ -1680,7 +1680,6 @@ export function Dashboard() {
                     />
                   ) : bottomTab === "files" ? (
                     <FileExplorer
-                      key={activeSession}
                       ref={fileExplorerRef}
                       roots={activeSessionPaths}
                       onClose={() => {
