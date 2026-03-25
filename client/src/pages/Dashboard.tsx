@@ -919,17 +919,19 @@ export function Dashboard() {
     ].slice(0, 8);
   }, [activeSession]);
 
-  // Ctrl+` to cycle through MRU sessions
+  // Ctrl+Left/Right to navigate MRU sessions (Left = back, Right = forward)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.key !== "`") return;
+      if (!e.ctrlKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
       e.preventDefault();
       const list = mruList.current.filter((s) => sessions.some((sess) => sess.name === s));
       if (list.length < 2) return;
 
-      // Find current position in MRU and advance by 1
       const currentIdx = list.indexOf(activeSession ?? "");
-      const nextIdx = (currentIdx + 1) % list.length;
+      // Right = forward in history (toward more recent), Left = back (toward older)
+      const delta = e.key === "ArrowLeft" ? 1 : -1;
+      const nextIdx = Math.max(0, Math.min(list.length - 1, currentIdx + delta));
+      if (nextIdx === currentIdx) return;
       setActiveSession(list[nextIdx]);
       setMobileShowTerminal(true);
 
