@@ -97,19 +97,37 @@ function SessionRow({
   dataTutorial?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [swipeX, setSwipeX] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const menuPortalRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipeStartYRef = useRef<number | null>(null);
+  const swipeBaseXRef = useRef(0);
+  const swipeDirRef = useRef<"h" | "v" | null>(null);
 
-  // Close menu on outside click
+  const SWIPE_REVEAL = 80;
+  const SWIPE_THRESHOLD = 50;
+
+  // Close menu on outside click (handles portaled menu)
   useEffect(() => {
     if (!menuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+    function handleOutside(e: MouseEvent | TouchEvent) {
+      const target = e.target as Node;
+      if (!menuBtnRef.current?.contains(target) && !menuPortalRef.current?.contains(target)) {
         setMenuOpen(false);
+        setMenuPos(null);
       }
     }
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("touchstart", handleOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("touchstart", handleOutside);
+    };
   }, [menuOpen]);
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -162,17 +180,115 @@ function SessionRow({
 
   const displayStatus = getDisplayStatus(session);
 
-  return (
+  const openMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (menuOpen) { setMenuOpen(false); setMenuPos(null); return; }
+    const rect = menuBtnRef.current?.getBoundingClientRect();
+    if (rect) {
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 280) {
+        setMenuPos({ bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right });
+      } else {
+        setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+      }
+    }
+    setMenuOpen(true);
+  };
+
+  const handleSwipeTouchStart = (e: React.TouchEvent) => {
+    swipeStartXRef.current = e.touches[0].clientX;
+    swipeStartYRef.current = e.touches[0].clientY;
+    swipeBaseXRef.current = swipeX;
+    swipeDirRef.current = null;
+    setIsSwiping(false);
+  };
+
+  const handleSwipeTouchMove = (e: React.TouchEvent) => {
+    if (swipeStartXRef.current === null || swipeStartYRef.current === null) return;
+    const dx = e.touches[0].clientX - swipeStartXRef.current;
+    const dy = e.touches[0].clientY - swipeStartYRef.current;
+    if (!swipeDirRef.current && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      swipeDirRef.current = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+    }
+    if (swipeDirRef.current !== "h") return;
+    const newX = Math.min(0, Math.max(-SWIPE_REVEAL, swipeBaseXRef.current + dx));
+    if (!isSwiping) setIsSwiping(true);
+    setSwipeX(newX);
+  };
+
+  const handleSwipeTouchEnd = () => {
+    setIsSwiping(false);
+    if (swipeDirRef.current === "h") {
+      setSwipeX(swipeX < -SWIPE_THRESHOLD ? -SWIPE_REVEAL : 0);
+    }
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+  };
+
+  const handleRowClick = () => {
+    if (swipeX < -5) { setSwipeX(0); return; }
+    onSelect();
+  };
+
+  const menuJSX = menuOpen && menuPos && createPortal(
     <div
-      className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
-      data-tutorial={dataTutorial}
-      onClick={onSelect}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDragEnd={onDragEnd}
-      onDrop={onDrop}
+      ref={menuPortalRef}
+      className="session-row-menu session-row-menu-portal"
+      style={menuPos as React.CSSProperties}
     >
+      {onTogglePin && (
+        <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); setMenuPos(null); }}>
+          {pinned ? "Unpin" : "Pin to top"}
+        </button>
+      )}
+      {onEditProps && (
+        <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); handleEditProps(e); }}>Edit properties</button>
+      )}
+      {onPinToHeader && (
+        <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onPinToHeader(); setMenuOpen(false); setMenuPos(null); }}>Pin to header</button>
+      )}
+      {onForkSession && (
+        <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onForkSession(); setMenuOpen(false); setMenuPos(null); }}>
+          + New agent here
+        </button>
+      )}
+      <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
+      <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
+      {session.status !== "stopped" && (
+        <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
+      )}
+      {session.status === "stopped" && onRestore && (
+        <button className="session-row-menu-item" onClick={handleRestore} disabled={restoring}>
+          {restoring ? "Restoring…" : "↺ Restore session"}
+        </button>
+      )}
+      <button className="session-row-menu-item danger" onClick={handleKill}>
+        {session.status === "stopped" ? "Delete" : "Kill session"}
+      </button>
+    </div>,
+    document.body
+  );
+
+  return (
+    <>
+    <div className="session-row-swipe-wrap">
+      <div className="session-row-swipe-action" onClick={handleKill}>
+        {session.status === "stopped" ? "delete" : "kill"}
+      </div>
+      <div
+        className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
+        data-tutorial={dataTutorial}
+        onClick={handleRowClick}
+        onTouchStart={handleSwipeTouchStart}
+        onTouchMove={handleSwipeTouchMove}
+        onTouchEnd={handleSwipeTouchEnd}
+        style={{ transform: swipeX ? `translateX(${swipeX}px)` : undefined, transition: isSwiping ? "none" : "transform 0.2s ease" }}
+        draggable={draggable}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragEnd={onDragEnd}
+        onDrop={onDrop}
+      >
       <div className="session-row-main">
         {isChild && (
           <span className="session-row-tree-connector">
@@ -253,48 +369,19 @@ function SessionRow({
         )}
         <div className="session-row-menu-wrap" ref={menuRef}>
           <button
+            ref={menuBtnRef}
             className="session-row-menu-btn"
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+            onClick={openMenu}
             aria-label="Session actions"
           >
             ⋯
           </button>
-          {menuOpen && (
-            <div className="session-row-menu">
-              {onTogglePin && (
-                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); }}>
-                  {pinned ? "Unpin" : "Pin to top"}
-                </button>
-              )}
-              {onEditProps && (
-                <button className="session-row-menu-item" onClick={handleEditProps}>Edit properties</button>
-              )}
-              {onPinToHeader && (
-                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onPinToHeader(); setMenuOpen(false); }}>Pin to header</button>
-              )}
-              {onForkSession && (
-                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onForkSession(); setMenuOpen(false); }}>
-                  + New agent here
-                </button>
-              )}
-              <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
-              <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
-              {session.status !== "stopped" && (
-                <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
-              )}
-              {session.status === "stopped" && onRestore && (
-                <button className="session-row-menu-item" onClick={handleRestore} disabled={restoring}>
-                  {restoring ? "Restoring…" : "↺ Restore session"}
-                </button>
-              )}
-              <button className="session-row-menu-item danger" onClick={handleKill}>
-                {session.status === "stopped" ? "Delete" : "Kill session"}
-              </button>
-            </div>
-          )}
         </div>
       </div>
+      </div>
     </div>
+    {menuJSX}
+    </>
   );
 }
 
@@ -1268,7 +1355,18 @@ export function Dashboard() {
         </div>
         <div className="session-list" data-tutorial="session-list">
           {loading ? (
-            <div className="loading">LOADING...</div>
+            <>
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} className="session-row-skeleton">
+                  <div className="session-row-skeleton-main">
+                    <div className="skeleton-dot" />
+                    <div className="skeleton-line skeleton-line-name" style={{ animationDelay: `${i * 0.1}s` }} />
+                    <div className="skeleton-line skeleton-line-status" style={{ animationDelay: `${i * 0.1 + 0.05}s` }} />
+                  </div>
+                  <div className="skeleton-line skeleton-line-meta" style={{ animationDelay: `${i * 0.1 + 0.1}s` }} />
+                </div>
+              ))}
+            </>
           ) : sessions.length === 0 ? (
             <div className="empty-state">
               <pre className="ascii-art">{ASCII_LOGO}</pre>
