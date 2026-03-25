@@ -11,6 +11,7 @@ import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
+import { FileExplorer } from "../components/FileExplorer";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo, MetaPropertyPreset } from "../types";
 import type { QuickLaunch } from "../components/Header";
@@ -693,7 +694,7 @@ export function Dashboard() {
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
   // Bottom pane (plan/changes/sub-agents) split with terminal
-  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | null>(null);
+  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | "files" | null>(null);
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
   const [bottomMaximized, setBottomMaximized] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
@@ -1549,6 +1550,12 @@ export function Dashboard() {
                       <span className="tab-badge">{activeSessionInfo?.children?.length}</span>
                     </button>
                   )}
+                  <button
+                    className={`main-tab ${bottomTab === "files" ? "main-tab-active" : ""}`}
+                    onClick={() => setBottomTab(bottomTab === "files" ? null : "files")}
+                  >
+                    files
+                  </button>
                   {bottomTab && (
                     <button
                       className="main-tab split-maximize-btn"
@@ -1580,6 +1587,12 @@ export function Dashboard() {
                         setMobileShowTerminal(true);
                       }}
                       onRefresh={refresh}
+                    />
+                  ) : bottomTab === "files" ? (
+                    <FileExplorer
+                      key={activeSession}
+                      sessionName={activeSession!}
+                      roots={activeSessionPaths}
                     />
                   ) : (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
@@ -1724,6 +1737,13 @@ export function Dashboard() {
           >
             <span className="mobile-nav-icon">±</span>
             <span className="mobile-nav-label">Changes</span>
+          </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">⊞</span>
+            <span className="mobile-nav-label">Files</span>
           </button>
         </>
       )}

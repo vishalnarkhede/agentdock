@@ -309,6 +309,33 @@ export function wsUrl(sessionName: string): string {
   return `${proto}//${window.location.host}/ws/sessions/${sessionName}`;
 }
 
+// ─── File System API ───
+
+export interface FsEntry {
+  name: string;
+  type: "file" | "dir";
+  ext?: string;
+}
+
+export async function fetchFsDir(path: string, session: string): Promise<FsEntry[]> {
+  const res = await fetch(`${BASE}/api/fs/list?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to list directory");
+  }
+  const data = await res.json();
+  return data.entries;
+}
+
+export async function fetchFsFile(path: string, session: string): Promise<{ content: string; language: string; size: number }> {
+  const res = await fetch(`${BASE}/api/fs/read?path=${encodeURIComponent(path)}&session=${encodeURIComponent(session)}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to read file");
+  }
+  return res.json();
+}
+
 // ─── Settings API ───
 
 export interface ToolHealth {
