@@ -885,9 +885,20 @@ export function Dashboard() {
         e.preventDefault();
         setBottomTab("files");
         setBottomMaximized(false);
-        // Focus search after tab switch renders
         setTimeout(() => fileExplorerRef.current?.focusSearch(), 50);
       }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Escape to collapse bottom pane (when focus is not in an input/textarea)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      setBottomTab((prev) => (prev ? null : prev));
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
