@@ -31,7 +31,8 @@ type Category =
   | "meta"
   | "mcp"
   | "security"
-  | "health";
+  | "health"
+  | "shortcuts";
 
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: "appearance", label: "Appearance" },
@@ -42,6 +43,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: "mcp", label: "MCP Servers" },
   { id: "security", label: "Security" },
   { id: "health", label: "Health" },
+  { id: "shortcuts", label: "Shortcuts" },
 ];
 
 const THEMES: { id: Settings["theme"]; label: string }[] = [
@@ -250,6 +252,7 @@ export function SettingsModal({ open, onClose }: Props) {
             {category === "mcp" && <McpServersPanel />}
             {category === "security" && <SecurityPanel />}
             {category === "health" && <HealthPanel />}
+            {category === "shortcuts" && <ShortcutsPanel />}
           </div>
         </div>
       </div>
@@ -841,6 +844,90 @@ function SecurityPanel() {
           )}
         </div>
       </div>
+    </>
+  );
+}
+
+// ─── Shortcuts Panel ───
+
+interface ShortcutGroup {
+  title: string;
+  shortcuts: { keys: string[]; description: string }[];
+}
+
+const SHORTCUT_GROUPS: ShortcutGroup[] = [
+  {
+    title: "Navigation",
+    shortcuts: [
+      { keys: ["⌘K"], description: "Focus session search" },
+      { keys: ["⌘P"], description: "Open file explorer / focus file search" },
+      { keys: ["Ctrl", "Shift", "["], description: "Go back to previous session (MRU)" },
+      { keys: ["Ctrl", "Shift", "]"], description: "Go forward to next session (MRU)" },
+      { keys: ["Esc"], description: "Close bottom pane (plan / changes / files)" },
+    ],
+  },
+  {
+    title: "File Explorer",
+    shortcuts: [
+      { keys: ["↑", "↓"], description: "Navigate search results" },
+      { keys: ["Enter"], description: "Open selected file" },
+      { keys: ["Esc"], description: "Clear file search query, or close explorer" },
+      { keys: ["⌘F"], description: "Search text in open file" },
+      { keys: ["Enter"], description: "Next match in file" },
+      { keys: ["Shift", "Enter"], description: "Previous match in file" },
+      { keys: ["Esc"], description: "Close in-file search" },
+    ],
+  },
+  {
+    title: "Terminal",
+    shortcuts: [
+      { keys: ["Shift", "Enter"], description: "Insert a newline without submitting" },
+    ],
+  },
+  {
+    title: "Session Search",
+    shortcuts: [
+      { keys: ["Esc"], description: "Clear search and blur input" },
+    ],
+  },
+  {
+    title: "Plan / Message Input",
+    shortcuts: [
+      { keys: ["Enter"], description: "Send message to agent" },
+      { keys: ["Shift", "Enter"], description: "Insert newline" },
+      { keys: ["Esc"], description: "Cancel inline comment" },
+    ],
+  },
+];
+
+function ShortcutsPanel() {
+  return (
+    <>
+      <p className="settings-security-desc">
+        All keyboard shortcuts available in AgentDock.
+      </p>
+      {SHORTCUT_GROUPS.map((group) => (
+        <div key={group.title} className="shortcuts-group">
+          <div className="shortcuts-group-title">{group.title}</div>
+          <table className="shortcuts-table">
+            <tbody>
+              {group.shortcuts.map((s, i) => (
+                <tr key={i} className="shortcuts-row">
+                  <td className="shortcuts-keys">
+                    {s.keys.map((k, ki) => (
+                      <span key={ki}>
+                        <kbd className="shortcuts-kbd">{k}</kbd>
+                        {ki < s.keys.length - 1 && <span className="shortcuts-plus">+</span>}
+                      </span>
+                    ))}
+                  </td>
+                  <td className="shortcuts-desc">{s.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </>
   );
 }

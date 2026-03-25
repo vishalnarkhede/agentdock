@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsModal } from "./SettingsModal";
 import { createSession, fetchPreferences, updatePreferences, fetchNgrokStatus, startNgrok, stopNgrok } from "../api";
@@ -119,15 +120,24 @@ export function Header() {
     return () => clearInterval(id);
   }, [ngrok.running]);
 
+  const [ngrokToast, setNgrokToast] = useState<string | null>(null);
+  const ngrokToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleNgrokToggle = async () => {
     setNgrokLoading(true);
     try {
       if (ngrok.running) {
         await stopNgrok();
         setNgrok({ running: false, url: null });
+        setNgrokToast(null);
       } else {
         const status = await startNgrok();
         setNgrok(status);
+        if (status.url) {
+          setNgrokToast(status.url);
+          if (ngrokToastTimer.current) clearTimeout(ngrokToastTimer.current);
+          ngrokToastTimer.current = setTimeout(() => setNgrokToast(null), 8000);
+        }
       }
     } finally {
       setNgrokLoading(false);
@@ -159,6 +169,7 @@ export function Header() {
   }, [location.pathname]);
 
   return (
+    <>
     <header className="header">
       {/* Back button — mobile only, non-root pages or when in session */}
       {(location.pathname !== "/" || inSession) && (
@@ -236,7 +247,7 @@ export function Header() {
             disabled={ngrokLoading}
             title={ngrok.running && ngrok.url ? `ngrok: ${ngrok.url}` : "Start ngrok tunnel"}
           >
-            {ngrokLoading ? "..." : ngrok.running ? "ngrok on" : "ngrok"}
+            {ngrokLoading ? "..." : ngrok.running ? "ngrok on" : "Activate ngrok"}
           </button>
         )}
         <button
@@ -347,5 +358,19 @@ export function Header() {
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
+    {ngrokToast && createPortal(
+      <div className="ngrok-toast">
+        <span className="ngrok-toast-label">ngrok ready</span>
+        <a className="ngrok-toast-url" href={ngrokToast} target="_blank" rel="noopener noreferrer">
+          {ngrokToast.replace("https://", "")}
+        </a>
+        <button className="ngrok-toast-copy" onClick={() => { navigator.clipboard.writeText(ngrokToast); }}>
+          ⎘ copy
+        </button>
+        <button className="ngrok-toast-close" onClick={() => setNgrokToast(null)}>✕</button>
+      </div>,
+      document.body
+    )}
+    </>
   );
 }

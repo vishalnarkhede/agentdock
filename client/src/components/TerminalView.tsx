@@ -167,6 +167,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     return () => window.removeEventListener("agentdock-toggle-kb", handler);
   }, []);
 
+  // Focus terminal when requested (e.g. after closing file explorer)
+  useEffect(() => {
+    const handler = () => termRef.current?.focus();
+    window.addEventListener("agentdock-focus-terminal", handler);
+    return () => window.removeEventListener("agentdock-focus-terminal", handler);
+  }, []);
+
   // When custom keyboard is active, prevent xterm's hidden textarea from
   // triggering the native keyboard on mobile. inputmode="none" is the
   // reliable way to suppress the virtual keyboard on iOS/Android.

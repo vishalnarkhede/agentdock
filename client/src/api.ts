@@ -309,6 +309,49 @@ export function wsUrl(sessionName: string): string {
   return `${proto}//${window.location.host}/ws/sessions/${sessionName}`;
 }
 
+// ─── File System API ───
+
+export interface FsEntry {
+  name: string;
+  type: "file" | "dir";
+  ext?: string;
+}
+
+export async function fetchFsDir(path: string, roots: string[]): Promise<FsEntry[]> {
+  const params = new URLSearchParams({ path });
+  if (roots.length > 0) params.set("roots", roots.join(","));
+  const res = await fetch(`${BASE}/api/fs/list?${params}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to list directory");
+  }
+  const data = await res.json();
+  return data.entries;
+}
+
+export async function searchFsFiles(query: string, roots: string[]): Promise<Array<{ path: string; name: string; type: "file" | "dir" }>> {
+  const params = new URLSearchParams({ q: query });
+  if (roots.length > 0) params.set("roots", roots.join(","));
+  const res = await fetch(`${BASE}/api/fs/search?${params}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Search failed");
+  }
+  const data = await res.json();
+  return data.results;
+}
+
+export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number }> {
+  const params = new URLSearchParams({ path });
+  if (roots.length > 0) params.set("roots", roots.join(","));
+  const res = await fetch(`${BASE}/api/fs/read?${params}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Failed to read file");
+  }
+  return res.json();
+}
+
 // ─── Settings API ───
 
 export interface ToolHealth {

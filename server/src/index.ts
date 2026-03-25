@@ -10,6 +10,7 @@ import uploadRoutes from "./routes/upload";
 import settingsRoutes from "./routes/settings";
 import dbRoutes from "./routes/db";
 import ngrokRoutes from "./routes/ngrok";
+import fsRoutes from "./routes/fs";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
 import { handleWsOpen, handleWsMessage, handleWsClose } from "./routes/ws";
 import { syncRepos, syncHooksToClaudeSettings } from "./services/config";
@@ -33,6 +34,7 @@ app.route("/api/upload", uploadRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/db", dbRoutes);
 app.route("/api/ngrok", ngrokRoutes);
+app.route("/api/fs", fsRoutes);
 
 // Health check
 app.get("/api/health", (c) => c.json({ ok: true }));

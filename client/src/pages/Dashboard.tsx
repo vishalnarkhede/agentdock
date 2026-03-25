@@ -11,6 +11,8 @@ import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
+import { FileExplorer } from "../components/FileExplorer";
+import type { FileExplorerHandle } from "../components/FileExplorer";
 import { useMobileNav } from "../MobileNavContext";
 import type { SessionInfo, MetaPropertyPreset } from "../types";
 import type { QuickLaunch } from "../components/Header";
@@ -693,7 +695,7 @@ export function Dashboard() {
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
   // Bottom pane (plan/changes/sub-agents) split with terminal
-  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | null>(null);
+  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | "files" | null>(null);
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
   const [bottomMaximized, setBottomMaximized] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
@@ -873,6 +875,80 @@ export function Dashboard() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Cmd+P to open file explorer and focus search
+  const fileExplorerRef = useRef<FileExplorerHandle>(null);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        setBottomTab("files");
+        setBottomMaximized(false);
+        setTimeout(() => fileExplorerRef.current?.focusSearch(), 50);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Escape to collapse bottom pane (when focus is not in an input/textarea)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      setBottomTab((prev) => (prev ? null : prev));
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // ─── MRU session switching ───
+  // mruList[0] = current session, mruList[1] = previous, etc.
+  const mruList = useRef<string[]>([]);
+  const [mruSwitcherVisible, setMruSwitcherVisible] = useState(false);
+  const mruDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Update MRU whenever active session changes
+  useEffect(() => {
+    if (!activeSession) return;
+    mruList.current = [
+      activeSession,
+      ...mruList.current.filter((s) => s !== activeSession),
+    ].slice(0, 8);
+  }, [activeSession]);
+
+  // Ctrl+Shift+[ / Ctrl+Shift+] to navigate MRU sessions
+  // Use e.code (physical key) not e.key — Shift changes [ to { and ] to }
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "BracketLeft" && e.code !== "BracketRight") return;
+      e.preventDefault();
+      const list = mruList.current.filter((s) => sessions.some((sess) => sess.name === s));
+      if (list.length < 2) return;
+
+      const currentIdx = list.indexOf(activeSession ?? "");
+      // BracketRight = ] = forward (more recent), BracketLeft = [ = back (older)
+      const delta = e.code === "BracketLeft" ? 1 : -1;
+      const nextIdx = Math.max(0, Math.min(list.length - 1, currentIdx + delta));
+      if (nextIdx === currentIdx) return;
+      setActiveSession(list[nextIdx]);
+      setMobileShowTerminal(true);
+
+      // Show switcher popup, auto-dismiss after 1.5s of inactivity
+      setMruSwitcherVisible(true);
+      if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
+      mruDismissTimer.current = setTimeout(() => setMruSwitcherVisible(false), 1500);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeSession, sessions, setActiveSession]);
+
+  // Cleanup dismiss timer on unmount
+  useEffect(() => () => {
+    if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
   }, []);
 
   // Build ordered session list: pinned first, then parents, then their children indented below
@@ -1549,6 +1625,12 @@ export function Dashboard() {
                       <span className="tab-badge">{activeSessionInfo?.children?.length}</span>
                     </button>
                   )}
+                  <button
+                    className={`main-tab ${bottomTab === "files" ? "main-tab-active" : ""}`}
+                    onClick={() => setBottomTab(bottomTab === "files" ? null : "files")}
+                  >
+                    files
+                  </button>
                   {bottomTab && (
                     <button
                       className="main-tab split-maximize-btn"
@@ -1580,6 +1662,16 @@ export function Dashboard() {
                         setMobileShowTerminal(true);
                       }}
                       onRefresh={refresh}
+                    />
+                  ) : bottomTab === "files" ? (
+                    <FileExplorer
+                      key={activeSession}
+                      ref={fileExplorerRef}
+                      roots={activeSessionPaths}
+                      onClose={() => {
+                        setBottomTab(null);
+                        setTimeout(() => window.dispatchEvent(new Event("agentdock-focus-terminal")), 50);
+                      }}
                     />
                   ) : (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
@@ -1725,9 +1817,35 @@ export function Dashboard() {
             <span className="mobile-nav-icon">±</span>
             <span className="mobile-nav-label">Changes</span>
           </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">⊞</span>
+            <span className="mobile-nav-label">Files</span>
+          </button>
         </>
       )}
     </nav>
+    {mruSwitcherVisible && createPortal(
+      <div className="mru-switcher">
+        {mruList.current
+          .filter((s) => sessions.some((sess) => sess.name === s))
+          .slice(0, 6)
+          .map((name, idx) => {
+            const sess = sessions.find((s) => s.name === name);
+            const display = name.replace(/^claude-/, "");
+            return (
+              <div key={name} className={`mru-switcher-item${name === activeSession ? " mru-switcher-item-active" : ""}`}>
+                <span className={`mru-switcher-status mru-status-${sess?.status ?? "unknown"}`} />
+                <span className="mru-switcher-name">{display}</span>
+                {idx === 0 && <span className="mru-switcher-badge">now</span>}
+              </div>
+            );
+          })}
+      </div>,
+      document.body
+    )}
     </>
   );
 }
