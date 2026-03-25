@@ -919,17 +919,18 @@ export function Dashboard() {
     ].slice(0, 8);
   }, [activeSession]);
 
-  // Ctrl+Left/Right to navigate MRU sessions (Left = back, Right = forward)
+  // Cmd+Shift+[ / Cmd+Shift+] to navigate MRU sessions (like VS Code tabs)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (e.key !== "[" && e.key !== "]") return;
       e.preventDefault();
       const list = mruList.current.filter((s) => sessions.some((sess) => sess.name === s));
       if (list.length < 2) return;
 
       const currentIdx = list.indexOf(activeSession ?? "");
-      // Right = forward in history (toward more recent), Left = back (toward older)
-      const delta = e.key === "ArrowLeft" ? 1 : -1;
+      // ] = forward (more recent), [ = back (older)
+      const delta = e.key === "[" ? 1 : -1;
       const nextIdx = Math.max(0, Math.min(list.length - 1, currentIdx + delta));
       if (nextIdx === currentIdx) return;
       setActiveSession(list[nextIdx]);
