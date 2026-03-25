@@ -341,6 +341,25 @@ export async function searchFsFiles(query: string, roots: string[]): Promise<Arr
   return data.results;
 }
 
+export interface GrepResult {
+  path: string;
+  name: string;
+  lineNumber: number;
+  line: string;
+}
+
+export async function grepFsFiles(query: string, roots: string[]): Promise<GrepResult[]> {
+  const params = new URLSearchParams({ q: query });
+  if (roots.length > 0) params.set("roots", roots.join(","));
+  const res = await fetch(`${BASE}/api/fs/grep?${params}`);
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || "Grep failed");
+  }
+  const data = await res.json();
+  return data.results;
+}
+
 export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number }> {
   const params = new URLSearchParams({ path });
   if (roots.length > 0) params.set("roots", roots.join(","));

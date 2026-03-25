@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
-import { fetchFsDir, fetchFsFile, searchFsFiles } from "../api";
-import type { FsEntry } from "../api";
+import { fetchFsDir, fetchFsFile, searchFsFiles, grepFsFiles } from "../api";
+import type { FsEntry, GrepResult } from "../api";
 import "highlight.js/styles/atom-one-dark.css";
 import hljs from "highlight.js/lib/core";
 // Register only the languages we actually need — keeps bundle lean
@@ -213,6 +213,18 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Content search state (Cmd+Shift+F)
+  type SearchMode = "files" | "content";
+  const [searchMode, setSearchMode] = useState<SearchMode>("files");
+  const [contentQuery, setContentQuery] = useState("");
+  const [contentResults, setContentResults] = useState<GrepResult[] | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+  const [contentError, setContentError] = useState<string | null>(null);
+  const contentSearchInputRef = useRef<HTMLInputElement>(null);
+  const contentSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // When opening a grep result, remember target line to scroll to after render
+  const targetLineRef = useRef<number | null>(null);
+
   useImperativeHandle(ref, () => ({
     focusSearch: () => {
       searchInputRef.current?.focus();
@@ -220,10 +232,19 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     },
   }));
 
-  // Cmd+F to open in-file search
+  // Cmd+Shift+F — switch to content search mode
+  // Cmd+F — in-file search (only when file is open)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && openFile) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "F" && e.shiftKey) {
+        e.preventDefault();
+        setSearchMode("content");
+        setTimeout(() => {
+          contentSearchInputRef.current?.focus();
+          contentSearchInputRef.current?.select();
+        }, 30);
+      } else if (e.key === "f" && !e.shiftKey && openFile) {
         e.preventDefault();
         setFileSearchActive(true);
         setTimeout(() => {
@@ -311,6 +332,71 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setFileSearchActive(false);
     setFileSearchQuery("");
   }, []);
+
+  // Debounced content search
+  useEffect(() => {
+    if (contentSearchTimeout.current) clearTimeout(contentSearchTimeout.current);
+    if (!contentQuery.trim() || searchMode !== "content") {
+      setContentResults(null);
+      return;
+    }
+    contentSearchTimeout.current = setTimeout(async () => {
+      setContentLoading(true);
+      setContentError(null);
+      try {
+        const results = await grepFsFiles(contentQuery.trim(), roots);
+        setContentResults(results);
+      } catch (err: any) {
+        setContentError(err.message || "Search failed");
+        setContentResults([]);
+      } finally {
+        setContentLoading(false);
+      }
+    }, 400);
+    return () => { if (contentSearchTimeout.current) clearTimeout(contentSearchTimeout.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentQuery, searchMode, roots.join(",")]);
+
+  // After a grep result opens a file, scroll to the target line
+  useEffect(() => {
+    const line = targetLineRef.current;
+    if (!line || !fileContentRef.current) return;
+    targetLineRef.current = null;
+    const pre = fileContentRef.current;
+    // Approximate: measure line height from computed style
+    const style = window.getComputedStyle(pre);
+    const lineHeight = parseFloat(style.lineHeight) || 18;
+    // Add padding offset
+    const paddingTop = parseFloat(style.paddingTop) || 12;
+    pre.scrollTop = paddingTop + (line - 1) * lineHeight - pre.clientHeight / 3;
+  }, [openFile]);
+
+  const handleOpenGrepResult = useCallback(async (result: GrepResult) => {
+    targetLineRef.current = result.lineNumber;
+    if (openFile?.path !== result.path) {
+      setLoadingPath(result.path);
+      setError(null);
+      try {
+        const data = await fetchFsFile(result.path, roots);
+        setOpenFile({ path: result.path, ...data });
+      } catch (err: any) {
+        setError(err.message || "Failed to read file");
+        targetLineRef.current = null;
+      } finally {
+        setLoadingPath(null);
+      }
+    } else {
+      // File already open — scroll immediately
+      const pre = fileContentRef.current;
+      if (pre) {
+        const style = window.getComputedStyle(pre);
+        const lineHeight = parseFloat(style.lineHeight) || 18;
+        const paddingTop = parseFloat(style.paddingTop) || 12;
+        pre.scrollTop = paddingTop + (result.lineNumber - 1) * lineHeight - pre.clientHeight / 3;
+      }
+      targetLineRef.current = null;
+    }
+  }, [openFile, roots]);
 
   const handleFileSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") {
@@ -444,85 +530,163 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   return (
     <div className="fe-container">
       <div className="fe-tree-panel">
-        <div className="fe-search-bar">
-          <input
-            ref={searchInputRef}
-            className="fe-search-input"
-            type="text"
-            placeholder="⌘P — search files…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-          />
-          {searchQuery && (
-            <button className="fe-search-clear" onClick={() => setSearchQuery("")}>×</button>
-          )}
+        {/* Mode tabs */}
+        <div className="fe-mode-tabs">
+          <button
+            className={`fe-mode-tab${searchMode === "files" ? " fe-mode-tab-active" : ""}`}
+            onClick={() => { setSearchMode("files"); setTimeout(() => searchInputRef.current?.focus(), 30); }}
+          >Files ⌘P</button>
+          <button
+            className={`fe-mode-tab${searchMode === "content" ? " fe-mode-tab-active" : ""}`}
+            onClick={() => { setSearchMode("content"); setTimeout(() => contentSearchInputRef.current?.focus(), 30); }}
+          >Search ⌘⇧F</button>
         </div>
 
-        {searchQuery ? (
-          <div className="fe-search-results">
-            {searchLoading && <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>searching…</div>}
-            {!searchLoading && searchResults !== null && searchResults.length === 0 && (
-              <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>no matches</div>
-            )}
-            {searchResults?.map((result, idx) => (
-              <div
-                key={result.path}
-                className={`fe-tree-item fe-search-result${openFilePath === result.path || focusedResultIdx === idx ? " fe-tree-item-active" : ""}`}
-                onClick={() => result.type === "file" ? handleOpenFile(result.path) : handleToggleDir(result.path)}
-                title={result.path}
-              >
-                <span className="fe-icon fe-icon-file" style={{ color: result.type === "dir" ? "var(--accent)" : undefined }}>
-                  {result.type === "dir" ? "DIR" : result.name.includes(".") ? result.name.split(".").pop()!.slice(0, 2).toUpperCase() : "··"}
-                </span>
-                <div className="fe-search-result-text">
-                  <span className="fe-tree-name">{result.name}</span>
-                  <span className="fe-search-result-path">{getBreadcrumb(result.path)}</span>
-                </div>
-              </div>
-            ))}
-            {searchResults && searchResults.length === 100 && (
-              <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 100 results</div>
-            )}
+        {searchMode === "content" ? (
+          <div className="fe-content-search">
+            <div className="fe-search-bar">
+              <input
+                ref={contentSearchInputRef}
+                className="fe-search-input"
+                type="text"
+                placeholder="search in files…"
+                value={contentQuery}
+                onChange={(e) => setContentQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    if (contentQuery) setContentQuery("");
+                    else { setSearchMode("files"); setTimeout(() => searchInputRef.current?.focus(), 30); }
+                  }
+                }}
+              />
+              {contentQuery && (
+                <button className="fe-search-clear" onClick={() => setContentQuery("")}>×</button>
+              )}
+            </div>
+            <div className="fe-content-results">
+              {contentLoading && <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>searching…</div>}
+              {contentError && <div className="fe-tree-empty" style={{ padding: "8px 12px", color: "var(--red)" }}>{contentError}</div>}
+              {!contentLoading && contentResults !== null && contentResults.length === 0 && (
+                <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>no matches</div>
+              )}
+              {contentResults && (() => {
+                // Group results by file path
+                const byFile = new Map<string, GrepResult[]>();
+                for (const r of contentResults) {
+                  if (!byFile.has(r.path)) byFile.set(r.path, []);
+                  byFile.get(r.path)!.push(r);
+                }
+                return Array.from(byFile.entries()).map(([filePath, matches]) => (
+                  <div key={filePath} className="fe-content-file-group">
+                    <div className="fe-content-file-header" title={filePath}>
+                      <span className="fe-icon fe-icon-file">
+                        {matches[0].name.includes(".") ? matches[0].name.split(".").pop()!.slice(0, 2).toUpperCase() : "··"}
+                      </span>
+                      <span className="fe-content-file-name">{matches[0].name}</span>
+                      <span className="fe-content-file-path">{getBreadcrumb(filePath)}</span>
+                    </div>
+                    {matches.map((m) => (
+                      <div
+                        key={m.lineNumber}
+                        className={`fe-content-match${openFile?.path === filePath ? " fe-content-match-open" : ""}`}
+                        onClick={() => handleOpenGrepResult(m)}
+                        title={`Line ${m.lineNumber}`}
+                      >
+                        <span className="fe-content-linenum">{m.lineNumber}</span>
+                        <span className="fe-content-line">{m.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()}
+              {contentResults && contentResults.length >= 200 && (
+                <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 200 matches</div>
+              )}
+            </div>
           </div>
         ) : (
-          <div className="fe-tree-body">
-            {roots.map((root) => (
-              <div key={root} className="fe-root-section">
-                <div
-                  className="fe-root-header"
-                  onClick={() => handleToggleDir(root)}
-                >
-                  <span className={`fe-dir-arrow${expandedDirs.has(root) ? " fe-dir-arrow-open" : ""}`}>▶</span>
-                  <span className="fe-root-name">{getBasename(root)}</span>
-                  {loadingPath === root && <span className="fe-spinner">…</span>}
-                </div>
-                {expandedDirs.has(root) && dirContents.has(root) && (
-                  <div className="fe-tree-children">
-                    {dirContents.get(root)!.map((entry) => (
-                      <TreeNode
-                        key={entry.name}
-                        path={`${root}/${entry.name}`}
-                        name={entry.name}
-                        type={entry.type}
-                        ext={entry.ext}
-                        dirContents={dirContents}
-                        expandedDirs={expandedDirs}
-                        loadingPath={loadingPath}
-                        openFilePath={openFilePath}
-                        onToggleDir={handleToggleDir}
-                        onOpenFile={handleOpenFile}
-                        depth={1}
-                      />
-                    ))}
-                    {dirContents.get(root)!.length === 0 && (
-                      <div className="fe-tree-empty" style={{ paddingLeft: "24px" }}>empty</div>
-                    )}
+          <>
+            <div className="fe-search-bar">
+              <input
+                ref={searchInputRef}
+                className="fe-search-input"
+                type="text"
+                placeholder="search files…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+              />
+              {searchQuery && (
+                <button className="fe-search-clear" onClick={() => setSearchQuery("")}>×</button>
+              )}
+            </div>
+
+            {searchQuery ? (
+              <div className="fe-search-results">
+                {searchLoading && <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>searching…</div>}
+                {!searchLoading && searchResults !== null && searchResults.length === 0 && (
+                  <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>no matches</div>
+                )}
+                {searchResults?.map((result, idx) => (
+                  <div
+                    key={result.path}
+                    className={`fe-tree-item fe-search-result${openFilePath === result.path || focusedResultIdx === idx ? " fe-tree-item-active" : ""}`}
+                    onClick={() => result.type === "file" ? handleOpenFile(result.path) : handleToggleDir(result.path)}
+                    title={result.path}
+                  >
+                    <span className="fe-icon fe-icon-file" style={{ color: result.type === "dir" ? "var(--accent)" : undefined }}>
+                      {result.type === "dir" ? "DIR" : result.name.includes(".") ? result.name.split(".").pop()!.slice(0, 2).toUpperCase() : "··"}
+                    </span>
+                    <div className="fe-search-result-text">
+                      <span className="fe-tree-name">{result.name}</span>
+                      <span className="fe-search-result-path">{getBreadcrumb(result.path)}</span>
+                    </div>
                   </div>
+                ))}
+                {searchResults && searchResults.length === 100 && (
+                  <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 100 results</div>
                 )}
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="fe-tree-body">
+                {roots.map((root) => (
+                  <div key={root} className="fe-root-section">
+                    <div
+                      className="fe-root-header"
+                      onClick={() => handleToggleDir(root)}
+                    >
+                      <span className={`fe-dir-arrow${expandedDirs.has(root) ? " fe-dir-arrow-open" : ""}`}>▶</span>
+                      <span className="fe-root-name">{getBasename(root)}</span>
+                      {loadingPath === root && <span className="fe-spinner">…</span>}
+                    </div>
+                    {expandedDirs.has(root) && dirContents.has(root) && (
+                      <div className="fe-tree-children">
+                        {dirContents.get(root)!.map((entry) => (
+                          <TreeNode
+                            key={entry.name}
+                            path={`${root}/${entry.name}`}
+                            name={entry.name}
+                            type={entry.type}
+                            ext={entry.ext}
+                            dirContents={dirContents}
+                            expandedDirs={expandedDirs}
+                            loadingPath={loadingPath}
+                            openFilePath={openFilePath}
+                            onToggleDir={handleToggleDir}
+                            onOpenFile={handleOpenFile}
+                            depth={1}
+                          />
+                        ))}
+                        {dirContents.get(root)!.length === 0 && (
+                          <div className="fe-tree-empty" style={{ paddingLeft: "24px" }}>empty</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -269,4 +269,99 @@ app.get("/search", async (c) => {
   return c.json({ results });
 });
 
+interface GrepMatch {
+  path: string;
+  name: string;
+  lineNumber: number;
+  line: string;
+}
+
+/**
+ * Search file contents using ripgrep (fast) with grep -r fallback.
+ * Returns up to maxMatches results across all roots.
+ * Per-file match limit keeps any single file from dominating results.
+ */
+async function grepContent(roots: string[], query: string, maxMatches: number): Promise<GrepMatch[]> {
+  const SKIP_GLOBS = ["!node_modules", "!.git", "!dist", "!build", "!.next", "!vendor", "!target", "!coverage", "!*.min.js", "!*.map"];
+
+  // Try ripgrep first (much faster than grep -r)
+  const rgArgs = [
+    "--no-heading", "-n",
+    "--max-count=5",       // max 5 matches per file
+    "--max-columns=300",   // truncate very long lines
+    "--fixed-strings",     // literal match, not regex
+    "--ignore-case",
+    ...SKIP_GLOBS.map((g) => ["--glob", g]).flat(),
+    query,
+    ...roots,
+  ];
+
+  let rawOutput = "";
+  let usedTool = "";
+
+  try {
+    const proc = Bun.spawn(["rg", ...rgArgs], { stdout: "pipe", stderr: "pipe" });
+    rawOutput = await new Response(proc.stdout).text();
+    usedTool = "rg";
+  } catch {
+    // rg not installed — fall back to grep
+    try {
+      const grepArgs = ["-r", "-n", "-i", "--include=*.*", "-m", "200", query, ...roots];
+      const proc = Bun.spawn(["grep", ...grepArgs], { stdout: "pipe", stderr: "pipe" });
+      rawOutput = await new Response(proc.stdout).text();
+      usedTool = "grep";
+    } catch {
+      return [];
+    }
+  }
+
+  const results: GrepMatch[] = [];
+  for (const rawLine of rawOutput.split("\n")) {
+    if (results.length >= maxMatches) break;
+    if (!rawLine.trim()) continue;
+
+    // Format: /abs/path/to/file:linenum:content
+    // Find first two colons that separate path, line number, content
+    const first = rawLine.indexOf(":");
+    if (first === -1) continue;
+    // On Windows there would be drive letter colons, but this runs on macOS/Linux
+    const second = rawLine.indexOf(":", first + 1);
+    if (second === -1) continue;
+
+    const filePath = resolve(rawLine.slice(0, first));
+    const lineNumber = parseInt(rawLine.slice(first + 1, second), 10);
+    const line = rawLine.slice(second + 1);
+    if (!filePath || isNaN(lineNumber)) continue;
+    if (!isWithinBasePath(filePath)) continue;
+
+    results.push({ path: filePath, name: basename(filePath), lineNumber, line });
+  }
+
+  // Sort by path so results are grouped by file
+  results.sort((a, b) => a.path.localeCompare(b.path) || a.lineNumber - b.lineNumber);
+  return results;
+}
+
+// GET /api/fs/grep?q=<query>&roots=<comma-separated-abs-paths>
+app.get("/grep", async (c) => {
+  const q = c.req.query("q");
+  const rootsParam = c.req.query("roots");
+
+  if (!q || q.trim().length < 2) {
+    return c.json({ results: [] });
+  }
+
+  const roots = parseRoots(rootsParam);
+  const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
+
+  for (const root of searchRoots) {
+    if (!isWithinBasePath(root)) {
+      return c.json({ error: "roots outside allowed directory" }, 403);
+    }
+  }
+
+  const results = await grepContent(searchRoots, q.trim(), 200);
+  return c.json({ results });
+});
+
 export default app;
