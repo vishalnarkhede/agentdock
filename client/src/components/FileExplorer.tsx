@@ -144,7 +144,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return () => {
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
     };
-  }, [searchQuery, roots]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, roots.join(",")]); // roots.join avoids re-running when array ref changes but content is same
 
   // Reset focused result when results change
   useEffect(() => {
