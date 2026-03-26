@@ -14,6 +14,8 @@ So I started building my own setup — a proper web UI for running Claude Code i
 
 If any of that sounds familiar, this is for you. If you're using it and want to chat about where it goes next — [find me on X](https://x.com/vishtree1992).
 
+> **Note:** This is a side project I work on in my spare time. Things may not always work perfectly — if you hit a bug or something feels off, just [open an issue](https://github.com/vishalnarkhede/agentdock/issues) and I'll get to it when I can.
+
 ## Features
 
 - **Multi-agent support** — Claude Code, Cursor Agent, or add your own (see [AGENTS.md](./AGENTS.md))
