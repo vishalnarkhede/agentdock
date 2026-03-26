@@ -19,12 +19,21 @@ Create sessions, watch live terminal output, type input, switch between agents m
 - **Agent switching** — Switch between agents mid-conversation with context preservation
 - **Sub-agents** — Agents can spawn child agents for parallel workstreams
 - **Git worktrees** — Isolate work with automatic worktree creation per session
-- **Multi-repo sessions** — Work across multiple repositories in grouped sessions
+- **Multi-repo sessions** — Work across multiple repositories in a single grouped session
 - **Live terminal** — Stream agent output in real-time via WebSocket + xterm.js
-- **Prompt templates** — Save and reuse common prompts
+- **Session restore** — Restore stopped sessions with full conversation history intact
+- **Plan tab** — Agents save structured plans; send follow-up messages directly from the plan view
+- **Changes tab** — Live git diff viewer with inline commenting
+- **Files explorer** — Browse and open files from the session's repo with in-file search (Cmd+F)
+- **Status detection** — Real-time working/waiting/done status via Claude Code hooks
+- **Prompt templates** — Save and reuse common prompts across sessions
+- **Session grouping** — Organize sessions by project or team
 - **Session pinning** — Pin important sessions to the top of the list
+- **Meta-properties** — Attach custom key-value properties to sessions for context
+- **Quick actions** — Fix-me button and Slack-to-fix for one-click session creation from issues
+- **Ngrok integration** — Expose the dashboard over the internet with a single toggle
+- **Keyboard shortcuts** — MRU session switcher, fullscreen terminal, and more
 - **Collapsible sidebar** — Maximize terminal space with one click
-- **Auto plan tracking** — Agents automatically save plans viewable in the Plan tab
 - **Mobile-friendly UI** — Manage agents from your phone or tablet
 - **Browser notifications** — Get notified when agents finish or need input
 - **Password protection** — Optional authentication for network access
@@ -119,11 +128,24 @@ MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be ad
 
 1. **Create a session** — pick repos, choose an agent (Claude or Cursor), optionally enable worktree isolation
 2. **Agent launches** in a tmux session with appropriate permissions for file edits, git, and GitHub CLI
-3. **Watch live output** — the terminal view streams `tmux capture-pane` over WebSocket at ~200ms intervals
-4. **Type input** — keystrokes are forwarded to the tmux pane via `tmux send-keys`
-5. **Switch agents** — seamlessly switch between Claude and Cursor while preserving conversation context
-6. **Sub-agents** — agents can spawn child agents using the `ad-agent` CLI for parallel work
-7. **Stop** — kills the tmux session and cleans up any worktrees
+3. **Status is tracked** via Claude Code lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, etc.) that write to `/tmp/agentdock-status/` — no terminal scraping needed
+4. **Watch live output** — the terminal view streams `tmux capture-pane` over WebSocket at ~200ms intervals
+5. **Type input** — keystrokes are forwarded to the tmux pane via `tmux send-keys`
+6. **View the plan** — agents save structured plans to `~/.config/agentdock/plans/` which appear in the Plan tab; send follow-up messages directly from there
+7. **Browse changes** — the Changes tab shows a live git diff of all modified files
+8. **Switch agents** — seamlessly switch between Claude and Cursor while preserving conversation context
+9. **Sub-agents** — agents can spawn child agents using the `ad-agent` CLI for parallel work
+10. **Restore** — stopped sessions can be restored with full Claude conversation history, bypassing the interactive picker for reliability
+11. **Stop** — kills the tmux session and cleans up any worktrees
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+[` / `Ctrl+Shift+]` | Switch to previous/next session (MRU order) |
+| `Cmd+F` | In-file search (when Files tab is open) |
+| `Esc` | Collapse plan/changes/files panel |
+| Fullscreen button | Expand terminal to full window |
 
 ## Architecture
 
@@ -135,24 +157,33 @@ agentdock/
   server/                 # Bun + Hono (port 4800)
     src/
       services/
-        session-manager.ts  # Session lifecycle orchestration
-        tmux.ts             # tmux command interface
-        worktree.ts         # git worktree management
-        status.ts           # Agent status detection
-        config.ts           # File-based configuration
+        session-manager.ts    # Session lifecycle orchestration
+        tmux.ts               # tmux command interface
+        worktree.ts           # git worktree management
+        status.ts             # Agent status detection (hooks + fallback)
+        config.ts             # File-based configuration
+        linear.ts             # Linear ticket fetching
+        slack.ts              # Slack message fetching
+        sub-agent-prompt.ts   # Sub-agent system prompt generation
       routes/
-        sessions.ts         # Session CRUD + agent switching
-        repos.ts            # Repository management
-        ws.ts               # WebSocket terminal streaming
+        sessions.ts           # Session CRUD + agent switching + sub-agents
+        repos.ts              # Repository management
+        ws.ts                 # WebSocket terminal streaming
+        git.ts                # Git diff / branch / PR operations
+        tickets.ts            # Ticket context fetching
+        quick.ts              # Quick actions (fix-me, Slack-to-fix)
+        ngrok.ts              # Ngrok tunnel management
   client/                 # React + Vite + xterm.js (port 5173)
     src/
       pages/
-        Dashboard.tsx       # Split-panel: session list + terminal/plan/changes
-        CreateSession.tsx   # New session form with repo search + templates
+        Dashboard.tsx         # Split-panel: session list + terminal/plan/changes/files
+        CreateSession.tsx     # New session form with repo search + templates
       components/
-        TerminalView.tsx    # xterm.js + WebSocket
-        ChangesView.tsx     # Git diff viewer with inline commenting
-        SubAgentsView.tsx   # Sub-agent monitoring
+        TerminalView.tsx      # xterm.js + WebSocket streaming
+        ChangesView.tsx       # Git diff viewer with inline commenting
+        FileExplorer.tsx      # File browser with in-file search
+        SubAgentsView.tsx     # Sub-agent monitoring
+        Header.tsx            # Quick actions, ngrok, session controls
 ```
 
 ## Adding a New Agent
@@ -188,7 +219,13 @@ Fast startup, built-in TypeScript support, and native WebSocket handling. The se
 Session state is ephemeral (tmux sessions) and configuration is simple (a few JSON/text files). A database would add complexity without benefit.
 
 **Can I run this on a remote server?**
-Yes — set a password in `~/.config/agentdock/password` and access the UI over your network. Consider using SSH tunneling or a reverse proxy with HTTPS for security.
+Yes — set a password in `~/.config/agentdock/password` and access the UI over your network. Use the built-in ngrok integration for a quick public URL, or set up SSH tunneling / a reverse proxy with HTTPS for a permanent setup.
+
+**How does status detection work?**
+Claude Code sessions use lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, `SubagentStop`) that write status files to `/tmp/agentdock-status/`. This gives accurate working/waiting/done state without parsing terminal output. Cursor Agent uses terminal pattern matching as a fallback since it doesn't support hooks.
+
+**How does session restore work?**
+When a session is stopped (e.g. after a reboot), agentdock finds the most recent Claude conversation UUID from `~/.claude/projects/` and passes it directly to `claude --resume <uuid>`, bypassing Claude's interactive session picker entirely.
 
 ## Contributing
 
