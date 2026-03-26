@@ -12,7 +12,7 @@ I got tired of Cursor eating all my RAM. I'm not a terminal guy. I work on featu
 
 So I started building my own setup — a proper web UI for running Claude Code in tmux, with git worktrees for isolation, a live terminal I can actually see from my phone, and enough structure that I can run several parallel workstreams without losing my mind. At some point it became real enough that I decided to open source it.
 
-If any of that sounds familiar, this is for you.
+If any of that sounds familiar, this is for you. If you're using it and want to chat about where it goes next — [find me on X](https://x.com/vishtree1992).
 
 ## Features
 
