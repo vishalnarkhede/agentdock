@@ -6,6 +6,14 @@ Create sessions, watch live terminal output, type input, switch between agents m
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/cf8f345c-7a43-44b1-8346-831dc6751923" />
 
+## Why I built this
+
+I got tired of Cursor eating all my RAM. I'm not a terminal guy. I work on features that span multiple repos simultaneously. And sometimes I just need to keep things moving while walking the baby at 2am.
+
+So I started building my own setup — a proper web UI for running Claude Code in tmux, with git worktrees for isolation, a live terminal I can actually see from my phone, and enough structure that I can run several parallel workstreams without losing my mind. At some point it became real enough that I decided to open source it.
+
+If any of that sounds familiar, this is for you.
+
 ## Features
 
 - **Multi-agent support** — Claude Code, Cursor Agent, or add your own (see [AGENTS.md](./AGENTS.md))
