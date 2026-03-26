@@ -4,14 +4,7 @@ A web dashboard for managing parallel AI coding agents across multiple repositor
 
 Create sessions, watch live terminal output, type input, switch between agents mid-conversation, spawn sub-agents, and manage everything through a clean web UI or CLI — including from your phone or tablet with a mobile-optimized interface.
 
-### Plan Tab
-![Plan tab showing agent progress and task checklist](screenshots/plan-tab.png)
-
-### Changes Tab
-![Changes tab showing git diff and modified files](screenshots/changes-tab.png)
-
-### Settings
-![Settings modal with appearance and configuration options](screenshots/settings-modal.png)
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/cf8f345c-7a43-44b1-8346-831dc6751923" />
 
 ## Features
 
