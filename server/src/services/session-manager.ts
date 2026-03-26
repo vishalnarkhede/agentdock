@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "crypto";
-import { readFileSync, mkdirSync, writeFileSync } from "fs";
+import { readFileSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import {
   resolveAlias,
@@ -466,6 +466,24 @@ export async function stopAllSessions(): Promise<void> {
   }
 }
 
+function findLatestClaudeSessionUuid(wtDir: string): string | null {
+  try {
+    // Claude encodes the project path by replacing '/' and '.' with '-'
+    const encoded = wtDir.replace(/[/.]/g, "-");
+    const claudeProjectDir = join(HOME_DIR, ".claude", "projects", encoded);
+    const files = readdirSync(claudeProjectDir).filter((f) => f.endsWith(".jsonl"));
+    if (files.length === 0) return null;
+    const withStats = files.map((f) => ({
+      uuid: f.replace(".jsonl", ""),
+      mtime: statSync(join(claudeProjectDir, f)).mtimeMs,
+    }));
+    withStats.sort((a, b) => b.mtime - a.mtime);
+    return withStats[0].uuid;
+  } catch {
+    return null;
+  }
+}
+
 export async function restoreSession(sessionName: string): Promise<void> {
   if (await tmux.hasSession(sessionName)) {
     throw new Error(`Session ${sessionName} is already running`);
@@ -512,7 +530,13 @@ export async function restoreSession(sessionName: string): Promise<void> {
     cmd = `claude --allowedTools ${tools}`;
   }
   cmd += ` --append-system-prompt-file ${systemPromptFile}`;
-  cmd += ` --resume "${displayName}"`;
+  // Pass UUID directly to bypass the interactive TUI session picker (which can freeze)
+  const sessionUuid = findLatestClaudeSessionUuid(cwd);
+  if (sessionUuid) {
+    cmd += ` --resume ${sessionUuid}`;
+  } else {
+    cmd += ` --resume "${displayName}"`;
+  }
 
   await tmux.sendKeys(sessionName, cmd);
 
@@ -521,7 +545,7 @@ export async function restoreSession(sessionName: string): Promise<void> {
   await tmux.sendSpecialKey(sessionName, "Enter");
   markSessionClaudeNamed(sessionName);
 
-  console.log(`[restore] ${sessionName}: resumed with --resume "${displayName}"`);
+  console.log(`[restore] ${sessionName}: resumed with uuid=${sessionUuid ?? `name:${displayName}`}`);
 }
 
 export async function migrateUnnamedSessions(): Promise<void> {

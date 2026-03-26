@@ -3833,6 +3833,26 @@ mark.fe-match-active {
 .terminal-wrapper .xterm-helper-textarea {
   opacity: 0 !important;
   caret-color: transparent !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  /* Move off-screen so macOS Chrome can't paint an OS-level cursor at the
+     textarea's position. CSS !important overrides xterm's inline left/top. */
+  position: fixed !important;
+  top: -9999px !important;
+  left: -9999px !important;
+}
+
+/* Hide the absolutely-positioned xterm-cursor overlay in the DOM renderer.
+   It gets out of sync with the in-flow xterm-bg-257 cursor cell on each
+   term.reset()+rewrite cycle, causing a growing gap between two cursors.
+   The xterm-bg-257 cell background correctly shows the cursor position. */
+.terminal-wrapper .xterm-cursor {
+  display: none !important;
+}
+
+.terminal-wrapper .xterm-accessibility {
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /* ─── Terminal unfocused hint ─── */
