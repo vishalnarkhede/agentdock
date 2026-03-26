@@ -2,7 +2,7 @@
 
 A web dashboard for managing parallel AI coding agents across multiple repositories. Run [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Cursor Agent](https://docs.cursor.com/agent), or other agents side-by-side in tmux sessions with git worktree isolation — all from your browser.
 
-Create sessions, watch live terminal output, type input, switch between agents mid-conversation, spawn sub-agents, and manage everything through a clean web UI or CLI — including from your phone or tablet with a mobile-optimized interface.
+Create sessions, watch live terminal output, type input, switch between agents mid-conversation, and manage everything through a clean web UI or CLI — including from your phone or tablet with a mobile-optimized interface.
 
 ### Plan Tab
 ![Plan tab showing agent progress and task checklist](screenshots/plan-tab.png)
