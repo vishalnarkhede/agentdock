@@ -248,7 +248,7 @@ agentdock is designed to support any CLI-based coding agent. See [AGENTS.md](./A
 
 - **Local-first** — server binds to `localhost` by default
 - **No external dependencies** — all data stored in local files, no database or cloud services
-- **Optional auth** — password protection via hashed tokens stored in `~/.config/agentdock/password`
+- **Optional auth** — password protection via hashed tokens stored in `~/.config/agentdock/auth-password`
 - **Agent isolation** — each session runs in its own tmux session with configurable tool permissions
 
 For security issues, please see [SECURITY.md](./SECURITY.md).
@@ -273,7 +273,7 @@ Fast startup, built-in TypeScript support, and native WebSocket handling. The se
 Session state is ephemeral (tmux sessions) and configuration is simple (a few JSON/text files). A database would add complexity without benefit.
 
 **Can I run this on a remote server?**
-Yes — set a password in `~/.config/agentdock/password` and access the UI over your network. Use the built-in ngrok integration for a quick public URL, or set up SSH tunneling / a reverse proxy with HTTPS for a permanent setup.
+Yes — set a password in `~/.config/agentdock/auth-password` and access the UI over your network. Use the built-in ngrok integration for a quick public URL, or set up SSH tunneling / a reverse proxy with HTTPS for a permanent setup.
 
 **How does status detection work?**
 Claude Code sessions use lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, `SubagentStop`) that write status files to `/tmp/agentdock-status/`. This gives accurate working/waiting/done state without parsing terminal output. Cursor Agent uses terminal pattern matching as a fallback since it doesn't support hooks.

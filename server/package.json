@@ -2,7 +2,8 @@
   "name": "server",
   "version": "1.0.0",
   "scripts": {
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun run --watch src/index.ts",
+    "test": "bun test --preload ./src/__tests__/test-preload.ts"
   },
   "dependencies": {
     "hono": "^4.7.0"
