@@ -24,7 +24,11 @@ export function Header() {
   const sessionTitle = mobileNav?.sessionTitle ?? "";
   const inSession = mobileNav?.inSession ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") !== "native");
+  const [customKb, setCustomKb] = useState(() => {
+    const stored = localStorage.getItem("agentdock-kb");
+    if (stored) return stored !== "native";
+    return window.innerWidth <= 768; // default on only on mobile
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);

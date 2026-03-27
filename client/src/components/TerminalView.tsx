@@ -124,7 +124,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
-  const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") !== "native");
+  const [customKb, setCustomKb] = useState(() => {
+    const stored = localStorage.getItem("agentdock-kb");
+    if (stored) return stored !== "native";
+    return window.innerWidth <= 768; // default on only on mobile
+  });
   const [kbVisible, setKbVisible] = useState(false);
   const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
 
