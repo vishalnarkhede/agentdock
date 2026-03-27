@@ -18,7 +18,7 @@ If any of that sounds familiar, this is for you. If you're using it and want to 
 
 ## Features
 
-- **Multi-agent support** — Claude Code, Cursor Agent, or add your own (see [AGENTS.md](./AGENTS.md))
+- **Claude Code first** — built and optimised for Claude Code; Cursor Agent support exists but is experimental (see [AGENTS.md](./AGENTS.md) to add your own)
 - **Agent switching** — Switch between agents mid-conversation with context preservation
 - **Sub-agents** — Agents can spawn child agents for parallel workstreams
 - **Git worktrees** — Isolate work with automatic worktree creation per session
@@ -88,10 +88,23 @@ Once added, it opens full-screen without the browser chrome, just like a real ap
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) (runtime)
-- [tmux](https://github.com/tmux/tmux) (session management)
-- [git](https://git-scm.com/) (worktrees)
-- At least one agent CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Cursor Agent](https://docs.cursor.com/agent)
+> **Note:** agentdock is built primarily for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Cursor Agent mode exists but is not actively maintained — expect rough edges.
+
+| Tool | Required | Purpose | Install |
+|---|---|---|---|
+| [Bun](https://bun.sh/) | ✅ | Runtime + package manager | `curl -fsSL https://bun.sh/install \| bash` |
+| [tmux](https://github.com/tmux/tmux) | ✅ | Session management | `brew install tmux` |
+| [git](https://git-scm.com/) | ✅ | Worktree isolation | usually pre-installed |
+| [Node.js](https://nodejs.org/) | ✅ | Client build (npx) | `brew install node` |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ | AI agent | `npm install -g @anthropic-ai/claude-code` |
+| [gh CLI](https://cli.github.com/) | ⚪ optional | PR / GitHub features | `brew install gh` |
+| [Cursor Agent](https://docs.cursor.com/agent) | ⚪ optional | Alternative agent (experimental) | via Cursor IDE |
+
+After installing Claude Code, authenticate before first use:
+
+```bash
+claude login
+```
 
 ### Install
 
