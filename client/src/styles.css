@@ -2612,8 +2612,45 @@ h1 {
 }
 
 .plan-content input[type="checkbox"] {
-  accent-color: var(--accent);
-  margin-right: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  border: 2px solid var(--text-dim);
+  border-radius: 3px;
+  margin-right: 8px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+  background: transparent;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.plan-content input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.plan-content input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+/* Dim completed items */
+.plan-content li:has(input[type="checkbox"]:checked) {
+  opacity: 0.55;
+  text-decoration: line-through;
+  text-decoration-color: var(--text-dim);
 }
 
 .plan-content code {
