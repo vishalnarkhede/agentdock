@@ -387,9 +387,8 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
     } else {
       // Single repo
       const resolved = await resolvePiece(target, newBranch, sessionSlug);
-      if (resolved.isWorktree) {
-        saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir);
-      }
+      // Always save path metadata so the session list shows the correct repo path
+      saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir);
 
       await launchAgent(sess, resolved.workDir, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession, undefined, req.meta);
     }

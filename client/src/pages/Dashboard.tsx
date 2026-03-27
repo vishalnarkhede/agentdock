@@ -163,6 +163,7 @@ function SessionRow({
   };
 
   const displayStatus = getDisplayStatus(session);
+  const displayPath = session.worktrees?.[0]?.wtDir || session.path;
 
   return (
     <div
@@ -238,8 +239,8 @@ function SessionRow({
         </div>
       )}
       <div className="session-row-meta">
-        <span className="session-row-path" title={session.path}>
-          {session.path.replace(/^\/Users\/[^/]+\//, "~/")}
+        <span className="session-row-path" title={displayPath}>
+          {displayPath.replace(/^\/Users\/[^/]+\//, "~/")}
         </span>
         {session.agentType && session.agentType !== "claude" && (
           <span className="session-row-agent" title={`Agent: ${session.agentType}`}>
