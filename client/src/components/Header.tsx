@@ -24,7 +24,7 @@ export function Header() {
   const sessionTitle = mobileNav?.sessionTitle ?? "";
   const inSession = mobileNav?.inSession ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") === "custom");
+  const [customKb, setCustomKb] = useState(() => localStorage.getItem("agentdock-kb") !== "native");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);

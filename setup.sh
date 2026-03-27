@@ -63,34 +63,7 @@ else
   echo "  Install: brew install gh"
 fi
 
-# 5. Install ffmpeg (required by mlx-whisper for audio decoding)
-if command -v ffmpeg &>/dev/null; then
-  echo "[ok] ffmpeg found"
-else
-  if command -v brew &>/dev/null; then
-    echo "[installing] ffmpeg via homebrew..."
-    brew install ffmpeg
-    echo "[ok] ffmpeg installed"
-  else
-    echo "[warn] ffmpeg not found. Install it for voice input support:"
-    echo "  macOS:  brew install ffmpeg"
-    echo "  Linux:  sudo apt install ffmpeg"
-  fi
-fi
-
-# 6. Install Python dependencies for voice input (whisper server)
-echo ""
-echo "Setting up whisper server (voice input)..."
-VENV_DIR="${SCRIPT_DIR}/.venv"
-if [[ ! -d "$VENV_DIR" ]]; then
-  python3 -m venv "$VENV_DIR"
-fi
-"${VENV_DIR}/bin/pip" install -q mlx-whisper fastapi uvicorn python-multipart 2>/dev/null || {
-  echo "[warn] whisper dependencies install failed — voice input may not work"
-}
-echo "[ok] whisper venv ready"
-
-# 7. Install node dependencies
+# 5. Install node dependencies
 echo ""
 echo "Installing dependencies..."
 (cd "$SCRIPT_DIR" && bun install)
@@ -183,10 +156,4 @@ echo "Or use the CLI directly:"
 echo ""
 echo "  agentdock start my-repo"
 echo "  agentdock repos"
-echo ""
-echo "For voice input, start the whisper server:"
-echo ""
-echo "  ${VENV_DIR}/bin/python bin/whisper-server.py"
-echo ""
-echo "(First run downloads ~1.6GB model from HuggingFace)"
 echo ""
