@@ -352,13 +352,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       return;
     }
 
-    // Reset terminal state (clears screen, scrollback, and importantly resets the
-    // ANSI parser). Without this, a truncated escape sequence in captured content
-    // can leave the parser stuck, causing all subsequent text to render unstyled.
-    term.reset();
+    // Write the clear + content in a single term.write() call so xterm batches
+    // them atomically in one animation frame — no blank flash between clear and render.
+    // \x1b[H = cursor to home, \x1b[2J = erase display, \x1bc = full reset (parser + screen).
+    // Using \x1bc inside write() resets the ANSI parser AND clears the screen within
+    // the same render pass, eliminating the flicker that term.reset() caused.
     const row = snapshot.cursorY + 1;
     const col = snapshot.cursorX + 1;
     term.write(
+      "\x1bc" +         // full reset (parser + screen) — atomic with content below
       "\x1b[?25l" +     // hide cursor during render
       snapshot.content.replace(/\n+$/, "") +
       `\x1b[${row};${col}H` +
