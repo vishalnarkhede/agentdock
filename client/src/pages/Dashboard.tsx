@@ -1576,6 +1576,7 @@ export function Dashboard() {
                     toolbarPortal={toolbarRef}
                     onSwipeBack={() => setMobileShowTerminal(false)}
                     onKeyboardVisibilityChange={setKbOpen}
+                    isActive={!bottomTab}
                   />
                 )}
               </div>

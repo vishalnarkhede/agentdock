@@ -82,9 +82,10 @@ interface Props {
   toolbarPortal?: React.RefObject<HTMLDivElement | null>;
   onSwipeBack?: () => void;
   onKeyboardVisibilityChange?: (visible: boolean) => void;
+  isActive?: boolean;
 }
 
-export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange }: Props) {
+export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive }: Props) {
   const { settings } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -131,6 +132,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     onKeyboardVisibilityChange?.(customKb && kbVisible);
   }, [customKb, kbVisible, onKeyboardVisibilityChange]);
   const scrollbarDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
+
+  // Scroll to bottom when terminal tab becomes active (e.g. switching back from plan/changes)
+  useEffect(() => {
+    if (isActive && termRef.current) {
+      termRef.current.scrollToBottom();
+    }
+  }, [isActive]);
 
   // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
   useEffect(() => {
