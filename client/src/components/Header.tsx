@@ -24,11 +24,6 @@ export function Header() {
   const sessionTitle = mobileNav?.sessionTitle ?? "";
   const inSession = mobileNav?.inSession ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [customKb, setCustomKb] = useState(() => {
-    const stored = localStorage.getItem("agentdock-kb");
-    if (stored) return stored !== "native";
-    return window.innerWidth <= 768; // default on only on mobile
-  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);
@@ -337,18 +332,6 @@ export function Header() {
                 )}
               </>
             )}
-            <button
-              className={`header-fix-me-btn ${customKb ? "header-kb-active" : ""}`}
-              onClick={() => {
-                const next = !customKb;
-                setCustomKb(next);
-                localStorage.setItem("agentdock-kb", next ? "custom" : "native");
-                window.dispatchEvent(new CustomEvent("agentdock-toggle-kb"));
-                setMenuOpen(false);
-              }}
-            >
-              {customKb ? "⌨ custom keyboard" : "⌨ native keyboard"}
-            </button>
             {authEnabled && (
               <button
                 className="header-logout-btn"

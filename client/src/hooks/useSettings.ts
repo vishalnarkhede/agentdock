@@ -11,6 +11,7 @@ export interface Settings {
   cursorBlink: boolean;
   scrollback: number;
   terminalFontSize: number;
+  customKeyboard: boolean;
 
   // Notifications
   notificationsEnabled: boolean;
@@ -23,6 +24,7 @@ const DEFAULTS: Settings = {
   scrollback: 10000,
   terminalFontSize: 14,
   notificationsEnabled: true,
+  customKeyboard: typeof window !== "undefined" && window.innerWidth <= 768,
 };
 
 function loadSettings(): Settings {
@@ -82,6 +84,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           if (serverPrefs.scrollback !== undefined) merged.scrollback = serverPrefs.scrollback;
           if (serverPrefs.terminalFontSize !== undefined) merged.terminalFontSize = serverPrefs.terminalFontSize;
           if (serverPrefs.notificationsEnabled !== undefined) merged.notificationsEnabled = serverPrefs.notificationsEnabled;
+          if (serverPrefs.customKeyboard !== undefined) merged.customKeyboard = serverPrefs.customKeyboard;
           return merged;
         });
       }

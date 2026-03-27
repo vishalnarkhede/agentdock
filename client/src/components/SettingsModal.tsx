@@ -177,6 +177,18 @@ export function SettingsModal({ open, onClose }: Props) {
             {category === "terminal" && (
               <>
                 <div className="settings-row">
+                  <label className="settings-label">Custom Keyboard</label>
+                  <button
+                    className={`settings-toggle ${settings.customKeyboard ? "settings-toggle-on" : ""}`}
+                    onClick={() => updateSetting("customKeyboard", !settings.customKeyboard)}
+                    role="switch"
+                    aria-checked={settings.customKeyboard}
+                    title="Use agentdock's custom keyboard (recommended on mobile)"
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+                <div className="settings-row">
                   <label className="settings-label">Cursor Blink</label>
                   <button
                     className={`settings-toggle ${settings.cursorBlink ? "settings-toggle-on" : ""}`}

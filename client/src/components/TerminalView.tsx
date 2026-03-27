@@ -86,7 +86,7 @@ interface Props {
 }
 
 export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive }: Props) {
-  const { settings } = useSettings();
+  const { settings, updateSetting } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const [lastContent, setLastContent] = useState<string | null>(null);
@@ -124,11 +124,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
-  const [customKb, setCustomKb] = useState(() => {
-    const stored = localStorage.getItem("agentdock-kb");
-    if (stored) return stored !== "native";
-    return window.innerWidth <= 768; // default on only on mobile
-  });
+  const customKb = settings.customKeyboard;
   const [kbVisible, setKbVisible] = useState(false);
   const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
 
@@ -164,19 +160,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     };
     el.addEventListener("touchmove", handler, { passive: false });
     return () => el.removeEventListener("touchmove", handler);
-  }, []);
-
-  // Listen for toggle events dispatched from the hamburger menu
-  useEffect(() => {
-    const handler = () => {
-      setCustomKb((prev) => {
-        const next = !prev;
-        localStorage.setItem("agentdock-kb", next ? "custom" : "native");
-        return next;
-      });
-    };
-    window.addEventListener("agentdock-toggle-kb", handler);
-    return () => window.removeEventListener("agentdock-toggle-kb", handler);
   }, []);
 
   // Focus terminal when requested (e.g. after closing file explorer)
@@ -812,9 +795,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         </button>
         <button className="mobile-term-btn" onClick={() => {
           if (!customKb) {
-            setCustomKb(true);
-            localStorage.setItem("agentdock-kb", "custom");
-            window.dispatchEvent(new CustomEvent("agentdock-toggle-kb"));
+            updateSetting("customKeyboard", true);
             setKbVisible(true);
           } else {
             setKbVisible((v) => !v);
