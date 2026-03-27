@@ -16,6 +16,12 @@ Whenever you create a plan — whether entering plan mode, being asked to plan, 
 
 The user has a separate "Plan" tab in the AgentDock UI that reads this file. Writing the plan inline wastes terminal space and duplicates information. Always save to the file path above.
 
+### Checklist discipline
+
+- **Always use `- [ ]` checklists** for any multi-step task. Every distinct action should be its own checklist item.
+- **Mark items done as you go** — after completing each step, rewrite the plan file with that item changed to `- [x]`. Do not wait until the end.
+- **Update the plan before starting the next step** — the user watches progress in real time from the Plan tab.
+
 ## Status Line
 
 After completing a task or when you need user input, output a status line as the LAST thing you write:
