@@ -20,7 +20,6 @@ If any of that sounds familiar, this is for you. If you're using it and want to 
 
 - **Claude Code first** — built and optimised for Claude Code; Cursor Agent support exists but is experimental (see [AGENTS.md](./AGENTS.md) to add your own)
 - **Agent switching** — Switch between agents mid-conversation with context preservation
-- **Sub-agents** — Agents can spawn child agents for parallel workstreams
 - **Git worktrees** — Isolate work with automatic worktree creation per session
 - **Multi-repo sessions** — Work across multiple repositories in a single grouped session
 - **Live terminal** — Stream agent output in real-time via WebSocket + xterm.js
@@ -185,17 +184,15 @@ MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be ad
 
 ## How It Works
 
-1. **Create a session** — pick repos, choose an agent (Claude or Cursor), optionally enable worktree isolation
+1. **Create a session** — pick repos, optionally enable worktree isolation
 2. **Agent launches** in a tmux session with appropriate permissions for file edits, git, and GitHub CLI
 3. **Status is tracked** via Claude Code lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, etc.) that write to `/tmp/agentdock-status/` — no terminal scraping needed
 4. **Watch live output** — the terminal view streams `tmux capture-pane` over WebSocket at ~200ms intervals
 5. **Type input** — keystrokes are forwarded to the tmux pane via `tmux send-keys`
 6. **View the plan** — agents save structured plans to `~/.config/agentdock/plans/` which appear in the Plan tab; send follow-up messages directly from there
 7. **Browse changes** — the Changes tab shows a live git diff of all modified files
-8. **Switch agents** — seamlessly switch between Claude and Cursor while preserving conversation context
-9. **Sub-agents** — agents can spawn child agents using the `ad-agent` CLI for parallel work
-10. **Restore** — stopped sessions can be restored with full Claude conversation history, bypassing the interactive picker for reliability
-11. **Stop** — kills the tmux session and cleans up any worktrees
+8. **Restore** — stopped sessions can be restored with full Claude conversation history, bypassing the interactive picker for reliability
+9. **Stop** — kills the tmux session and cleans up any worktrees
 
 ## Keyboard Shortcuts
 
@@ -212,7 +209,7 @@ MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be ad
 agentdock/
   bin/
     agentdock             # CLI tool
-    ad-agent              # Sub-agent spawner (used by agents)
+    ad-agent              # Sub-agent launcher
   server/                 # Bun + Hono (port 4800)
     src/
       services/
@@ -223,9 +220,8 @@ agentdock/
         config.ts             # File-based configuration
         linear.ts             # Linear ticket fetching
         slack.ts              # Slack message fetching
-        sub-agent-prompt.ts   # Sub-agent system prompt generation
       routes/
-        sessions.ts           # Session CRUD + agent switching + sub-agents
+        sessions.ts           # Session CRUD + agent switching
         repos.ts              # Repository management
         ws.ts                 # WebSocket terminal streaming
         git.ts                # Git diff / branch / PR operations
@@ -241,7 +237,6 @@ agentdock/
         TerminalView.tsx      # xterm.js + WebSocket streaming
         ChangesView.tsx       # Git diff viewer with inline commenting
         FileExplorer.tsx      # File browser with in-file search
-        SubAgentsView.tsx     # Sub-agent monitoring
         Header.tsx            # Quick actions, ngrok, session controls
 ```
 
