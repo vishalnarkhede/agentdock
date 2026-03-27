@@ -364,7 +364,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       `\x1b[${row};${col}H` +
       "\x1b[?25h"       // show cursor at final position
     );
-    term.scrollToBottom();
     setLastContent(snapshot.content);
 
     // Update scrollbar thumb after render

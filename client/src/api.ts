@@ -664,7 +664,7 @@ export async function updatePreferences(partial: Record<string, any>): Promise<R
 // ─── Meta Property Presets API ───
 
 export async function fetchMetaPropertyPresets(): Promise<MetaPropertyPreset[]> {
-  if (isDemo()) return [{ key: "project", label: "Project" }];
+  if (isDemo()) return [{ key: "project", label: "Project", values: [] }];
   const res = await fetch(`${BASE}/api/settings/meta-properties`);
   return res.json();
 }
