@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchSettingsHealth } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
@@ -759,12 +759,25 @@ export function Dashboard() {
   const [setupError, setSetupError] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<{ alias: string; path: string; remote?: string; selected: boolean }[]>([]);
 
+  const [missingTools, setMissingTools] = useState<string[]>([]);
+  const [missingToolsDismissed, setMissingToolsDismissed] = useState(false);
+
   useEffect(() => {
     fetchSettingsStatus().then((status) => {
       if (status.needsSetup) {
         setSetupPath(status.basePath);
         setShowSetup(true);
       }
+    }).catch(() => {});
+    fetchSettingsHealth().then((h) => {
+      const required = [
+        { name: "tmux", ok: h.tmux.installed },
+        { name: "claude", ok: h.claude.installed },
+        { name: "git", ok: h.git.installed },
+        { name: "bun", ok: h.bun.installed },
+      ];
+      const missing = required.filter((t) => !t.ok).map((t) => t.name);
+      if (missing.length > 0) setMissingTools(missing);
     }).catch(() => {});
   }, []);
 
@@ -1358,6 +1371,17 @@ export function Dashboard() {
           )}
         </div>
         </div>
+        {missingTools.length > 0 && !missingToolsDismissed && (
+          <div className="missing-tools-banner">
+            <span className="missing-tools-icon">⚠</span>
+            <span className="missing-tools-text">
+              Required tool{missingTools.length > 1 ? "s" : ""} not installed:{" "}
+              <strong>{missingTools.join(", ")}</strong>.
+              {" "}Check Settings → Health for install instructions.
+            </span>
+            <button className="missing-tools-dismiss" onClick={() => setMissingToolsDismissed(true)}>✕</button>
+          </div>
+        )}
         <div className="session-list" data-tutorial="session-list">
           {loading ? (
             <div className="loading">LOADING...</div>

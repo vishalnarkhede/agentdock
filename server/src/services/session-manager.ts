@@ -176,6 +176,30 @@ async function resolvePiece(
   return { workDir: repo.path, repoPath: repo.path, isWorktree: false };
 }
 
+async function checkAgentInstalled(agentType: AgentType): Promise<void> {
+  const cmd = agentType === "cursor" ? "agent" : "claude";
+  try {
+    const proc = Bun.spawn([cmd, "--version"], { stdout: "pipe", stderr: "pipe" });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      // Version command failed — still probably installed; proceed
+    }
+  } catch (err: any) {
+    if (err?.code === "ENOENT" || err?.errno === -2) {
+      if (agentType === "cursor") {
+        throw new Error(
+          "Cursor agent CLI is not installed. Install the Cursor IDE from cursor.com, then enable the agent CLI."
+        );
+      } else {
+        throw new Error(
+          "Claude Code is not installed. Install it with:\n  npm install -g @anthropic-ai/claude-code\n  or visit: https://claude.ai/code"
+        );
+      }
+    }
+    // Other errors (permission denied, etc.) — let it proceed and fail naturally
+  }
+}
+
 async function launchAgent(
   sess: string,
   cwd: string,
@@ -186,6 +210,7 @@ async function launchAgent(
   addDirs?: string[],
   meta?: Record<string, string>,
 ): Promise<void> {
+  await checkAgentInstalled(agentType);
 
   // Pass env vars via tmux's -e flag so they are set BEFORE the shell starts.
   // This avoids race conditions with shell init (oh-my-zsh prompts, plugins, etc.)

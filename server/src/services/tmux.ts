@@ -3,16 +3,25 @@ const decoder = new TextDecoder();
 async function run(
   args: string[],
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["tmux", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const exitCode = await proc.exited;
-  return { stdout, stderr, exitCode };
+  try {
+    const proc = Bun.spawn(["tmux", ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+    return { stdout, stderr, exitCode };
+  } catch (err: any) {
+    if (err?.code === "ENOENT" || err?.errno === -2) {
+      throw new Error(
+        "tmux is not installed. Install it with:\n  macOS: brew install tmux\n  Linux: sudo apt install tmux  (or sudo dnf install tmux)"
+      );
+    }
+    throw err;
+  }
 }
 
 export interface TmuxSession {

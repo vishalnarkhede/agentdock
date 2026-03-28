@@ -289,13 +289,13 @@ function HealthPanel() {
   if (!health) return <div className="settings-error">Failed to check health</div>;
 
   const tools = [
-    { name: "tmux", ...health.tmux, required: true },
-    { name: "claude", ...health.claude, required: true },
-    { name: "cursor (agent CLI)", ...health.cursor, required: false },
-    { name: "git", ...health.git, required: true },
-    { name: "gh (GitHub CLI)", ...health.gh, required: false },
-    { name: "bun", ...health.bun, required: true },
-    { name: "psql", ...health.psql, required: false },
+    { name: "tmux", ...health.tmux, required: true, install: "brew install tmux  •  apt install tmux" },
+    { name: "claude", ...health.claude, required: true, install: "npm i -g @anthropic-ai/claude-code  •  claude.ai/code" },
+    { name: "cursor (agent CLI)", ...health.cursor, required: false, install: "Install Cursor IDE from cursor.com" },
+    { name: "git", ...health.git, required: true, install: "brew install git  •  apt install git" },
+    { name: "gh (GitHub CLI)", ...health.gh, required: false, install: "brew install gh  •  cli.github.com" },
+    { name: "bun", ...health.bun, required: true, install: "curl -fsSL https://bun.sh/install | bash" },
+    { name: "psql", ...health.psql, required: false, install: "brew install postgresql  •  apt install postgresql-client" },
   ];
 
   return (
@@ -309,7 +309,8 @@ function HealthPanel() {
               <span className="settings-health-version">{tool.version}</span>
             ) : (
               <span className="settings-health-missing">
-                {tool.required ? "missing (required)" : "missing (optional)"}
+                <span>{tool.required ? "missing (required)" : "missing (optional)"}</span>
+                <code className="settings-health-install">{tool.install}</code>
               </span>
             )}
           </div>
