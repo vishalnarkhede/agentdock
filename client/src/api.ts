@@ -353,11 +353,15 @@ export async function grepFsFiles(query: string, roots: string[]): Promise<GrepR
   if (roots.length > 0) params.set("roots", roots.join(","));
   const res = await fetch(`${BASE}/api/fs/grep?${params}`);
   if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Grep failed");
+    let message = "Grep failed";
+    try {
+      const data = await res.json();
+      message = data.error || message;
+    } catch {}
+    throw new Error(message);
   }
   const data = await res.json();
-  return data.results;
+  return data.results ?? [];
 }
 
 export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number }> {

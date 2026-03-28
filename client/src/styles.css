@@ -437,6 +437,18 @@ a:hover {
   content: "";
 }
 
+/* Mobile-only logo shown on session list page */
+.header-title-mobile-home {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .header-title-mobile-home {
+    display: flex;
+    align-items: center;
+  }
+}
+
 .header-nav {
   display: flex;
   gap: 8px;
@@ -2982,13 +2994,11 @@ h1 {
 
 .fe-tree-panel {
   width: 220px;
-  min-width: 160px;
-  max-width: 320px;
+  min-width: 140px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--border);
 }
 
 .fe-tree-body {
@@ -3052,6 +3062,23 @@ h1 {
   /* container for item + children */
 }
 
+.fe-tree-children {
+  position: relative;
+}
+
+/* Subtle indent guide line for nested directories */
+.fe-tree-children::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .fe-tree-item {
   display: flex;
   align-items: center;
@@ -3111,6 +3138,22 @@ h1 {
   margin-left: 4px;
 }
 
+/* Resize handle between tree panel and file panel */
+.fe-resize-handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+  position: relative;
+  z-index: 1;
+}
+
+.fe-resize-handle:hover,
+.fe-resize-handle:active {
+  background: var(--accent);
+}
+
 /* File content panel */
 .fe-file-panel {
   flex: 1;
@@ -3156,6 +3199,13 @@ h1 {
   background: transparent;
   white-space: pre;
   tab-size: 2;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.fe-file-content code {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* hljs code block fills the pre and scrolls correctly */
@@ -3404,8 +3454,13 @@ mark.fe-match-active {
     flex-direction: column;
   }
 
+  .fe-resize-handle {
+    display: none;
+  }
+
   .fe-tree-panel {
-    width: 100%;
+    width: 100% !important;
+    min-width: 100% !important;
     max-width: 100%;
     height: 40%;
     border-right: none;
@@ -6213,10 +6268,42 @@ mark.fe-match-active {
   /* Create form */
   .create-form {
     gap: 12px;
+    max-width: 100%;
   }
 
   .page {
     padding: 12px;
+  }
+
+  .form-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .form-actions .btn-large {
+    width: 100%;
+    text-align: center;
+  }
+
+  .agent-type-selector {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .radio-label {
+    min-height: 44px;
+  }
+
+  .templates-list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .template-item {
+    flex-shrink: 0;
   }
 
   /* Empty state */

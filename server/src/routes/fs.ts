@@ -282,13 +282,13 @@ interface GrepMatch {
  * Per-file match limit keeps any single file from dominating results.
  */
 async function grepContent(roots: string[], query: string, maxMatches: number): Promise<GrepMatch[]> {
-  const SKIP_GLOBS = ["!node_modules", "!.git", "!dist", "!build", "!.next", "!vendor", "!target", "!coverage", "!*.min.js", "!*.map"];
+  const SKIP_GLOBS = ["!node_modules", "!.git", "!dist", "!build", "!.next", "!vendor", "!target", "!coverage", "!.venv", "!venv", "!__pycache__", "!*.min.js", "!*.map"];
 
   // Try ripgrep first (much faster than grep -r)
   const rgArgs = [
     "--no-heading", "-n",
-    "--max-count=5",       // max 5 matches per file
-    "--max-columns=300",   // truncate very long lines
+    "--max-count=2",       // max 2 matches per file — keeps total bounded
+    "--max-columns=200",   // truncate long lines
     "--fixed-strings",     // literal match, not regex
     "--ignore-case",
     ...SKIP_GLOBS.map((g) => ["--glob", g]).flat(),
@@ -304,9 +304,18 @@ async function grepContent(roots: string[], query: string, maxMatches: number): 
     rawOutput = await new Response(proc.stdout).text();
     usedTool = "rg";
   } catch {
-    // rg not installed — fall back to grep
+    // rg not available as binary — fall back to grep with exclusions
     try {
-      const grepArgs = ["-r", "-n", "-i", "--include=*.*", "-m", "200", query, ...roots];
+      const EXCLUDE_DIRS = ["node_modules", ".git", "dist", "build", ".next", "vendor", "target", "coverage", ".venv", "venv", "__pycache__"];
+      const grepArgs = [
+        "-r", "-n", "-i",
+        "-I",               // skip binary files
+        "--include=*.*",
+        ...EXCLUDE_DIRS.flatMap((d) => ["--exclude-dir", d]),
+        "-m", "2",          // max 2 matches per file
+        query,
+        ...roots,
+      ];
       const proc = Bun.spawn(["grep", ...grepArgs], { stdout: "pipe", stderr: "pipe" });
       rawOutput = await new Response(proc.stdout).text();
       usedTool = "grep";
@@ -344,24 +353,29 @@ async function grepContent(roots: string[], query: string, maxMatches: number): 
 
 // GET /api/fs/grep?q=<query>&roots=<comma-separated-abs-paths>
 app.get("/grep", async (c) => {
-  const q = c.req.query("q");
-  const rootsParam = c.req.query("roots");
+  try {
+    const q = c.req.query("q");
+    const rootsParam = c.req.query("roots");
 
-  if (!q || q.trim().length < 2) {
+    if (!q || q.trim().length < 2) {
+      return c.json({ results: [] });
+    }
+
+    const roots = parseRoots(rootsParam);
+    const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
+
+    for (const root of searchRoots) {
+      if (!isWithinBasePath(root)) {
+        return c.json({ error: "roots outside allowed directory" }, 403);
+      }
+    }
+
+    const results = await grepContent(searchRoots, q.trim(), 10);
+    return c.json({ results });
+  } catch (err) {
+    console.error("[fs/grep] error:", err);
     return c.json({ results: [] });
   }
-
-  const roots = parseRoots(rootsParam);
-  const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
-
-  for (const root of searchRoots) {
-    if (!isWithinBasePath(root)) {
-      return c.json({ error: "roots outside allowed directory" }, 403);
-    }
-  }
-
-  const results = await grepContent(searchRoots, q.trim(), 200);
-  return c.json({ results });
 });
 
 export default app;

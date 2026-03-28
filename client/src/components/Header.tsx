@@ -184,6 +184,20 @@ export function Header() {
       {sessionTitle && (
         <span className="header-session-title-mobile">{sessionTitle}</span>
       )}
+      {/* Logo — mobile only, shown on session list (root, not in session) */}
+      {location.pathname === "/" && !inSession && (
+        <Link to="/" className="header-title header-title-mobile-home">
+          <svg className="header-logo" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <polyline points="6 8 10 12 6 16" />
+            <line x1="14" y1="16" x2="18" y2="16" />
+            <circle cx="7" cy="21" r="1" fill="currentColor" stroke="none" />
+            <circle cx="12" cy="21" r="1" fill="currentColor" stroke="none" />
+            <circle cx="17" cy="21" r="1" fill="currentColor" stroke="none" />
+          </svg>
+          AgentDock
+        </Link>
+      )}
       {/* Logo — desktop only */}
       <Link to="/" className="header-title header-title-desktop">
         <svg className="header-logo" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

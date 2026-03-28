@@ -189,8 +189,16 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setDirContents(saved.dirContents);
     } else {
       setOpenFile(null);
-      setExpandedDirs(new Set());
+      // Auto-expand all roots so the tree is usable immediately
+      setExpandedDirs(new Set(roots));
       setDirContents(new Map());
+      // Fetch root directory contents in background
+      roots.forEach(async (root) => {
+        try {
+          const entries = await fetchFsDir(root, roots);
+          setDirContents((prev) => new Map(prev).set(root, entries));
+        } catch {}
+      });
     }
     setError(null);
     prevRootsKey.current = rootsKey;
@@ -262,13 +270,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     const pre = fileContentRef.current;
     if (!pre) return;
 
-    // Clear existing marks
+    // Clear existing marks — extract children back into parent, then remove the mark
+    // NOTE: do NOT call parent.normalize() here — it merges adjacent text nodes and
+    // destroys any active browser text selection.
     pre.querySelectorAll("mark.fe-match").forEach((el) => {
       const parent = el.parentNode;
       if (parent) {
         while (el.firstChild) parent.insertBefore(el.firstChild, el);
         parent.removeChild(el);
-        parent.normalize();
       }
     });
 
@@ -517,6 +526,45 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   const openFilePath = openFile?.path ?? null;
 
+  // Resizable tree panel
+  const [treePanelWidth, setTreePanelWidth] = useState(220);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = treePanelWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      const delta = ev.clientX - dragStartX.current;
+      const newWidth = Math.max(140, Math.min(480, dragStartWidth.current + delta));
+      setTreePanelWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [treePanelWidth]);
+
+  // Memoize highlighted HTML — prevents React from needlessly resetting the code element's
+  // innerHTML on unrelated state changes (e.g. fileSearchIdx), which would destroy marks
+  // and any in-progress text selection.
+  const highlightedHtml = useMemo(
+    () => openFile ? highlight(openFile.content, openFile.language) : "",
+    [openFile],
+  );
+
   // Relative path from root for breadcrumb
   function getBreadcrumb(filePath: string): string {
     for (const root of roots) {
@@ -529,7 +577,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   return (
     <div className="fe-container">
-      <div className="fe-tree-panel">
+      <div className="fe-tree-panel" style={{ width: treePanelWidth, minWidth: treePanelWidth, maxWidth: treePanelWidth }}>
         {/* Mode tabs */}
         <div className="fe-mode-tabs">
           <button
@@ -599,8 +647,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   </div>
                 ));
               })()}
-              {contentResults && contentResults.length >= 200 && (
-                <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 200 matches</div>
+              {contentResults && contentResults.length >= 10 && (
+                <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 10 matches</div>
               )}
             </div>
           </div>
@@ -690,6 +738,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         )}
       </div>
 
+      <div className="fe-resize-handle" onMouseDown={handleResizeMouseDown} title="Drag to resize" />
       <div className="fe-file-panel">
         {error && (
           <div className="fe-error">{error}</div>
@@ -722,7 +771,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             )}
             <pre ref={fileContentRef} className="fe-file-content"><code
               className={`hljs language-${openFile.language}`}
-              dangerouslySetInnerHTML={{ __html: highlight(openFile.content, openFile.language) }}
+              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
             /></pre>
           </>
         ) : (
