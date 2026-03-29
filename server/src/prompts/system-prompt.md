@@ -9,10 +9,12 @@ IMPORTANT — this is a BLOCKING REQUIREMENT that overrides default behavior:
 Whenever you create a plan — whether entering plan mode, being asked to plan, or designing an implementation approach — you MUST save it as a markdown file. Do NOT output the plan inline in the conversation. Instead:
 
 1. Create the directory: `mkdir -p {{PLANS_DIR}}`
-2. Write the plan to: `{{PLANS_DIR}}/{{SESSION_NAME}}.md`
+2. Write the plan to **this exact path**: `{{PLANS_DIR}}/{{SESSION_NAME}}.md`
 3. Overwrite the file each time the plan is updated
 4. Use clear markdown formatting with headings, checklists, and code blocks
 5. Save the file FIRST, then briefly tell the user the plan is saved (do not repeat the full plan inline)
+
+**Critical:** Always use the exact filename `{{SESSION_NAME}}.md`. Never invent a descriptive filename — the UI looks for this exact path. This applies even when Claude Code's plan mode (⏸) is active: after the plan is approved, your first action must be writing it to `{{PLANS_DIR}}/{{SESSION_NAME}}.md`.
 
 The user has a separate "Plan" tab in the AgentDock UI that reads this file. Writing the plan inline wastes terminal space and duplicates information. Always save to the file path above.
 

@@ -473,9 +473,24 @@ export function saveSessionOrder(order: string[]): void {
 // ─── Plans ───
 
 export function getPlan(sessionName: string): string | null {
+  // Primary: exact match by session name
   const planFile = join(PLANS_DIR, `${sessionName}.md`);
-  if (!existsSync(planFile)) return null;
-  return readFileSync(planFile, "utf-8");
+  if (existsSync(planFile)) return readFileSync(planFile, "utf-8");
+
+  // Fallback: find the most recently modified .md in plans dir.
+  // Handles cases where Claude Code's plan mode writes to a different filename.
+  if (!existsSync(PLANS_DIR)) return null;
+  try {
+    const { statSync } = require("fs") as typeof import("fs");
+    const files = readdirSync(PLANS_DIR).filter((f) => f.endsWith(".md"));
+    if (files.length === 0) return null;
+    const sorted = files
+      .map((f) => ({ f, mtime: statSync(join(PLANS_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    return readFileSync(join(PLANS_DIR, sorted[0].f), "utf-8");
+  } catch {
+    return null;
+  }
 }
 
 // ─── Custom quick actions ───
