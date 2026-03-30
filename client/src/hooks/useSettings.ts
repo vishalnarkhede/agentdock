@@ -18,7 +18,7 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  theme: "terminal",
+  theme: "midnight",
   fontSize: "medium",
   cursorBlink: true,
   scrollback: 10000,
