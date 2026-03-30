@@ -14,6 +14,7 @@ import { SubAgentsView } from "../components/SubAgentsView";
 import { FileExplorer } from "../components/FileExplorer";
 import type { FileExplorerHandle } from "../components/FileExplorer";
 import { useMobileNav } from "../MobileNavContext";
+import { useAuth } from "../hooks/useAuth";
 import type { SessionInfo, MetaPropertyPreset } from "../types";
 import type { QuickLaunch } from "../components/Header";
 
@@ -681,6 +682,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
 
 export function Dashboard() {
   const { sessions, loading, refresh } = useSessions();
+  const { login: authLogin } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const mobileNav = useMobileNav();
@@ -826,6 +828,8 @@ export function Dashboard() {
     try {
       const result = await setPassword(setupPassword);
       if (result.error) throw new Error(result.error);
+      // Auto-login so user isn't immediately redirected to the login page
+      await authLogin(setupPassword);
       setShowSetup(false);
     } catch (err: any) {
       setSetupError(err?.message || "Failed to set password");
