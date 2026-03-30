@@ -185,6 +185,8 @@ MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be ad
 
 ## How It Works
 
+> For a deep dive into the internals, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 1. **Create a session** — pick repos, optionally enable worktree isolation
 2. **Agent launches** in a tmux session with appropriate permissions for file edits, git, and GitHub CLI
 3. **Status is tracked** via Claude Code lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, etc.) that write to `/tmp/agentdock-status/` — no terminal scraping needed
