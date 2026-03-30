@@ -124,7 +124,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
-  const customKb = settings.customKeyboard;
+  // Custom keyboard only makes sense on mobile — never activate it on desktop
+  // even if the preference was saved while on a mobile device.
+  const customKb = settings.customKeyboard && window.innerWidth <= 900;
   const [kbVisible, setKbVisible] = useState(false);
   const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
 
