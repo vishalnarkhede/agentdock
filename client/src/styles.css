@@ -2436,11 +2436,12 @@ h1 {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg-card);
 }
 
 .split-bottom-bar {
   flex-shrink: 0;
-  border-top: 1px solid var(--border);
+  border-top: 2px solid var(--border);
 }
 
 .split-resize-handle {
@@ -2459,7 +2460,7 @@ h1 {
   align-items: center;
   gap: 0;
   padding: 0 8px;
-  background: var(--bg);
+  background: var(--bg-card);
 }
 
 .split-maximize-btn {
