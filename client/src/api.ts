@@ -1,7 +1,6 @@
 import type {
   SessionInfo,
   RepoConfig,
-  LinearTicket,
   CreateSessionRequest,
   AgentType,
   MetaPropertyPreset,
@@ -14,7 +13,6 @@ import {
   DEMO_AUTH,
   DEMO_SETTINGS_STATUS,
   DEMO_SETTINGS_HEALTH,
-  DEMO_INTEGRATIONS,
   DEMO_REPOS,
   DEMO_TEMPLATES,
   getDemoOutput,
@@ -138,18 +136,6 @@ export async function fetchRepos(): Promise<RepoConfig[]> {
   return res.json();
 }
 
-export async function fetchTicket(id: string): Promise<LinearTicket> {
-  if (isDemo()) return { identifier: id, title: "Demo ticket" };
-  const res = await fetch(`${BASE}/api/tickets/${id}`);
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Failed to fetch ticket");
-  }
-  return res.json();
-}
-
-
-
 export async function fetchGitChanges(
   path: string,
 ): Promise<{ status: string; diff: string; branch: string; prUrl: string | null }> {
@@ -239,22 +225,6 @@ export async function deleteTemplate(id: string): Promise<void> {
   await fetch(`${BASE}/api/templates/${id}`, { method: "DELETE" });
 }
 
-export async function slackToFix(
-  link: string,
-  targets?: string[],
-): Promise<{ ticket: { identifier: string; title: string; url?: string }; sessions: string[] }> {
-  if (isDemo()) return { ticket: { identifier: "DEMO-1", title: "Demo" }, sessions: [] };
-  const res = await fetch(`${BASE}/api/quick/slack-to-fix`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ link, targets }),
-  });
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Failed to process Slack message");
-  }
-  return res.json();
-}
 
 export async function sendSessionInput(sessionName: string, text: string): Promise<void> {
   if (isDemo()) return;
@@ -392,19 +362,12 @@ export interface SettingsHealth {
   psql: ToolHealth;
 }
 
-export interface IntegrationStatus {
-  linear: { configured: boolean; hasTeamId: boolean };
-  slack: { configured: boolean };
-}
-
 export interface SettingsStatus {
   firstRun: boolean;
   needsSetup: boolean;
   basePath: string;
   repoCount: number;
   hasReposFile: boolean;
-  linear: boolean;
-  slack: boolean;
 }
 
 export interface CustomAction {
@@ -420,11 +383,6 @@ export async function fetchSettingsHealth(): Promise<SettingsHealth> {
   return res.json();
 }
 
-export async function fetchIntegrations(): Promise<IntegrationStatus> {
-  if (isDemo()) return DEMO_INTEGRATIONS;
-  const res = await fetch(`${BASE}/api/settings/integrations`);
-  return res.json();
-}
 
 export async function fetchSettingsStatus(): Promise<SettingsStatus> {
   if (isDemo()) return DEMO_SETTINGS_STATUS;
@@ -476,25 +434,6 @@ export async function deleteSettingsRepo(alias: string): Promise<void> {
   });
 }
 
-export async function saveIntegrationKey(
-  type: "linear-key" | "linear-team-id" | "slack-token",
-  value: string,
-): Promise<void> {
-  if (isDemo()) return;
-  const keyMap = { "linear-key": "key", "linear-team-id": "id", "slack-token": "token" };
-  await fetch(`${BASE}/api/settings/${type}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ [keyMap[type]]: value }),
-  });
-}
-
-export async function deleteIntegrationKey(
-  type: "linear-key" | "linear-team-id" | "slack-token",
-): Promise<void> {
-  if (isDemo()) return;
-  await fetch(`${BASE}/api/settings/${type}`, { method: "DELETE" });
-}
 
 // ─── Auth API ───
 

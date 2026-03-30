@@ -30,14 +30,6 @@ export interface WorktreeMeta {
   wtDir: string;
 }
 
-export interface LinearTicket {
-  identifier: string;
-  title: string;
-  description?: string;
-  url?: string;
-  branchName?: string;
-}
-
 export interface DbShard {
   name: string;       // e.g. "us_east:c1"
   host: string;
@@ -60,7 +52,6 @@ export interface CreateSessionRequest {
   targets: string[];
   name?: string;
   prompt?: string;
-  ticket?: string;
   grouped?: boolean;
   isolated?: boolean;
   newBranch?: string;

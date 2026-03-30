@@ -3,7 +3,6 @@ import type {
   AuthStatus,
   SettingsHealth,
   SettingsStatus,
-  IntegrationStatus,
   SessionTemplate,
 } from "./api";
 
@@ -341,8 +340,6 @@ export const DEMO_SETTINGS_STATUS: SettingsStatus = {
   basePath: "~/projects",
   repoCount: 3,
   hasReposFile: true,
-  linear: true,
-  slack: false,
 };
 
 export const DEMO_SETTINGS_HEALTH: SettingsHealth = {
@@ -355,10 +352,6 @@ export const DEMO_SETTINGS_HEALTH: SettingsHealth = {
   psql: { installed: true, version: "16.2" },
 };
 
-export const DEMO_INTEGRATIONS: IntegrationStatus = {
-  linear: { configured: true, hasTeamId: true },
-  slack: { configured: false },
-};
 
 export const DEMO_REPOS = [
   { alias: "acme-api", path: "~/projects/acme-api", remote: "git@github.com:acme/api.git" },

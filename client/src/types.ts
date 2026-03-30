@@ -31,14 +31,6 @@ export interface MetaPropertyPreset {
   values: string[];
 }
 
-export interface LinearTicket {
-  identifier: string;
-  title: string;
-  description?: string;
-  url?: string;
-  branchName?: string;
-}
-
 export interface McpServer {
   name: string;
   command: string;
@@ -50,7 +42,6 @@ export interface CreateSessionRequest {
   targets: string[];
   name?: string;
   prompt?: string;
-  ticket?: string;
   grouped?: boolean;
   isolated?: boolean;
   newBranch?: string;

@@ -8,9 +8,6 @@ const HOME = process.env.HOME || homedir();
 const CONFIG_DIR = process.env.AGENTDOCK_CONFIG_DIR || join(HOME, ".config", "agentdock");
 const REPOS_FILE = join(CONFIG_DIR, "repos.json");
 const BASE_PATH_FILE = join(CONFIG_DIR, "base-path");
-const LINEAR_KEY_FILE = join(CONFIG_DIR, "linear-api-key");
-const SLACK_TOKEN_FILE = join(CONFIG_DIR, "slack-token");
-const LINEAR_TEAM_ID_FILE = join(CONFIG_DIR, "linear-team-id");
 const AUTH_PASSWORD_FILE = join(CONFIG_DIR, "auth-password");
 const NGROK_BASIC_AUTH_FILE = join(CONFIG_DIR, "ngrok-basic-auth");
 const DB_SHARDS_DIR = join(CONFIG_DIR, "db-shards");
@@ -159,49 +156,6 @@ export function resolveAlias(alias: string): RepoConfig | undefined {
   return getRepos().find((r) => r.alias === alias);
 }
 
-// ─── Integration keys ───
-
-export function getLinearApiKey(): string | null {
-  if (!existsSync(LINEAR_KEY_FILE)) return null;
-  return readFileSync(LINEAR_KEY_FILE, "utf-8").trim();
-}
-
-export function setLinearApiKey(key: string): void {
-  ensureConfigDir();
-  writeFileSync(LINEAR_KEY_FILE, key.trim());
-}
-
-export function deleteLinearApiKey(): void {
-  if (existsSync(LINEAR_KEY_FILE)) unlinkSync(LINEAR_KEY_FILE);
-}
-
-export function getSlackToken(): string | null {
-  if (!existsSync(SLACK_TOKEN_FILE)) return null;
-  return readFileSync(SLACK_TOKEN_FILE, "utf-8").trim();
-}
-
-export function setSlackToken(token: string): void {
-  ensureConfigDir();
-  writeFileSync(SLACK_TOKEN_FILE, token.trim());
-}
-
-export function deleteSlackToken(): void {
-  if (existsSync(SLACK_TOKEN_FILE)) unlinkSync(SLACK_TOKEN_FILE);
-}
-
-export function getLinearTeamId(): string | null {
-  if (!existsSync(LINEAR_TEAM_ID_FILE)) return null;
-  return readFileSync(LINEAR_TEAM_ID_FILE, "utf-8").trim();
-}
-
-export function setLinearTeamId(id: string): void {
-  ensureConfigDir();
-  writeFileSync(LINEAR_TEAM_ID_FILE, id.trim());
-}
-
-export function deleteLinearTeamId(): void {
-  if (existsSync(LINEAR_TEAM_ID_FILE)) unlinkSync(LINEAR_TEAM_ID_FILE);
-}
 
 // ─── Auth ───
 

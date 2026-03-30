@@ -7,15 +7,6 @@ import {
   hasBasePath,
   getBasePath,
   setBasePath,
-  getLinearApiKey,
-  setLinearApiKey,
-  deleteLinearApiKey,
-  getLinearTeamId,
-  setLinearTeamId,
-  deleteLinearTeamId,
-  getSlackToken,
-  setSlackToken,
-  deleteSlackToken,
   getCustomActions,
   saveCustomAction,
   deleteCustomAction,
@@ -73,55 +64,6 @@ app.put("/base-path", async (c) => {
   return c.json({ ok: true });
 });
 
-// ─── Integrations ───
-
-app.get("/integrations", (c) => {
-  return c.json({
-    linear: {
-      configured: !!getLinearApiKey(),
-      hasTeamId: !!getLinearTeamId(),
-    },
-    slack: {
-      configured: !!getSlackToken(),
-    },
-  });
-});
-
-app.put("/linear-key", async (c) => {
-  const body = (await c.req.json()) as { key: string };
-  if (!body.key) return c.json({ error: "key is required" }, 400);
-  setLinearApiKey(body.key);
-  return c.json({ ok: true });
-});
-
-app.delete("/linear-key", (c) => {
-  deleteLinearApiKey();
-  return c.json({ ok: true });
-});
-
-app.put("/linear-team-id", async (c) => {
-  const body = (await c.req.json()) as { id: string };
-  if (!body.id) return c.json({ error: "id is required" }, 400);
-  setLinearTeamId(body.id);
-  return c.json({ ok: true });
-});
-
-app.delete("/linear-team-id", (c) => {
-  deleteLinearTeamId();
-  return c.json({ ok: true });
-});
-
-app.put("/slack-token", async (c) => {
-  const body = (await c.req.json()) as { token: string };
-  if (!body.token) return c.json({ error: "token is required" }, 400);
-  setSlackToken(body.token);
-  return c.json({ ok: true });
-});
-
-app.delete("/slack-token", (c) => {
-  deleteSlackToken();
-  return c.json({ ok: true });
-});
 
 // ─── Health check ───
 
@@ -160,8 +102,6 @@ app.get("/status", (c) => {
     basePath: getBasePath(),
     repoCount: repos.length,
     hasReposFile: hasReposFile(),
-    linear: !!getLinearApiKey(),
-    slack: !!getSlackToken(),
   });
 });
 

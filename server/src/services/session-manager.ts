@@ -34,8 +34,7 @@ import {
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
-import { fetchTicket, buildTicketPrompt } from "./linear";
-import type { CreateSessionRequest, LinearTicket, AgentType } from "../types";
+import type { CreateSessionRequest, AgentType } from "../types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -273,34 +272,16 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
   let prompt = req.prompt || "";
   let isolated = req.isolated || false;
   let newBranch = req.newBranch || "";
-  let ticket: LinearTicket | null = null;
   let agentType: AgentType = req.agentType || "claude"; // Default to Claude for backward compatibility
-
-  // --ticket: fetch Linear ticket, set isolated + new-branch + prompt
-  if (req.ticket) {
-    console.log(`[ticket] Fetching ticket ${req.ticket}...`);
-    ticket = await fetchTicket(req.ticket);
-    if (!ticket) throw new Error(`Ticket '${req.ticket}' not found in Linear`);
-    console.log(`[ticket] Found: ${ticket.identifier} — ${ticket.title}`);
-    isolated = true;
-    if (!newBranch) newBranch = "main";
-    if (!prompt) prompt = buildTicketPrompt(ticket);
-    console.log(`[ticket] Prompt length: ${prompt.length}`);
-  }
 
   // --isolated: generate worktree branch for every target
   let sessionSlug: string | undefined;
   if (isolated) {
     if (!newBranch) newBranch = "main";
 
-    let wtBranch: string;
-    if (req.ticket) {
-      wtBranch = req.ticket;
-    } else {
-      // Use a short ID for the worktree branch — Claude can rename/create
-      // the real branch as part of its workflow (e.g., based on Linear ticket)
-      wtBranch = `wt-${shortId()}`;
-    }
+    // Use a short ID for the worktree branch — Claude can rename/create
+    // the real branch as part of its workflow
+    const wtBranch = `wt-${shortId()}`;
 
     // Derive sessionSlug from wtBranch so they always match
     sessionSlug = wtBranch.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
@@ -322,11 +303,6 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
   if (req.parentSession && !req.name) {
     const idx = getNextChildIndex(req.parentSession);
     req.name = `${req.parentSession.replace(`${PREFIX}-`, "")}-sub-${idx}`;
-  }
-
-  // Ticket actions require at least one repo target for worktree isolation
-  if (targets.length === 0 && req.ticket) {
-    throw new Error("Select at least one repository for ticket sessions");
   }
 
   // No repos selected — launch a plain agent session in ~/projects
