@@ -694,10 +694,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           scroll paused — tap to resume
         </button>
       )}
-      {!focused && (
+      {!focused && !customKb && (
         <div
           className="terminal-unfocused-hint"
-          onClick={() => termRef.current?.focus()}
+          onClick={() => { termRef.current?.focus(); setFocused(true); }}
         >
           click to type
         </div>
