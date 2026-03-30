@@ -1764,6 +1764,11 @@ export function Dashboard() {
                   <>
                     <p className="setup-description">
                       Set the base directory where your repos live.
+                      <span
+                        className="setup-help-icon"
+                        style={{ marginLeft: 6 }}
+                        data-tooltip={"The parent folder that contains all your git repos.\nFor example, if your repos are at ~/projects/api and ~/projects/web, enter ~/projects."}
+                      >i</span>
                     </p>
                     <label className="form-label">Base path</label>
                     <input
@@ -1788,6 +1793,11 @@ export function Dashboard() {
                   <>
                     <p className="setup-description">
                       Found {discoveredRepos.length} git repo{discoveredRepos.length !== 1 ? "s" : ""} in <strong>{setupPath}</strong>. Select which ones to add:
+                      <span
+                        className="setup-help-icon"
+                        style={{ marginLeft: 6 }}
+                        data-tooltip={"Only selected repos will appear in agentdock.\nYou can add or remove repos later in Settings → Repositories."}
+                      >i</span>
                     </p>
                     <div className="setup-repo-list">
                       {discoveredRepos.map((repo, i) => (
@@ -1823,6 +1833,11 @@ export function Dashboard() {
                   <>
                     <p className="setup-description">
                       Optionally set a password to protect the dashboard when accessed over the network.
+                      <span
+                        className="setup-help-icon"
+                        style={{ marginLeft: 6 }}
+                        data-tooltip={"Recommended if you access agentdock from your phone or other devices on your network.\nLeave blank if you only use it locally on this machine."}
+                      >i</span>
                     </p>
                     <label className="form-label">Password</label>
                     <input
