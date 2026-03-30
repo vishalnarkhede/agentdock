@@ -79,7 +79,7 @@ export function Header() {
     if (fixingMe) return;
     setFixingMe(true);
     try {
-      const { sessions } = await createSession({ targets: ["agentdock"], dangerouslySkipPermissions: true });
+      const { sessions } = await createSession({ targets: ["__agentdock__"], dangerouslySkipPermissions: true });
       if (sessions?.[0]) {
         navigate(`/?session=${sessions[0]}`);
         window.dispatchEvent(new CustomEvent("agentdock-mobile-show-terminal"));

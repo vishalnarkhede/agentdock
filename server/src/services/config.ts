@@ -19,6 +19,9 @@ const SESSIONS_DIR = join(CONFIG_DIR, "sessions");
 const PLANS_DIR = join(CONFIG_DIR, "plans");
 const QUICK_ACTIONS_FILE = join(CONFIG_DIR, "quick-actions.json");
 
+// The agentdock repo root (server/src/services/ → up 3 levels)
+export const AGENTDOCK_REPO_DIR = resolve(__dirname, "../../..");
+
 // No legacy repos — configure repos via the web UI or repos.json
 
 function ensureConfigDir(): void {
@@ -149,6 +152,10 @@ export function hasReposFile(): boolean {
 }
 
 export function resolveAlias(alias: string): RepoConfig | undefined {
+  // Built-in alias: "__agentdock__" always resolves to the agentdock repo itself
+  if (alias === "__agentdock__") {
+    return { alias: "agentdock", path: AGENTDOCK_REPO_DIR };
+  }
   return getRepos().find((r) => r.alias === alias);
 }
 
