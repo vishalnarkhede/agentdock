@@ -1870,11 +1870,15 @@ h1 {
   max-width: 480px;
 }
 
+.setup-modal .settings-body {
+  padding: 24px;
+  display: block;
+}
+
 .setup-content {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 4px 0;
 }
 
 .setup-description {
