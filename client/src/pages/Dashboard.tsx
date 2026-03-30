@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchSettingsHealth } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
@@ -753,11 +753,13 @@ export function Dashboard() {
 
   // First-run setup
   const [showSetup, setShowSetup] = useState(false);
-  const [setupStep, setSetupStep] = useState<"path" | "repos">("path");
+  const [setupStep, setSetupStep] = useState<"path" | "repos" | "password">("path");
   const [setupPath, setSetupPath] = useState("~/projects");
   const [setupSaving, setSetupSaving] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<{ alias: string; path: string; remote?: string; selected: boolean }[]>([]);
+  const [setupPassword, setSetupPassword] = useState("");
+  const [setupPasswordConfirm, setSetupPasswordConfirm] = useState("");
 
   const [missingTools, setMissingTools] = useState<string[]>([]);
   const [missingToolsDismissed, setMissingToolsDismissed] = useState(false);
@@ -791,7 +793,7 @@ export function Dashboard() {
         setDiscoveredRepos(repos.map((r) => ({ ...r, selected: true })));
         setSetupStep("repos");
       } else {
-        setShowSetup(false);
+        setSetupStep("password");
       }
     } catch (err: any) {
       setSetupError(err?.message || "Failed to scan repos");
@@ -806,9 +808,27 @@ export function Dashboard() {
     try {
       const selected = discoveredRepos.filter((r) => r.selected);
       await Promise.all(selected.map((r) => addSettingsRepo({ alias: r.alias, path: r.path, remote: r.remote })));
-      setShowSetup(false);
+      setSetupStep("password");
     } catch (err: any) {
       setSetupError(err?.message || "Failed to save repos");
+    } finally {
+      setSetupSaving(false);
+    }
+  };
+
+  const handleSetupSetPassword = async () => {
+    if (setupPassword !== setupPasswordConfirm) {
+      setSetupError("Passwords do not match");
+      return;
+    }
+    setSetupSaving(true);
+    setSetupError(null);
+    try {
+      const result = await setPassword(setupPassword);
+      if (result.error) throw new Error(result.error);
+      setShowSetup(false);
+    } catch (err: any) {
+      setSetupError(err?.message || "Failed to set password");
     } finally {
       setSetupSaving(false);
     }
@@ -1760,7 +1780,7 @@ export function Dashboard() {
                       </button>
                     </div>
                   </>
-                ) : (
+                ) : setupStep === "repos" ? (
                   <>
                     <p className="setup-description">
                       Found {discoveredRepos.length} git repo{discoveredRepos.length !== 1 ? "s" : ""} in <strong>{setupPath}</strong>. Select which ones to add:
@@ -1789,6 +1809,44 @@ export function Dashboard() {
                         disabled={setupSaving}
                       >
                         {setupSaving ? "Adding..." : `Add ${discoveredRepos.filter((r) => r.selected).length} repos`}
+                      </button>
+                      <button className="btn" onClick={() => setSetupStep("password")}>
+                        Skip
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="setup-description">
+                      Optionally set a password to protect the dashboard when accessed over the network.
+                    </p>
+                    <label className="form-label">Password</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={setupPassword}
+                      onChange={(e) => setSetupPassword(e.target.value)}
+                      placeholder="Leave blank to skip"
+                      autoFocus
+                    />
+                    <label className="form-label" style={{ marginTop: 12 }}>Confirm password</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={setupPasswordConfirm}
+                      onChange={(e) => setSetupPasswordConfirm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && setupPassword) handleSetupSetPassword();
+                        else if (e.key === "Enter") setShowSetup(false);
+                      }}
+                    />
+                    <div className="setup-actions">
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSetupSetPassword}
+                        disabled={setupSaving || !setupPassword.trim()}
+                      >
+                        {setupSaving ? "Saving..." : "Set password"}
                       </button>
                       <button className="btn" onClick={() => setShowSetup(false)}>
                         Skip

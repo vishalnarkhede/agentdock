@@ -40,49 +40,6 @@ If any of that sounds familiar, this is for you. If you're using it and want to 
 - **Browser notifications** — Get notified when agents finish or need input
 - **Password protection** — Optional authentication for network access
 
-## Using from Your Phone
-
-agentdock works great from a phone — the UI is designed for it. Here's how to get it running:
-
-**1. Start the server** on your Mac/Linux machine as usual:
-
-```bash
-agentdock web
-```
-
-The server binds to all network interfaces automatically, so no extra flags needed.
-
-**2. Find your local IP address:**
-
-```bash
-# macOS
-ipconfig getifaddr en0
-
-# Linux
-hostname -I | awk '{print $1}'
-```
-
-**3. Open Chrome on your phone** and navigate to:
-
-```
-https://<your-ip>:5173
-```
-
-> You'll see a "connection not private" warning because the dev server uses a self-signed certificate. Tap **Advanced → Proceed** to continue. This is expected and safe on your local network.
-
-**4. Add to your home screen** for a native app-like experience:
-
-- **Chrome (Android):** tap the three-dot menu → *Add to Home screen*
-- **Chrome (iOS):** tap the Share icon → *Add to Home Screen*
-
-Once added, it opens full-screen without the browser chrome, just like a real app.
-
----
-
-**Outside your home network?** Use the built-in ngrok integration — toggle it on from the header and you'll get a public HTTPS URL you can open from anywhere.
-
----
-
 ## Quickstart
 
 ### Prerequisites
@@ -129,6 +86,7 @@ On first launch, the setup wizard will prompt you to:
 1. Set your **base path** (the directory where your repos live, e.g. `~/projects`)
 2. **Auto-discover** git repositories in that directory
 3. **Select** which repos to add
+4. Optionally set a **password** to protect the dashboard on your network
 
 You can also add, remove, or scan for repos later in **Settings > Repositories**.
 
@@ -142,6 +100,49 @@ agentdock repos                        # list configured repos
 agentdock list                         # show active sessions
 agentdock stop --all                   # kill all sessions
 ```
+
+## Using from Your Phone
+
+agentdock works great from a phone — the UI is designed for it. Here's how to get it running:
+
+**1. Start the server** on your Mac/Linux machine as usual:
+
+```bash
+agentdock web
+```
+
+The server binds to all network interfaces automatically, so no extra flags needed.
+
+**2. Find your local IP address:**
+
+```bash
+# macOS
+ipconfig getifaddr en0
+
+# Linux
+hostname -I | awk '{print $1}'
+```
+
+**3. Open Chrome on your phone** and navigate to:
+
+```
+https://<your-ip>:5173
+```
+
+> You'll see a "connection not private" warning because the dev server uses a self-signed certificate. Tap **Advanced → Proceed** to continue. This is expected and safe on your local network.
+
+**4. Add to your home screen** for a native app-like experience:
+
+- **Chrome (Android):** tap the three-dot menu → *Add to Home screen*
+- **Chrome (iOS):** tap the Share icon → *Add to Home Screen*
+
+Once added, it opens full-screen without the browser chrome, just like a real app.
+
+---
+
+**Outside your home network?** Use the built-in ngrok integration — toggle it on from the header and you'll get a public HTTPS URL you can open from anywhere.
+
+---
 
 ## Configuration
 
