@@ -630,10 +630,12 @@ h1 {
 .sidebar-select-link {
   background: none;
   border: none;
+  border-left: 1px solid var(--border);
   color: var(--text-dim);
   font-size: calc(var(--fs-base) - 2px);
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 2px 6px 2px 10px;
+  margin-left: 4px;
   font-family: var(--font-mono);
   white-space: nowrap;
 }
