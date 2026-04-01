@@ -2656,11 +2656,9 @@ h1 {
 /* Fixed-position popover for paragraph "+" button comments */
 .plan-comment-popover--fixed {
   position: fixed !important;
-  bottom: 120px;
-  left: 50%;
+  left: 50% !important;
   transform: translateX(-50%);
   width: min(480px, 90vw);
-  top: auto !important;
   background: var(--bg-modal, var(--bg-card)) !important;
   z-index: 50;
 }

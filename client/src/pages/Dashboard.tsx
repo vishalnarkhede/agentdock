@@ -399,7 +399,7 @@ function extractText(children: React.ReactNode): string {
 
 function makeBlockRenderer(
   tag: "p" | "h1" | "h2" | "h3" | "h4",
-  onComment: (text: string) => void,
+  onComment: (text: string, rect: DOMRect) => void,
 ) {
   const BlockTag = tag as React.ElementType;
   return ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
@@ -410,7 +410,7 @@ function makeBlockRenderer(
           tabIndex={-1}
           aria-label="Add comment to this section"
           onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); onComment(extractText(children)); }}
+          onClick={(e) => { e.stopPropagation(); onComment(extractText(children), e.currentTarget.getBoundingClientRect()); }}
         >
           +
         </button>
@@ -435,6 +435,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   const [batchSending, setBatchSending] = useState(false);
   const [batchExpanded, setBatchExpanded] = useState(false);
   const [paragraphCommentText, setParagraphCommentText] = useState<string | null>(null);
+  const [paragraphCommentAnchor, setParagraphCommentAnchor] = useState<DOMRect | null>(null);
   const [paragraphComment, setParagraphComment] = useState("");
   const paragraphCommentRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -522,8 +523,9 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     savedRange.current = null;
   }, []);
 
-  const handleParagraphComment = useCallback((text: string) => {
+  const handleParagraphComment = useCallback((text: string, rect: DOMRect) => {
     setParagraphCommentText(text);
+    setParagraphCommentAnchor(rect);
     setParagraphComment("");
     // Clear any active text selection
     setShowCommentBtn(null);
@@ -541,6 +543,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     }]);
     setParagraphComment("");
     setParagraphCommentText(null);
+    setParagraphCommentAnchor(null);
   };
 
   const handleParagraphCommentKeyDown = (e: React.KeyboardEvent) => {
@@ -706,9 +709,24 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
             )}
           </div>
 
-          {paragraphCommentText !== null && (
+          {paragraphCommentText !== null && (() => {
+            const POPOVER_H = 200;
+            const MARGIN = 8;
+            const anchor = paragraphCommentAnchor;
+            let popoverStyle: React.CSSProperties = { bottom: 120 };
+            if (anchor) {
+              const spaceBelow = window.innerHeight - anchor.bottom - MARGIN;
+              const spaceAbove = anchor.top - MARGIN;
+              if (spaceBelow >= POPOVER_H || spaceBelow >= spaceAbove) {
+                popoverStyle = { top: anchor.bottom + MARGIN };
+              } else {
+                popoverStyle = { bottom: window.innerHeight - anchor.top + MARGIN };
+              }
+            }
+            return (
             <div
               className="plan-comment-popover plan-comment-popover--fixed"
+              style={popoverStyle}
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="plan-comment-context">{paragraphCommentText}</div>
@@ -722,7 +740,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
                 rows={2}
               />
               <div className="diff-comment-actions">
-                <button className="btn btn-sm" onClick={() => { setParagraphCommentText(null); setParagraphComment(""); }}>
+                <button className="btn btn-sm" onClick={() => { setParagraphCommentText(null); setParagraphCommentAnchor(null); setParagraphComment(""); }}>
                   cancel
                 </button>
                 <button
@@ -734,7 +752,8 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
                 </button>
               </div>
             </div>
-          )}
+            );
+          })()}
         </>
       ) : (
         <div className="plan-empty">no plan yet — ask the agent to create one</div>
