@@ -122,16 +122,19 @@ export async function sendKeysRaw(
   name: string,
   keys: string,
 ): Promise<void> {
-  if (keys.length <= 400) {
+  // Single-line short text: send-keys -l is fine
+  if (keys.length <= 400 && !keys.includes("\n")) {
     await run(["send-keys", "-l", "-t", name, keys]);
     return;
   }
-  // Large text: use tmux load-buffer + paste-buffer (no length limit, atomic)
+  // Multi-line or large text: use tmux load-buffer + paste-buffer.
+  // -p enables bracketed paste mode (\033[200~...\033[201~) so the receiving
+  // application treats newlines as literal newlines, not Enter key presses.
   const tmp = `/tmp/agentdock-paste-${Date.now()}`;
   await Bun.write(tmp, keys);
   try {
     await run(["load-buffer", tmp]);
-    await run(["paste-buffer", "-t", name, "-d"]);
+    await run(["paste-buffer", "-p", "-t", name, "-d"]);
   } finally {
     try { const { unlink } = require("fs/promises"); await unlink(tmp); } catch {}
   }

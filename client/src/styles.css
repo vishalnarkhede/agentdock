@@ -2566,6 +2566,66 @@ h1 {
   box-sizing: border-box;
 }
 
+/* Fixed-position popover for paragraph "+" button comments */
+.plan-comment-popover--fixed {
+  position: fixed !important;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(480px, 90vw);
+  top: auto !important;
+  background: var(--bg-modal, var(--bg-card)) !important;
+  z-index: 50;
+}
+
+/* ─── Plan paragraph gutter ─── */
+.plan-block-wrap {
+  display: flex;
+  align-items: flex-start;
+  position: relative;
+  margin-left: -24px;
+  padding-left: 24px;
+}
+
+.plan-block-gutter {
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 20px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.plan-gutter-btn {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.plan-block-wrap:hover .plan-gutter-btn {
+  display: flex;
+}
+
+.plan-gutter-btn:hover {
+  opacity: 0.8;
+}
+
 .plan-tab-wrap {
   position: relative;
   display: inline-flex;
@@ -3672,9 +3732,66 @@ mark.fe-match-active {
 }
 
 .diff-line {
+  display: flex;
+  align-items: stretch;
+  min-height: 1.5em;
+}
+
+.diff-gutter {
+  flex: 0 0 28px;
+  width: 28px;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: inherit;
+}
+
+.diff-add .diff-gutter { background: rgba(74, 222, 128, 0.1); }
+.diff-del .diff-gutter { background: rgba(248, 113, 113, 0.1); }
+.diff-hunk .diff-gutter { background: rgba(129, 140, 248, 0.08); }
+.diff-meta .diff-gutter { background: transparent; }
+
+.diff-line-code {
+  flex: 1;
   padding: 0 12px;
   white-space: pre;
-  min-height: 1.5em;
+  min-width: 0;
+}
+
+.diff-gutter-btn {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.diff-line:hover .diff-gutter-btn {
+  display: flex;
+}
+
+.diff-selected .diff-gutter-btn {
+  display: flex;
+}
+
+.diff-gutter-btn:hover {
+  opacity: 0.8;
 }
 
 .diff-add {
@@ -3714,8 +3831,11 @@ mark.fe-match-active {
 
 .diff-selected {
   background: rgba(129, 140, 248, 0.2) !important;
-  border-left: 2px solid var(--accent);
-  padding-left: 10px;
+}
+
+.diff-selected .diff-gutter {
+  border-right: 2px solid var(--accent);
+  background: rgba(129, 140, 248, 0.25);
 }
 
 /* ─── Diff comment box ─── */
@@ -6633,7 +6753,41 @@ mark.fe-match-active {
   .diff-line {
     font-size: 11px;
     min-width: max-content;
+  }
+
+  .diff-line-code {
     padding: 0 8px;
+  }
+
+  .diff-gutter {
+    flex: 0 0 24px;
+    width: 24px;
+  }
+
+  /* Always faintly visible on mobile (no hover state) */
+  .diff-gutter-btn {
+    display: flex;
+    opacity: 0.3;
+    width: 16px;
+    height: 16px;
+    font-size: 11px;
+  }
+
+  .diff-selected .diff-gutter-btn {
+    opacity: 1;
+  }
+
+  /* Plan paragraph gutter: always faintly visible on mobile */
+  .plan-gutter-btn {
+    display: flex;
+    opacity: 0.3;
+    width: 16px;
+    height: 16px;
+    font-size: 11px;
+  }
+
+  .plan-block-wrap:active .plan-gutter-btn {
+    opacity: 1;
   }
 
   .diff-file-path {

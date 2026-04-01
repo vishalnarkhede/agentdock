@@ -374,6 +374,43 @@ interface PlanComment {
   comment: string;
 }
 
+function extractText(children: React.ReactNode): string {
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) return (children as React.ReactNode[]).map(extractText).join("");
+  if (
+    children !== null &&
+    typeof children === "object" &&
+    "props" in children &&
+    (children as { props: { children?: React.ReactNode } }).props.children
+  ) {
+    return extractText((children as { props: { children: React.ReactNode } }).props.children);
+  }
+  return "";
+}
+
+function makeBlockRenderer(
+  tag: "p" | "h1" | "h2" | "h3" | "h4",
+  onComment: (text: string) => void,
+) {
+  const BlockTag = tag as React.ElementType;
+  return ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
+    <div className="plan-block-wrap">
+      <div className="plan-block-gutter">
+        <button
+          className="plan-gutter-btn"
+          tabIndex={-1}
+          aria-label="Add comment to this section"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onComment(extractText(children)); }}
+        >
+          +
+        </button>
+      </div>
+      <BlockTag {...props}>{children}</BlockTag>
+    </div>
+  );
+}
+
 function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "rendered" | "raw" }) {
   const [plan, setPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -388,6 +425,9 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   const [pendingComments, setPendingComments] = useState<PlanComment[]>([]);
   const [batchSending, setBatchSending] = useState(false);
   const [batchExpanded, setBatchExpanded] = useState(false);
+  const [paragraphCommentText, setParagraphCommentText] = useState<string | null>(null);
+  const [paragraphComment, setParagraphComment] = useState("");
+  const paragraphCommentRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -418,6 +458,10 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   useEffect(() => {
     if (commentBox && commentRef.current) commentRef.current.focus();
   }, [commentBox]);
+
+  useEffect(() => {
+    if (paragraphCommentText && paragraphCommentRef.current) paragraphCommentRef.current.focus();
+  }, [paragraphCommentText]);
 
   // On mouseup inside plan content, check if there's a text selection
   const handleContentMouseUp = useCallback(() => {
@@ -468,6 +512,38 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     }
     savedRange.current = null;
   }, []);
+
+  const handleParagraphComment = useCallback((text: string) => {
+    setParagraphCommentText(text);
+    setParagraphComment("");
+    // Clear any active text selection
+    setShowCommentBtn(null);
+    setCommentBox(null);
+    clearHighlight();
+    window.getSelection()?.removeAllRanges();
+  }, [clearHighlight]);
+
+  const handleAddParagraphComment = () => {
+    if (!paragraphComment.trim() || !paragraphCommentText) return;
+    setPendingComments(prev => [...prev, {
+      id: crypto.randomUUID(),
+      selectedText: paragraphCommentText,
+      comment: paragraphComment.trim(),
+    }]);
+    setParagraphComment("");
+    setParagraphCommentText(null);
+  };
+
+  const handleParagraphCommentKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleAddParagraphComment();
+    }
+    if (e.key === "Escape") {
+      setParagraphComment("");
+      setParagraphCommentText(null);
+    }
+  };
 
   const handleAddComment = () => {
     if (!comment.trim() || !commentBox) return;
@@ -548,6 +624,14 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     }
   };
 
+  const markdownComponents = useMemo(() => ({
+    p: makeBlockRenderer("p", handleParagraphComment),
+    h1: makeBlockRenderer("h1", handleParagraphComment),
+    h2: makeBlockRenderer("h2", handleParagraphComment),
+    h3: makeBlockRenderer("h3", handleParagraphComment),
+    h4: makeBlockRenderer("h4", handleParagraphComment),
+  }), [handleParagraphComment]);
+
   if (loading) {
     return <div className="plan-view"><div className="plan-loading">loading plan...</div></div>;
   }
@@ -565,7 +649,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
             onMouseDown={handleContentMouseDown}
           >
             {viewMode === "rendered" ? (
-              <Markdown remarkPlugins={[remarkGfm]}>{plan}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{plan}</Markdown>
             ) : (
               <pre className="plan-raw">{plan}</pre>
             )}
@@ -612,6 +696,36 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
               </div>
             )}
           </div>
+
+          {paragraphCommentText !== null && (
+            <div
+              className="plan-comment-popover plan-comment-popover--fixed"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="plan-comment-context">{paragraphCommentText}</div>
+              <textarea
+                ref={paragraphCommentRef}
+                className="diff-comment-input"
+                placeholder="Add a comment... (Enter to add, Esc to cancel)"
+                value={paragraphComment}
+                onChange={(e) => setParagraphComment(e.target.value)}
+                onKeyDown={handleParagraphCommentKeyDown}
+                rows={2}
+              />
+              <div className="diff-comment-actions">
+                <button className="btn btn-sm" onClick={() => { setParagraphCommentText(null); setParagraphComment(""); }}>
+                  cancel
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleAddParagraphComment}
+                  disabled={!paragraphComment.trim()}
+                >
+                  add comment
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <div className="plan-empty">no plan yet — ask the agent to create one</div>
@@ -964,6 +1078,11 @@ export function Dashboard() {
     mruSaveTimer.current = setTimeout(() => {
       updatePreferences({ mruSessions: mruList.current });
     }, 1000);
+  }, [activeSession]);
+
+  // Close bottom pane when switching sessions
+  useEffect(() => {
+    setBottomTab(null);
   }, [activeSession]);
 
   // Ctrl+Shift+[ / Ctrl+Shift+] to navigate MRU sessions

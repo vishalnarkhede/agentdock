@@ -182,20 +182,39 @@ function DiffBlock({
           className={cls}
           data-file-idx={fileIdx}
           data-line-idx={i}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            if (!e.shiftKey) {
-              onMouseDown(fileIdx, i);
-            }
-          }}
           onMouseMove={() => onMouseMove(fileIdx, i)}
           onMouseUp={() => onMouseUp()}
-          onTouchStart={(e) => { e.preventDefault(); onTouchStart(fileIdx, i, e.touches[0].clientX, e.touches[0].clientY); }}
-          onClick={(e) => {
-            if (e.shiftKey) onLineClick(fileIdx, i, true);
-          }}
         >
-          {line || " "}
+          <div className="diff-gutter">
+            <button
+              className="diff-gutter-btn"
+              tabIndex={-1}
+              aria-label="Add comment to this line"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.shiftKey) return; // let onClick handle shift-extend
+                onMouseDown(fileIdx, i);
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (e.shiftKey) {
+                  onLineClick(fileIdx, i, true);
+                } else if (!isDragging.current) {
+                  // Pure click (no drag): select just this line
+                  onLineClick(fileIdx, i, false);
+                }
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                // Immediately select on touch (no long-press delay needed for gutter)
+                onMouseDown(fileIdx, i);
+              }}
+            >
+              +
+            </button>
+          </div>
+          <div className="diff-line-code">{line || " "}</div>
         </div>,
       );
 
@@ -449,6 +468,9 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
         }
         return { fileIdx, startLine: lineIdx, endLine: lineIdx };
       });
+    } else {
+      // Plain click on "+" — single-line selection
+      setSelection({ fileIdx, startLine: lineIdx, endLine: lineIdx });
     }
   }, []);
 
