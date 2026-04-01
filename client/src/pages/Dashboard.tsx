@@ -415,7 +415,11 @@ function makeLiRenderer(
   onBlockMouseEnter: (e: React.MouseEvent<HTMLElement>) => void,
 ) {
   return ({ children, ...props }: React.HTMLAttributes<HTMLLIElement>) => (
-    <li className="plan-li-wrap" onMouseEnter={onBlockMouseEnter as React.MouseEventHandler<HTMLLIElement>} {...props}>
+    <li
+      {...props}
+      className={`plan-li-wrap${props.className ? " " + props.className : ""}`}
+      onMouseEnter={onBlockMouseEnter as React.MouseEventHandler<HTMLLIElement>}
+    >
       <span className="plan-li-gutter">
         <button
           className="plan-gutter-btn"
