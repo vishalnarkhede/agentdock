@@ -74,6 +74,9 @@ function SessionRow({
   onRestore,
   onForkSession,
   dataTutorial,
+  selectionMode,
+  selected,
+  onToggleSelect,
 }: {
   session: SessionInfo;
   active: boolean;
@@ -98,6 +101,9 @@ function SessionRow({
   onRestore?: () => Promise<void>;
   onForkSession?: () => void;
   dataTutorial?: string;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -168,16 +174,19 @@ function SessionRow({
 
   return (
     <div
-      className={`session-row ${active ? "session-row-active" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
+      className={`session-row ${active && !selectionMode ? "session-row-active" : ""} ${selected ? "session-row-selected" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
       data-tutorial={dataTutorial}
-      onClick={onSelect}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDragEnd={onDragEnd}
-      onDrop={onDrop}
+      onClick={selectionMode ? (e) => { e.stopPropagation(); onToggleSelect?.(); } : onSelect}
+      draggable={selectionMode ? false : draggable}
+      onDragStart={selectionMode ? undefined : onDragStart}
+      onDragOver={selectionMode ? undefined : onDragOver}
+      onDragEnd={selectionMode ? undefined : onDragEnd}
+      onDrop={selectionMode ? undefined : onDrop}
     >
       <div className="session-row-main">
+        {selectionMode && (
+          <span className={`session-row-select-check${selected ? " session-row-select-check-on" : ""}`} />
+        )}
         {isChild && (
           <span className="session-row-tree-connector">
             {isLastChild ? "\u2514\u2500" : "\u251C\u2500"}
@@ -255,7 +264,7 @@ function SessionRow({
             ))}
           </span>
         )}
-        <div className="session-row-menu-wrap" ref={menuRef}>
+        {!selectionMode && <div className="session-row-menu-wrap" ref={menuRef}>
           <button
             className="session-row-menu-btn"
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
@@ -296,7 +305,7 @@ function SessionRow({
               </button>
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -981,6 +990,8 @@ export function Dashboard() {
   const [metaPresets, setMetaPresets] = useState<MetaPropertyPreset[]>([]);
   const [editingSession, setEditingSession] = useState<SessionInfo | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const toggleGroup = useCallback((group: string) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -1265,6 +1276,31 @@ export function Dashboard() {
     });
   }, [activeSessionInfo?.name]);
 
+  const handleKillSelected = async () => {
+    if (selectedSessions.size === 0) return;
+    await Promise.all([...selectedSessions].map(name => deleteSession(name).catch(() => {})));
+    if (activeSession && selectedSessions.has(activeSession)) {
+      const remaining = sessions.filter(s => !selectedSessions.has(s.name));
+      setActiveSession(remaining.length > 0 ? remaining[0].name : null);
+    }
+    setSelectedSessions(new Set());
+    setSelectionMode(false);
+    refresh();
+  };
+
+  const handleExitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedSessions(new Set());
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedSessions.size === sessions.length) {
+      setSelectedSessions(new Set());
+    } else {
+      setSelectedSessions(new Set(sessions.map(s => s.name)));
+    }
+  };
+
   const handleStopAll = async () => {
     if (!confirm("Stop all sessions?")) return;
     try {
@@ -1442,14 +1478,19 @@ export function Dashboard() {
         <div className="sidebar-header">
           <span className="sidebar-title">sessions</span>
           <div className="sidebar-actions">
-            {sessions.length > 0 && (
-              <button className="btn btn-stop btn-sm" onClick={handleStopAll}>
-                kill --all
-              </button>
+            {selectionMode ? (
+              <button className="btn btn-sm" onClick={handleExitSelectionMode}>cancel</button>
+            ) : (
+              <>
+                {sessions.length > 1 && (
+                  <button className="sidebar-select-link" onClick={() => setSelectionMode(true)}>select</button>
+                )}
+                {sessions.length > 0 && (
+                  <button className="btn btn-stop btn-sm" onClick={handleStopAll}>kill --all</button>
+                )}
+                <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")} data-tutorial="new-session-btn">+ new</button>
+              </>
             )}
-            <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")} data-tutorial="new-session-btn">
-              + new
-            </button>
             <button
               className="btn btn-sm sidebar-collapse-btn"
               onClick={() => setSidebarCollapsed(true)}
@@ -1593,6 +1634,9 @@ export function Dashboard() {
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                       dataTutorial={getDemoTutorialAttr(session)}
+                      selectionMode={selectionMode}
+                      selected={selectedSessions.has(session.name)}
+                      onToggleSelect={() => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
                     />
                   ))}
                 </div>
@@ -1644,6 +1688,9 @@ export function Dashboard() {
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                       dataTutorial={getDemoTutorialAttr(session)}
+                      selectionMode={selectionMode}
+                      selected={selectedSessions.has(session.name)}
+                      onToggleSelect={() => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
                     />
                   ))}
                 </div>
@@ -1678,10 +1725,30 @@ export function Dashboard() {
                 onPinToHeader={() => handlePinToHeader(session)}
                 onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                 dataTutorial={getDemoTutorialAttr(session)}
+                selectionMode={selectionMode}
+                selected={selectedSessions.has(session.name)}
+                onToggleSelect={() => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
               />
             ))
           )}
         </div>
+        {selectionMode && (
+          <div className="selection-action-bar">
+            <button className="selection-select-all" onClick={handleToggleSelectAll}>
+              {selectedSessions.size === sessions.length ? "none" : "all"}
+            </button>
+            <span className="selection-count">
+              {selectedSessions.size > 0 ? `${selectedSessions.size} selected` : "tap to select"}
+            </span>
+            <button
+              className="btn btn-stop btn-sm"
+              onClick={handleKillSelected}
+              disabled={selectedSessions.size === 0}
+            >
+              kill {selectedSessions.size > 0 ? selectedSessions.size : ""}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="split-main">

@@ -620,6 +620,25 @@ h1 {
 .sidebar-actions {
   display: flex;
   gap: 4px;
+  align-items: center;
+}
+
+.sidebar-actions .btn {
+  white-space: nowrap;
+}
+
+.sidebar-select-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: calc(var(--fs-base) - 2px);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.sidebar-select-link:hover {
+  color: var(--accent);
 }
 
 .btn-sm {
@@ -690,6 +709,72 @@ h1 {
 .session-row-active {
   background: rgba(51, 255, 51, 0.07);
   border-left-color: var(--accent);
+}
+
+.session-row-selected {
+  background: var(--accent-glow) !important;
+  border-left-color: var(--accent);
+}
+
+/* ─── Multi-select checkbox ─── */
+.session-row-select-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.session-row-select-check-on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.session-row-select-check-on::after {
+  content: '✓';
+  color: var(--bg);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+/* ─── Selection action bar ─── */
+.selection-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+}
+
+.selection-count {
+  flex: 1;
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.selection-select-all {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: calc(var(--fs-base) - 2px);
+  cursor: pointer;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+
+.selection-select-all:hover {
+  text-decoration: underline;
 }
 
 .session-row-main {
