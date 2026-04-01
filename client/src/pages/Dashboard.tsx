@@ -388,7 +388,7 @@ function makeBlockRenderer(
   tag: "p" | "h1" | "h2" | "h3" | "h4",
   onGutterMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void,
   onGutterTouchStart: (e: React.TouchEvent<HTMLButtonElement>) => void,
-  onBlockMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => void,
+  onBlockMouseEnter: (e: React.MouseEvent<HTMLElement>) => void,
 ) {
   const BlockTag = tag as React.ElementType;
   return ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
@@ -406,6 +406,29 @@ function makeBlockRenderer(
       </div>
       <BlockTag {...props}>{children}</BlockTag>
     </div>
+  );
+}
+
+function makeLiRenderer(
+  onGutterMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void,
+  onGutterTouchStart: (e: React.TouchEvent<HTMLButtonElement>) => void,
+  onBlockMouseEnter: (e: React.MouseEvent<HTMLElement>) => void,
+) {
+  return ({ children, ...props }: React.HTMLAttributes<HTMLLIElement>) => (
+    <li className="plan-li-wrap" onMouseEnter={onBlockMouseEnter as React.MouseEventHandler<HTMLLIElement>} {...props}>
+      <span className="plan-li-gutter">
+        <button
+          className="plan-gutter-btn"
+          tabIndex={-1}
+          aria-label="Add comment to this item"
+          onMouseDown={onGutterMouseDown}
+          onTouchStart={onGutterTouchStart}
+        >
+          +
+        </button>
+      </span>
+      {children}
+    </li>
   );
 }
 
@@ -462,10 +485,10 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     if (commentBox && commentRef.current) commentRef.current.focus();
   }, [commentBox]);
 
-  // Assign data-block-idx to each .plan-block-wrap after plan renders
+  // Assign data-block-idx to each selectable block after plan renders
   useLayoutEffect(() => {
     if (!contentRef.current) return;
-    contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap").forEach((el, i) => {
+    contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap").forEach((el, i) => {
       el.dataset.blockIdx = String(i);
     });
   }, [plan, viewMode]);
@@ -473,7 +496,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   // Apply/remove selection highlight class
   useEffect(() => {
     if (!contentRef.current) return;
-    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap");
+    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap");
     const selMin = blockSel ? Math.min(blockSel.start, blockSel.end) : -1;
     const selMax = blockSel ? Math.max(blockSel.start, blockSel.end) : -1;
     blocks.forEach((el, i) => el.classList.toggle("plan-block-selected", i >= selMin && i <= selMax));
@@ -485,7 +508,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
       if (!isBlockDraggingRef.current) return;
       isBlockDraggingRef.current = false;
       if (!contentRef.current || !blockSel) return;
-      const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap");
+      const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap");
       const lastIdx = Math.min(Math.max(blockSel.start, blockSel.end), blocks.length - 1);
       const lastEl = blocks[lastIdx];
       if (!lastEl) return;
@@ -607,7 +630,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     setBlockComment("");
   }, []);
 
-  const handleBlockMouseEnter = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleBlockMouseEnter = useCallback((e: React.MouseEvent<HTMLElement>) => {
     if (!isBlockDraggingRef.current) return;
     const wrap = e.currentTarget;
     const idx = parseInt(wrap.dataset.blockIdx ?? "-1", 10);
@@ -616,7 +639,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
 
   const handleAddBlockComment = useCallback(() => {
     if (!blockComment.trim() || !blockSel || !contentRef.current) return;
-    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap");
+    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap");
     const selMin = Math.min(blockSel.start, blockSel.end);
     const selMax = Math.max(blockSel.start, blockSel.end);
     const selectedText = Array.from(blocks).slice(selMin, selMax + 1)
@@ -718,6 +741,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     h2: makeBlockRenderer("h2", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
     h3: makeBlockRenderer("h3", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
     h4: makeBlockRenderer("h4", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
+    li: makeLiRenderer(handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
   }), [handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter]);
 
   if (loading) {
