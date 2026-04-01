@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { MetaSelect } from "../components/MetaSelect";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -383,34 +383,23 @@ interface PlanComment {
   comment: string;
 }
 
-function extractText(children: React.ReactNode): string {
-  if (typeof children === "string") return children;
-  if (Array.isArray(children)) return (children as React.ReactNode[]).map(extractText).join("");
-  if (
-    children !== null &&
-    typeof children === "object" &&
-    "props" in children &&
-    (children as { props: { children?: React.ReactNode } }).props.children
-  ) {
-    return extractText((children as { props: { children: React.ReactNode } }).props.children);
-  }
-  return "";
-}
 
 function makeBlockRenderer(
   tag: "p" | "h1" | "h2" | "h3" | "h4",
-  onComment: (text: string, rect: DOMRect) => void,
+  onGutterMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void,
+  onGutterTouchStart: (e: React.TouchEvent<HTMLButtonElement>) => void,
+  onBlockMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => void,
 ) {
   const BlockTag = tag as React.ElementType;
   return ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
-    <div className="plan-block-wrap">
+    <div className="plan-block-wrap" onMouseEnter={onBlockMouseEnter}>
       <div className="plan-block-gutter">
         <button
           className="plan-gutter-btn"
           tabIndex={-1}
           aria-label="Add comment to this section"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); onComment(extractText(children), e.currentTarget.getBoundingClientRect()); }}
+          onMouseDown={onGutterMouseDown}
+          onTouchStart={onGutterTouchStart}
         >
           +
         </button>
@@ -434,10 +423,14 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   const [pendingComments, setPendingComments] = useState<PlanComment[]>([]);
   const [batchSending, setBatchSending] = useState(false);
   const [batchExpanded, setBatchExpanded] = useState(false);
-  const [paragraphCommentText, setParagraphCommentText] = useState<string | null>(null);
-  const [paragraphCommentAnchor, setParagraphCommentAnchor] = useState<DOMRect | null>(null);
-  const [paragraphComment, setParagraphComment] = useState("");
-  const paragraphCommentRef = useRef<HTMLTextAreaElement>(null);
+  // Block drag-select state (gutter "+" drag)
+  const [blockSel, setBlockSel] = useState<{ start: number; end: number } | null>(null);
+  const [blockComment, setBlockComment] = useState("");
+  const [blockCommentTop, setBlockCommentTop] = useState<number | null>(null);
+  const blockCommentRef = useRef<HTMLTextAreaElement>(null);
+  const isBlockDraggingRef = useRef(false);
+  const blockDragStartRef = useRef(-1);
+
   const contentRef = useRef<HTMLDivElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -469,12 +462,69 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     if (commentBox && commentRef.current) commentRef.current.focus();
   }, [commentBox]);
 
+  // Assign data-block-idx to each .plan-block-wrap after plan renders
+  useLayoutEffect(() => {
+    if (!contentRef.current) return;
+    contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap").forEach((el, i) => {
+      el.dataset.blockIdx = String(i);
+    });
+  }, [plan, viewMode]);
+
+  // Apply/remove selection highlight class
   useEffect(() => {
-    if (paragraphCommentText && paragraphCommentRef.current) paragraphCommentRef.current.focus();
-  }, [paragraphCommentText]);
+    if (!contentRef.current) return;
+    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap");
+    const selMin = blockSel ? Math.min(blockSel.start, blockSel.end) : -1;
+    const selMax = blockSel ? Math.max(blockSel.start, blockSel.end) : -1;
+    blocks.forEach((el, i) => el.classList.toggle("plan-block-selected", i >= selMin && i <= selMax));
+  }, [blockSel]);
+
+  // Global mouseup/touchend: finalize drag → show inline comment box
+  useEffect(() => {
+    const onUp = () => {
+      if (!isBlockDraggingRef.current) return;
+      isBlockDraggingRef.current = false;
+      if (!contentRef.current || !blockSel) return;
+      const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap");
+      const lastIdx = Math.min(Math.max(blockSel.start, blockSel.end), blocks.length - 1);
+      const lastEl = blocks[lastIdx];
+      if (!lastEl) return;
+      const lastRect = lastEl.getBoundingClientRect();
+      const contentRect = contentRef.current.getBoundingClientRect();
+      const top = lastRect.bottom - contentRect.top + contentRef.current.scrollTop + 4;
+      setBlockCommentTop(top);
+      setBlockComment("");
+      setTimeout(() => {
+        blockCommentRef.current?.focus();
+        blockCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 50);
+    };
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchend", onUp);
+    return () => { window.removeEventListener("mouseup", onUp); window.removeEventListener("touchend", onUp); };
+  }, [blockSel]);
+
+  // Native touchmove to extend selection on touch (passive:false to allow preventDefault)
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isBlockDraggingRef.current) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const el = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement | null;
+      const wrap = el?.closest<HTMLElement>("[data-block-idx]");
+      if (!wrap) return;
+      const idx = parseInt(wrap.dataset.blockIdx ?? "-1", 10);
+      if (idx >= 0) setBlockSel(prev => prev ? { start: blockDragStartRef.current, end: idx } : null);
+    };
+    content.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => content.removeEventListener("touchmove", onTouchMove);
+  }, [plan]);
 
   // On mouseup inside plan content, check if there's a text selection
   const handleContentMouseUp = useCallback(() => {
+    if (isBlockDraggingRef.current) return; // block drag takes precedence
     // Small delay to let the browser finalize the selection
     requestAnimationFrame(() => {
       const sel = window.getSelection();
@@ -496,13 +546,19 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     });
   }, []);
 
-  // Clicking anywhere in content without a selection dismisses the button
+  // Clicking anywhere in content without a selection dismisses buttons/comment boxes
   const handleContentMouseDown = useCallback(() => {
     if (showCommentBtn && !commentBox) {
       setShowCommentBtn(null);
       setSelectedText("");
     }
-  }, [showCommentBtn, commentBox]);
+    // Clear block selection if clicking in content area (gutter stops propagation)
+    if (blockCommentTop !== null) {
+      setBlockCommentTop(null);
+      setBlockSel(null);
+      setBlockComment("");
+    }
+  }, [showCommentBtn, commentBox, blockCommentTop]);
 
   const handleOpenCommentBox = () => {
     if (!showCommentBtn || !selectedText) return;
@@ -523,38 +579,58 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
     savedRange.current = null;
   }, []);
 
-  const handleParagraphComment = useCallback((text: string, rect: DOMRect) => {
-    setParagraphCommentText(text);
-    setParagraphCommentAnchor(rect);
-    setParagraphComment("");
-    // Clear any active text selection
-    setShowCommentBtn(null);
+  const handleGutterMouseDown = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const wrap = e.currentTarget.closest<HTMLElement>("[data-block-idx]");
+    if (!wrap) return;
+    const idx = parseInt(wrap.dataset.blockIdx ?? "0", 10);
+    isBlockDraggingRef.current = true;
+    blockDragStartRef.current = idx;
+    setBlockSel({ start: idx, end: idx });
+    setBlockCommentTop(null);
+    setBlockComment("");
     setCommentBox(null);
+    setShowCommentBtn(null);
     clearHighlight();
-    window.getSelection()?.removeAllRanges();
   }, [clearHighlight]);
 
-  const handleAddParagraphComment = () => {
-    if (!paragraphComment.trim() || !paragraphCommentText) return;
-    setPendingComments(prev => [...prev, {
-      id: crypto.randomUUID(),
-      selectedText: paragraphCommentText,
-      comment: paragraphComment.trim(),
-    }]);
-    setParagraphComment("");
-    setParagraphCommentText(null);
-    setParagraphCommentAnchor(null);
-  };
+  const handleGutterTouchStart = useCallback((e: React.TouchEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    const wrap = e.currentTarget.closest<HTMLElement>("[data-block-idx]");
+    if (!wrap) return;
+    const idx = parseInt(wrap.dataset.blockIdx ?? "0", 10);
+    isBlockDraggingRef.current = true;
+    blockDragStartRef.current = idx;
+    setBlockSel({ start: idx, end: idx });
+    setBlockCommentTop(null);
+    setBlockComment("");
+  }, []);
 
-  const handleParagraphCommentKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleAddParagraphComment();
-    }
-    if (e.key === "Escape") {
-      setParagraphComment("");
-      setParagraphCommentText(null);
-    }
+  const handleBlockMouseEnter = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isBlockDraggingRef.current) return;
+    const wrap = e.currentTarget;
+    const idx = parseInt(wrap.dataset.blockIdx ?? "-1", 10);
+    if (idx >= 0) setBlockSel(prev => prev ? { start: blockDragStartRef.current, end: idx } : null);
+  }, []);
+
+  const handleAddBlockComment = useCallback(() => {
+    if (!blockComment.trim() || !blockSel || !contentRef.current) return;
+    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap");
+    const selMin = Math.min(blockSel.start, blockSel.end);
+    const selMax = Math.max(blockSel.start, blockSel.end);
+    const selectedText = Array.from(blocks).slice(selMin, selMax + 1)
+      .map(el => el.innerText.trim()).filter(Boolean).join("\n");
+    setPendingComments(prev => [...prev, { id: crypto.randomUUID(), selectedText, comment: blockComment.trim() }]);
+    setBlockComment("");
+    setBlockCommentTop(null);
+    setBlockSel(null);
+    blocks.forEach(el => el.classList.remove("plan-block-selected"));
+  }, [blockComment, blockSel]);
+
+  const handleBlockCommentKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAddBlockComment(); }
+    if (e.key === "Escape") { setBlockCommentTop(null); setBlockSel(null); setBlockComment(""); }
   };
 
   const handleAddComment = () => {
@@ -637,12 +713,12 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
   };
 
   const markdownComponents = useMemo(() => ({
-    p: makeBlockRenderer("p", handleParagraphComment),
-    h1: makeBlockRenderer("h1", handleParagraphComment),
-    h2: makeBlockRenderer("h2", handleParagraphComment),
-    h3: makeBlockRenderer("h3", handleParagraphComment),
-    h4: makeBlockRenderer("h4", handleParagraphComment),
-  }), [handleParagraphComment]);
+    p:  makeBlockRenderer("p",  handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
+    h1: makeBlockRenderer("h1", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
+    h2: makeBlockRenderer("h2", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
+    h3: makeBlockRenderer("h3", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
+    h4: makeBlockRenderer("h4", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
+  }), [handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter]);
 
   if (loading) {
     return <div className="plan-view"><div className="plan-loading">loading plan...</div></div>;
@@ -707,53 +783,33 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
                 </div>
               </div>
             )}
-          </div>
 
-          {paragraphCommentText !== null && (() => {
-            const POPOVER_H = 200;
-            const MARGIN = 8;
-            const anchor = paragraphCommentAnchor;
-            let popoverStyle: React.CSSProperties = { bottom: 120 };
-            if (anchor) {
-              const spaceBelow = window.innerHeight - anchor.bottom - MARGIN;
-              const spaceAbove = anchor.top - MARGIN;
-              if (spaceBelow >= POPOVER_H || spaceBelow >= spaceAbove) {
-                popoverStyle = { top: anchor.bottom + MARGIN };
-              } else {
-                popoverStyle = { bottom: window.innerHeight - anchor.top + MARGIN };
-              }
-            }
-            return (
-            <div
-              className="plan-comment-popover plan-comment-popover--fixed"
-              style={popoverStyle}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              <div className="plan-comment-context">{paragraphCommentText}</div>
-              <textarea
-                ref={paragraphCommentRef}
-                className="diff-comment-input"
-                placeholder="Add a comment... (Enter to add, Esc to cancel)"
-                value={paragraphComment}
-                onChange={(e) => setParagraphComment(e.target.value)}
-                onKeyDown={handleParagraphCommentKeyDown}
-                rows={2}
-              />
-              <div className="diff-comment-actions">
-                <button className="btn btn-sm" onClick={() => { setParagraphCommentText(null); setParagraphCommentAnchor(null); setParagraphComment(""); }}>
-                  cancel
-                </button>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleAddParagraphComment}
-                  disabled={!paragraphComment.trim()}
-                >
-                  add comment
-                </button>
+            {blockCommentTop !== null && blockSel && (
+              <div
+                className="plan-block-comment-box"
+                style={{ top: blockCommentTop }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <textarea
+                  ref={blockCommentRef}
+                  className="diff-comment-input"
+                  placeholder="Add a comment... (Enter to add, Esc to cancel)"
+                  value={blockComment}
+                  onChange={(e) => setBlockComment(e.target.value)}
+                  onKeyDown={handleBlockCommentKeyDown}
+                  rows={2}
+                />
+                <div className="diff-comment-actions">
+                  <button className="btn btn-sm" onClick={() => { setBlockCommentTop(null); setBlockSel(null); setBlockComment(""); }}>
+                    cancel
+                  </button>
+                  <button className="btn btn-primary btn-sm" onClick={handleAddBlockComment} disabled={!blockComment.trim()}>
+                    add comment
+                  </button>
+                </div>
               </div>
-            </div>
-            );
-          })()}
+            )}
+          </div>
         </>
       ) : (
         <div className="plan-empty">no plan yet — ask the agent to create one</div>

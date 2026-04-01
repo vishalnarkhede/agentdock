@@ -2711,6 +2711,37 @@ h1 {
   opacity: 0.8;
 }
 
+/* Selected block highlight (drag selection) */
+.plan-block-selected {
+  background: rgba(129, 140, 248, 0.15);
+  border-radius: 2px;
+}
+
+.plan-block-selected .plan-gutter-btn {
+  display: flex;
+  background: var(--accent);
+}
+
+/* Inline comment box that appears below selected blocks */
+.plan-block-comment-box {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+}
+
+.plan-block-comment-box .diff-comment-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .plan-tab-wrap {
   position: relative;
   display: inline-flex;
