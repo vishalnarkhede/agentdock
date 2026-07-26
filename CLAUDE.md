@@ -61,7 +61,8 @@ server/src/
     quick.ts                  # Quick actions (Slack-to-fix)
     repos.ts, tickets.ts, upload.ts, db.ts
   hooks/
-    status-hook.sh            # Claude Code lifecycle hook script
+    status-hook.sh            # Claude Code lifecycle hook script (status)
+    plan-hook.sh              # PostToolUse hook — captures plan-mode files
   prompts/
     system-prompt.md          # System prompt template injected into every Claude session
 
@@ -106,6 +107,10 @@ No database. Each piece of data is a separate file:
 | `sessions/{name}.type` | Session type label |
 | `sessions/{name}.skip-perms` | Flag file (presence = true) |
 | `sessions/{name}.parent` | Parent session name (sub-agents) |
+| `plans/{name}.md` | Plan from an agent AgentDock launched |
+| `plans/external-{paneId}.md` | Plan captured by `plan-hook.sh` from a user-started pane |
+
+Use `PLANS_DIR_PATH` from `config.ts` for the plans directory — it follows `AGENTDOCK_CONFIG_DIR`. A second hardcoded `~/.config/agentdock/plans` sends agents somewhere `getPlan()` does not read, and `getPlan()` has no fallback, so the miss is silent.
 
 ### Session Creation Flow
 
@@ -113,12 +118,15 @@ No database. Each piece of data is a separate file:
 CreateSession.tsx → POST /api/sessions → startSession() →
   1. Resolve repo aliases → RepoConfig
   2. Create worktrees if isolated (git worktree add)
-  3. launchAgent() → tmux.createSession() + send agent command
+  3. launchAgent() → tmux.createSession() with `exec <agent cmd>`
+     (passed to new-session, not send-keys; exec keeps
+      pane_current_command == the agent, and remain-on-exit=failed
+      keeps a failed launch on screen instead of killing the session)
   4. Save metadata files (.agent, .meta, .skip-perms, etc.)
   5. Return session names → Dashboard polls and displays
 ```
 
-### Status Detection (5 Claude Code hooks)
+### Status Detection (5 status hooks)
 
 Hooks write to `/tmp/agentdock-status/{sessionName}`:
 
@@ -130,7 +138,9 @@ Hooks write to `/tmp/agentdock-status/{sessionName}`:
 | `Stop` | waiting | Claude finished responding |
 | `Notification` | waiting | Idle at prompt |
 
-Terminal pattern matching is **fallback only** for Cursor Agent (no hooks). Never add more terminal scanning for Claude — hooks are the source of truth.
+Terminal pattern matching is **fallback only** for Cursor Agent (no hooks). Hooks are the source of truth for Claude, with one exception: a `working` hook can go stale when Claude exits or is interrupted without a `Stop` hook firing. Screen content may therefore **demote** a `working` hook — a visible prompt or an "interrupted/cancelled" line drops it through to the terminal heuristics — but it may never **promote** one, and it must never originate a Claude status. Don't add terminal scanning beyond that carve-out.
+
+Note there are **six** hooks registered in total: the five status hooks above, plus `plan-hook.sh` on `PostToolUse` (see Plan Capture).
 
 ### WebSocket Terminal Streaming
 
@@ -157,6 +167,19 @@ API: `GET /api/settings/preferences`, `PATCH /api/settings/preferences`
 `--bg`, `--bg-card`, `--text`, `--text-dim`, `--accent`, `--border`, `--red`, `--green`, `--cyan`, etc.
 
 **Important**: Several themes (especially glass) use semi-transparent rgba values for `--bg-card`, `--bg-input`, and `--border`. See the **UI & CSS Guidelines** section before using these variables.
+
+## Terminology
+
+The UI and the code deliberately use different words for the same object. Keep them apart:
+
+| Word | Means | Where it belongs |
+|---|---|---|
+| **agent** | The unit of work a user manages — one sidebar row, one terminal, one task | All UI copy and user-facing docs. Never "session". |
+| **agent type** | The tool it runs on (Claude / Cursor / Codex) | Anywhere the vendor is named. Never bare "agent" — a row *is* an agent, so "Agent: cursor" reads as a category error. Use `agentTypeLabel()` in `client/src/session-messages.ts` for the display name. |
+| **session** | The tmux session hosting an agent | Code, `/api/sessions`, `~/.config/agentdock/sessions/`, tmux naming, and prose that is literally about tmux. Not user-facing. |
+
+So `SessionInfo`, `session-manager.ts`, and `?session=` stay as they are — they name the
+tmux layer. A button label, tooltip, `aria-label`, tour step, or README bullet says "agent".
 
 ## Key Types
 
@@ -254,6 +277,8 @@ When asked to redesign a component or "fix UX":
 - **Client types.ts and server types.ts** must stay in sync (SessionInfo, CreateSessionRequest, AgentType).
 - **styles.css** is 5000+ lines. Search for the class name before adding new styles — it may already exist.
 - **Multi-repo sessions without a prompt** get a "wait for task" instruction so Claude doesn't auto-explore.
+- **Never gate status parsing on a list of Claude's UI words.** `status.ts` must ask what *started a new turn* (a `●` bullet, a live spinner, a submitted prompt), never enumerate the chrome it tolerates. Claude keeps adding elements — `Sautéed for 1m 28s`, a wrapped `⎿ Tip:`, `※ recap:` — and each one that a whitelist missed silently discarded the completion status and pinned finished agents to "working". Same rule for spinner detection: match the trailing `…`, not the verb. See the "survives unrecognised chrome" tests.
+- **Don't drop the `exec`** in `asInitialAgentCommand()`. It is what makes `#{pane_current_command}` the agent instead of the shell, and `isAgentCommand()` reads that field — losing it silently breaks `sessionHasAgentPane()`, external-pane discovery, and shell detection in `detectStatus()`. Pane survival is handled by `remain-on-exit`, not by keeping a shell in front of the agent.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

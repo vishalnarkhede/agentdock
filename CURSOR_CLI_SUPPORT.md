@@ -6,8 +6,8 @@ This document describes the Cursor CLI integration in agentdock, enabling users 
 
 agentdock originally supported only Claude Code. This enhancement adds support for Cursor Agent, allowing users to:
 
-1. **Choose agent type** when creating a new session (Claude or Cursor)
-2. **View current agent** in the session list
+1. **Choose agent type** when launching a new agent (Claude or Cursor)
+2. **View current agent type** in the agent list
 3. **Switch agents** mid-conversation while preserving context
 
 This is particularly useful when running out of tokens on one platform, or when you want to leverage different agent capabilities for different parts of a task.
@@ -86,24 +86,28 @@ Body: { agentType: "claude" | "cursor", contextMessage?: string }
 
 ### Frontend Components
 
-#### 1. Create Session Page (`client/src/pages/CreateSession.tsx`)
+#### 1. Create Agent Form (`client/src/pages/CreateSession.tsx`)
 
 **UI Changes:**
-- Added radio button selector for agent type (Claude / Cursor)
+- Added radio button selector for agent type (Claude / Codex / Cursor)
 - Defaults to Claude for backward compatibility
 - Agent type submitted with session creation request
 
+The form is normally reached as a modal from the dashboard; `/create` serves the
+same form on a page surface.
+
 **UI Screenshot (conceptual):**
 ```
-Session Name: [___________]
+Target: [Search repos and worktrees...]
 
-Repositories: [Select repos...]
+Agent:
+  (●) Claude    ( ) Codex    ( ) Cursor
 
-Agent Type:
-  ( ) Claude Code    (●) Cursor Agent
+Checkout:
+  (●) Selected checkout    ( ) Temporary worktree
 
-[✓] Isolated worktrees
-[✓] Skip permissions
+▸ Advanced
+    Agent name, templates, launch without prompts, custom properties
 
 [Launch]
 ```
@@ -111,11 +115,11 @@ Agent Type:
 #### 2. Dashboard (`client/src/pages/Dashboard.tsx`)
 
 **Changes:**
-- Session rows display agent type badge with emoji:
-  - 🤖 Claude for Claude Code
-  - 💻 Cursor for Cursor Agent
+- Agent rows display an agent type badge, rendered only for non-Claude types
+  (Claude is the default, so naming it on every row is noise). The display name
+  comes from `agentTypeLabel()` in `client/src/session-messages.ts`.
 - Passes agent type to `TerminalView` component
-- Refreshes session list after agent switch
+- Refreshes the agent list after agent switch
 
 #### 3. Terminal View (`client/src/components/TerminalView.tsx`)
 
@@ -146,22 +150,22 @@ export async function switchAgent(
 ### Styling (`client/src/styles.css`)
 
 **New Classes:**
-- `.agent-type-selector` - Container for radio buttons on create page
+- `.agent-type-selector` - Container for radio buttons on the create form
 - `.radio-label` - Radio button label styling (hover, checked states)
-- `.session-row-agent` - Agent type badge in session list
+- `.session-row-agent` - Agent type badge in the agent list
 
 ## Usage
 
-### Creating a Session with Cursor
+### Launching an Agent on Cursor
 
-1. Navigate to "new session" page
+1. Open the "New agent" modal — sidebar `+`, the empty state, or `Cmd+Shift+A`
 2. Select repos (optional)
-3. Choose "Cursor Agent" radio button
+3. Choose the "Cursor" radio button
 4. Click "Launch"
 
-### Switching Agents Mid-Session
+### Switching Agent Type Mid-Conversation
 
-1. Open an active session
+1. Open an active agent
 2. Click the "→ Cursor" (or "→ Claude") button in the terminal toolbar
 3. Confirm the switch in the dialog
 4. Wait 3-4 seconds for the new agent to initialize
@@ -232,11 +236,11 @@ When switching agents, the system:
 
 ### Manual Testing Checklist
 
-- [ ] Create new session with Claude - verify it starts correctly
-- [ ] Create new session with Cursor - verify it starts correctly
+- [ ] Launch a new agent on Claude - verify it starts correctly
+- [ ] Launch a new agent on Cursor - verify it starts correctly
 - [ ] Switch from Claude to Cursor - verify context is preserved
 - [ ] Switch from Cursor to Claude - verify context is preserved
-- [ ] View agent type badge in session list
+- [ ] View agent type badge in the agent list
 - [ ] Verify agent metadata files are created
 - [ ] Verify agent metadata files are cleaned up on session stop
 - [ ] Test with isolated worktrees

@@ -2,6 +2,12 @@
 
 This document describes how agentdock works under the hood: the tech stack, key subsystems, data flows, and design decisions.
 
+> **A note on "session" vs "agent".** The UI calls the thing a user manages an **agent** —
+> one row in the sidebar, one terminal, one task. Under the hood it is hosted by a tmux
+> **session**, and the code, API paths, and config files keep that name throughout. So
+> "session" below means the tmux session, not the user-facing object. The tool an agent
+> runs on (Claude / Cursor / Codex) is its **agent type**, never bare "agent".
+
 ---
 
 ## Stack
@@ -47,14 +53,17 @@ agentdock/
         quick.ts              # Quick actions (Slack-to-fix)
         templates.ts          # Session template CRUD
       hooks/
-        status-hook.sh        # Claude Code lifecycle hook script
+        status-hook.sh        # Claude Code lifecycle hook script (status)
+        plan-hook.sh          # PostToolUse hook — captures plan-mode files
       prompts/
         system-prompt.md      # System prompt injected into every Claude session
   client/               # React + Vite SPA
     src/
       pages/
-        Dashboard.tsx         # Session list + terminal/plan/changes/files split view
-        CreateSession.tsx     # Session creation form
+        Dashboard.tsx         # Agent list + terminal/plan/review/explorer split view
+        CreateSession.tsx     # Agent creation form — CreateSessionForm has a
+                              # `surface: "page" | "modal"` split; the dashboard
+                              # mounts CreateSessionModal, /create serves the page
         Login.tsx             # Auth page
       components/
         Header.tsx            # Navbar, quick actions, ngrok, settings
@@ -83,16 +92,27 @@ CreateSession.tsx
       2. If isolated: git worktree add .worktrees/{slug}/{alias} -b wt-{shortId}
       3. launchAgent()
          a. checkAgentInstalled() — throws human-readable error if CLI missing
-         b. tmux new-session -d -s {name} -c {workdir}
-         c. Write system prompt to /tmp/agentdock-prompt-{name}.md
-         d. Write initial task to /tmp/agentdock-task-{name}.md
-         e. tmux send-keys: "claude --allowedTools ... < task-file"
-         f. Sleep 500ms, send Enter to dismiss trust prompt
+         b. Write system prompt to /tmp/agentdock-system-prompts/{name}.txt
+         c. tmux new-session -d -s {name} -c {workdir} "exec <agent cmd>"
+            \; set-option -t {name} remain-on-exit failed
+         d. acceptClaudeStartupPrompts() — poll the pane for Claude's
+            Bypass-Permissions and trust-folder prompts, answer each as it appears
+         e. If there is an initial task: write it to /tmp/agentdock-prompts/{name}.md,
+            let the TUI settle, then sendKeysRaw a "read the instructions in <file>"
       4. Save metadata: .agent, .meta, .skip-perms, .type, .parent
       5. Return { sessionNames: [...] }
 ```
 
-Session names follow the pattern `claude-{alias}` (or `cursor-{alias}`). The `PREFIX` constant (`"claude-"`) is defined in `config.ts`.
+The agent command is passed to `tmux new-session` directly rather than typed in with `send-keys` — an interactive shell starting up would otherwise swallow the keystrokes.
+
+Two details there are load-bearing:
+
+- **`exec`** makes the agent the pane's own process, so `#{pane_current_command}` reports `claude` / `codex` / `agent`. `isAgentCommand()` reads that field, and through it `sessionHasAgentPane()`, external-pane discovery, and the shell branch of `detectStatus()`. Run the agent as a child of the shell instead and every agent pane reports `zsh`.
+- **`remain-on-exit failed`** keeps the pane, and so the session, alive when the command exits non-zero. An agent that is not on `PATH` exits 127 the instant it starts; without this the session is gone before the error can be read. A clean exit still closes the pane as before. It is chained into the same `tmux` invocation because as a second call a fast failure beats it. The value requires tmux 3.4+; on older tmux the chain is rejected and the session is created without it.
+
+Startup prompts are polled for, not slept on. `acceptClaudeStartupPrompts()` captures the pane until it recognises a prompt, so a slow boot no longer races a fixed delay.
+
+Session names follow the pattern `claude-{alias}` (or `cursor-{alias}`). The `PREFIX` constant (`"claude-"`) is defined in `config.ts`. When a name is already taken, `startSession()` reuses the existing session if it hosts an agent of the same type, and otherwise launches under `claude-{alias}-{4 base36 chars}`.
 
 ### Worktree Isolation
 
@@ -128,17 +148,17 @@ When a session is stopped (e.g. after a reboot), its Claude conversation history
 3. Extract the UUID from the filename
 4. Launch: `claude --resume {uuid} ...`
 
-This bypasses Claude's interactive session picker entirely.
+This bypasses Claude's interactive session picker entirely. Restore uses the same launch path as creation — the resume command goes to `tmux new-session` with the same fallback-shell wrapper, followed by `acceptClaudeStartupPrompts()`.
 
 ---
 
 ## Status Detection
 
-Agent status (`waiting` / `working` / `background` / `shell` / `unknown`) is the core UX signal — it drives the colored dot on each session row.
+Agent status (`waiting` / `working` / `background` / `shell` / `unknown`) is the core UX signal — it drives the status icon on each agent row (a bordered tile with a per-status emoji, from `statusIcon()` in `Dashboard.tsx`).
 
 ### Primary: Claude Code Hooks
 
-Five hooks write to `/tmp/agentdock-status/{sessionName}`:
+Five status hooks write to `/tmp/agentdock-status/{sessionName}`:
 
 | Hook | Status written | Fires when |
 |---|---|---|
@@ -166,6 +186,12 @@ For Cursor Agent (no hook support) or before hooks report, `detectStatus()` in `
 - **Working** — spinner characters (`⠋⠙⠹`), cooking animation, "Thinking...", Cursor's progress lines → `working`
 - **Waiting** — Claude prompt (`❯`), Cursor prompt (`>`) with no input → `waiting`
 
+### Stale-hook demotion
+
+A `working` hook can outlive the work: Claude may exit or be interrupted without a `Stop` hook firing, leaving the last written status at `working` until it expires. So screen content is allowed to **demote** a `working` hook — a visible prompt or an "interrupted/cancelled" line drops it through to the terminal heuristics above, where a spinner still resolves to `working` and a bare prompt to `unknown`.
+
+The direction is one-way. Terminal content never promotes a hook status and never originates a Claude status; it only withdraws a `working` claim the screen contradicts.
+
 ### Status Line
 
 Agents can also emit a structured status line anywhere in their terminal output:
@@ -176,7 +202,7 @@ Agents can also emit a structured status line anywhere in their terminal output:
 [STATUS: error | build failed: missing dependency]
 ```
 
-`extractStatusLine()` in `status.ts` scans terminal content for this pattern and surfaces it in the UI below the session name.
+`extractStatusLine()` in `status.ts` scans terminal content for this pattern and surfaces it in the UI below the agent name.
 
 ---
 
@@ -228,7 +254,8 @@ All state lives in `~/.config/agentdock/` — no database required.
 | `sessions/{name}.skip-perms` | Presence = dangerously skip permissions |
 | `sessions/{name}.parent` | Parent session name (for sub-agents) |
 | `auth-password` | Bcrypt hash of the dashboard password |
-| `plans/{sessionName}.md` | Structured plan written by the agent |
+| `plans/{sessionName}.md` | Structured plan written by an agent AgentDock launched |
+| `plans/external-{paneId}.md` | Plan captured by `plan-hook.sh` from an agent the user started in their own tmux pane |
 | `mcp-servers.json` | MCP server definitions, synced to Claude config |
 
 Config operations are all synchronous file I/O — intentionally simple, no locking needed for typical usage.
@@ -239,13 +266,21 @@ Config operations are all synchronous file I/O — intentionally simple, no lock
 
 Every Claude session gets a system prompt injected via a file at `/tmp/agentdock-prompt-{name}.md`. The prompt template lives in `server/src/prompts/system-prompt.md` and has two template variables replaced at runtime:
 
-- `{{PLANS_DIR}}` → `~/.config/agentdock/plans/`
+- `{{PLANS_DIR}}` → the config dir's `plans/` (`~/.config/agentdock/plans/` by default, or under `AGENTDOCK_CONFIG_DIR`). It comes from `PLANS_DIR_PATH` in `config.ts`, the same constant `getPlan()` reads — don't reintroduce a second hardcoded path here, or agents will write where nothing looks.
 - `{{SESSION_NAME}}` → the tmux session name
 
 The prompt instructs Claude to:
 - Write structured plans to `{{PLANS_DIR}}/{{SESSION_NAME}}.md`
 - Emit `[STATUS: done|input|error | message]` lines so the UI can surface progress
 - Follow the hooks-based status reporting convention
+
+### Plan Capture
+
+The system prompt covers agents AgentDock launches, and is agent-agnostic — it works for Codex and Cursor, which have no plan mode. It cannot reach an agent the user started themselves in their own tmux pane, since that agent never sees AgentDock's prompt.
+
+`plan-hook.sh` is the backstop. Registered as a **synchronous `PostToolUse` hook with matcher `Write|Edit`** by `syncHooksToClaudeSettings()`, it watches for writes to `*/.claude/plans/*.md` and copies them into the plans dir, keyed by session name for AgentDock's own sessions and by `external-{paneId}` otherwise. It requires `jq`, and exits silently without it.
+
+Note `getPlan()` has no fallback: if there is no file for the requested key, the Plan tab shows nothing. It used to return the most recently modified plan in the directory, which confidently showed one agent's plan under another's name.
 
 ---
 
@@ -290,11 +325,11 @@ On session stop, `removeSessionWorkspace()` deletes the `.worktrees/{slug}/` dir
 
 ## Sub-Agents
 
-A session can spawn sub-agents to parallelize work across repos. Sub-agents are child tmux sessions with a `parent` pointer stored in `sessions/{name}.parent`.
+An agent can spawn sub-agents to parallelize work across repos. Sub-agents are child tmux sessions with a `parent` pointer stored in `sessions/{name}.parent`.
 
 The parent session orchestrates via `tmux send-keys` to each child. The `SubagentStop` hook fires when a child finishes, keeping the parent's status as `working` until all children complete.
 
-Sub-agents are shown in a collapsed tree under the parent session in the UI.
+Sub-agents are shown in a collapsed tree under the parent agent in the UI.
 
 ---
 

@@ -2,7 +2,7 @@
 
 A web dashboard for managing parallel AI coding agents across multiple repositories. Run [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Cursor Agent](https://docs.cursor.com/agent), or other agents side-by-side in tmux sessions with git worktree isolation — all from your browser.
 
-Create sessions, watch live terminal output, type input, switch between agents mid-conversation, and manage everything through a clean web UI or CLI — including from your phone or tablet with a mobile-optimized interface.
+Launch agents, watch live terminal output, type input, switch between agents mid-conversation, and manage everything through a clean web UI or CLI — including from your phone or tablet with a mobile-optimized interface.
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/cf8f345c-7a43-44b1-8346-831dc6751923" />
 
@@ -20,21 +20,21 @@ If any of that sounds familiar, this is for you. If you're using it and want to 
 
 - **Claude Code first** — built and optimised for Claude Code; Cursor Agent support exists but is experimental (see [AGENTS.md](./AGENTS.md) to add your own)
 - **Agent switching** — Switch between agents mid-conversation with context preservation
-- **Git worktrees** — Isolate work with automatic worktree creation per session
-- **Multi-repo sessions** — Work across multiple repositories in a single grouped session
+- **Git worktrees** — Isolate work with automatic worktree creation per agent
+- **Multi-repo agents** — Work across multiple repositories from a single grouped agent
 - **Live terminal** — Stream agent output in real-time via WebSocket + xterm.js
-- **Session restore** — Restore stopped sessions with full conversation history intact
-- **Plan tab** — Agents save structured plans; send follow-up messages directly from the plan view
-- **Changes tab** — Live git diff viewer with inline commenting
-- **Files explorer** — Browse and open files from the session's repo with in-file search (Cmd+F)
+- **Agent restore** — Restore stopped agents with full conversation history intact
+- **Plan tab** — Agents save structured plans; send follow-up messages directly from the plan view. Agents you start yourself in a tmux pane are covered too, via a `PostToolUse` hook that captures Claude Code's plan-mode files (needs `jq`)
+- **Review tab** — Live git diff viewer with inline commenting
+- **Explorer tab** — Browse and open files from the agent's repo with in-file search (Cmd+F)
 - **Status detection** — Real-time working/waiting/done status via Claude Code hooks
-- **Prompt templates** — Save and reuse common prompts across sessions
-- **Session grouping** — Organize sessions by project or team
-- **Session pinning** — Pin important sessions to the top of the list
-- **Meta-properties** — Attach custom key-value properties to sessions for context
-- **Quick actions** — Fix-me button and Slack-to-fix for one-click session creation from issues
+- **Prompt templates** — Save and reuse common prompts across agents
+- **Agent grouping** — Organize agents by project or team
+- **Agent pinning** — Pin important agents to the top of the list
+- **Meta-properties** — Attach custom key-value properties to agents for context
+- **Quick actions** — Fix-me button and Slack-to-fix for launching an agent from an issue in one click
 - **Ngrok integration** — Expose the dashboard over the internet with a single toggle
-- **Keyboard shortcuts** — MRU session switcher, fullscreen terminal, and more
+- **Keyboard shortcuts** — MRU agent switcher, fullscreen terminal, and more
 - **Collapsible sidebar** — Maximize terminal space with one click
 - **Mobile-friendly UI** — Manage agents from your phone or tablet
 - **Browser notifications** — Get notified when agents finish or need input
@@ -54,6 +54,7 @@ If any of that sounds familiar, this is for you. If you're using it and want to 
 | [Node.js](https://nodejs.org/) | ✅ | Client build (npx) | `brew install node` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ | AI agent | `npm install -g @anthropic-ai/claude-code` |
 | [gh CLI](https://cli.github.com/) | ⚪ optional | PR / GitHub features | `brew install gh` |
+| [jq](https://jqlang.github.io/jq/) | ⚪ optional | Plan capture from your own tmux panes | `brew install jq` • `apt install jq` |
 | [Cursor Agent](https://docs.cursor.com/agent) | ⚪ optional | Alternative agent (experimental) | via Cursor IDE |
 
 After installing Claude Code, authenticate before first use:
@@ -181,29 +182,29 @@ MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be ad
 
 ### Recommended: Session Persistence
 
-[Cortex](https://github.com/hjertefolger/cortex) adds persistent local memory to Claude Code sessions. It automatically archives context to a local SQLite database and enables cross-session recall using hybrid semantic + keyword search. Works seamlessly inside agentdock sessions — install it in your Claude Code MCP config and memories will persist across session restarts, compactions, and token limit resets.
+[Cortex](https://github.com/hjertefolger/cortex) adds persistent local memory to Claude Code sessions. It automatically archives context to a local SQLite database and enables cross-session recall using hybrid semantic + keyword search. Works seamlessly with agents launched from agentdock — install it in your Claude Code MCP config and memories will persist across session restarts, compactions, and token limit resets.
 
 ## How It Works
 
 > For a deep dive into the internals, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-1. **Create a session** — pick repos, optionally enable worktree isolation
+1. **Launch an agent** — a modal opens from the sidebar `+`, the empty state, or `Cmd+Shift+A`; pick repos, optionally enable worktree isolation
 2. **Agent launches** in a tmux session with appropriate permissions for file edits, git, and GitHub CLI
 3. **Status is tracked** via Claude Code lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, etc.) that write to `/tmp/agentdock-status/` — no terminal scraping needed
 4. **Watch live output** — the terminal view streams `tmux capture-pane` over WebSocket at ~200ms intervals
 5. **Type input** — keystrokes are forwarded to the tmux pane via `tmux send-keys`
-6. **View the plan** — agents save structured plans to `~/.config/agentdock/plans/` which appear in the Plan tab; send follow-up messages directly from there
-7. **Browse changes** — the Changes tab shows a live git diff of all modified files
-8. **Restore** — stopped sessions can be restored with full Claude conversation history, bypassing the interactive picker for reliability
+6. **View the plan** — agents save structured plans to `~/.config/agentdock/plans/` which appear in the Plan tab; send follow-up messages directly from there. If an agent has not written one, the tab stays empty rather than showing another agent's plan
+7. **Review changes** — the Review tab shows a live git diff of all modified files
+8. **Restore** — stopped agents can be restored with full Claude conversation history, bypassing the interactive picker for reliability
 9. **Stop** — kills the tmux session and cleans up any worktrees
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+[` / `Ctrl+Shift+]` | Switch to previous/next session (MRU order) |
-| `Cmd+F` | In-file search (when Files tab is open) |
-| `Esc` | Collapse plan/changes/files panel |
+| `Ctrl+Shift+[` / `Ctrl+Shift+]` | Switch to previous/next agent (MRU order) |
+| `Cmd+F` | In-file search (when Explorer tab is open) |
+| `Esc` | Collapse plan/review/explorer panel |
 | Fullscreen button | Expand terminal to full window |
 
 ## Architecture
@@ -234,13 +235,13 @@ agentdock/
   client/                 # React + Vite + xterm.js (port 5173)
     src/
       pages/
-        Dashboard.tsx         # Split-panel: session list + terminal/plan/changes/files
-        CreateSession.tsx     # New session form with repo search + templates
+        Dashboard.tsx         # Split-panel: agent list + terminal/plan/review/explorer
+        CreateSession.tsx     # New agent form (modal + page surfaces), repo search, templates
       components/
         TerminalView.tsx      # xterm.js + WebSocket streaming
         ChangesView.tsx       # Git diff viewer with inline commenting
         FileExplorer.tsx      # File browser with in-file search
-        Header.tsx            # Quick actions, ngrok, session controls
+        Header.tsx            # Quick actions, ngrok, agent controls
 ```
 
 ## Adding a New Agent
@@ -252,7 +253,7 @@ agentdock is designed to support any CLI-based coding agent. See [AGENTS.md](./A
 - **Local-first** — server binds to `localhost` by default
 - **No external dependencies** — all data stored in local files, no database or cloud services
 - **Optional auth** — password protection via hashed tokens stored in `~/.config/agentdock/auth-password`
-- **Agent isolation** — each session runs in its own tmux session with configurable tool permissions
+- **Agent isolation** — each agent runs in its own tmux session with configurable tool permissions
 
 For security issues, please see [SECURITY.md](./SECURITY.md).
 
@@ -281,8 +282,8 @@ Yes — set a password in `~/.config/agentdock/auth-password` and access the UI 
 **How does status detection work?**
 Claude Code sessions use lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, `SubagentStop`) that write status files to `/tmp/agentdock-status/`. This gives accurate working/waiting/done state without parsing terminal output. Cursor Agent uses terminal pattern matching as a fallback since it doesn't support hooks.
 
-**How does session restore work?**
-When a session is stopped (e.g. after a reboot), agentdock finds the most recent Claude conversation UUID from `~/.claude/projects/` and passes it directly to `claude --resume <uuid>`, bypassing Claude's interactive session picker entirely.
+**How does agent restore work?**
+When an agent is stopped (e.g. after a reboot), agentdock finds the most recent Claude conversation UUID from `~/.claude/projects/` and passes it directly to `claude --resume <uuid>`, bypassing Claude's interactive session picker entirely.
 
 ## Contributing
 
