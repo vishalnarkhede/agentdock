@@ -8,8 +8,19 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WEB_UI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_DIR="${HOME}/.config/agentdock"
+APP_DIR_FILE="${CONFIG_DIR}/install-dir"
+# Normalize PATH for GUI/launcher contexts where shell startup files are not loaded.
+export PATH="/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+WEB_UI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -n "${AGENTDOCK_APP_DIR:-}" && -d "${AGENTDOCK_APP_DIR}" ]]; then
+  WEB_UI_DIR="$(cd "$AGENTDOCK_APP_DIR" && pwd)"
+elif [[ -f "$APP_DIR_FILE" ]]; then
+  configured_app_dir="$(cat "$APP_DIR_FILE" | tr -d '[:space:]')"
+  if [[ -n "$configured_app_dir" && -d "$configured_app_dir" ]]; then
+    WEB_UI_DIR="$(cd "$configured_app_dir" && pwd)"
+  fi
+fi
 LINEAR_KEY_FILE="${CONFIG_DIR}/linear-api-key"
 SESSIONS_DIR="${CONFIG_DIR}/sessions"
 PREFIX="claude"
@@ -95,7 +106,7 @@ Commands:
   attach   Attach to a session (use name from 'list')
   stop     Kill tmux session(s) and clean up worktrees
   repos    Show configured repo aliases
-  web      Open the web dashboard (http://localhost:5173)
+  web      Open the web dashboard (https://localhost:5173 by default)
 
 Options for 'start':
   -r                Group all aliases into ONE session (cross-repo agent)
@@ -525,6 +536,16 @@ cmd_stop() {
 }
 
 cmd_web() {
+  local server_port="${PORT:-${SERVER_PORT:-4800}}"
+  local ui_port="${VITE_PORT:-5173}"
+  local host="${AGENTDOCK_HOST:-127.0.0.1}"
+  local display_host="$host"
+  if [[ "$display_host" == "0.0.0.0" || "$display_host" == "127.0.0.1" ]]; then
+    display_host="localhost"
+  fi
+  local server_url="http://${display_host}:${server_port}"
+  local ui_url="https://${display_host}:${ui_port}"
+
   # Ensure bun is available
   local bun_bin="${HOME}/.bun/bin/bun"
   if [[ ! -x "$bun_bin" ]]; then
@@ -537,12 +558,20 @@ cmd_web() {
   fi
 
   echo "starting web dashboard..."
-  echo "  server: http://localhost:4800"
-  echo "  UI:     http://localhost:5173"
+  echo "  server: ${server_url}"
+  echo "  UI:     ${ui_url}"
   echo ""
 
-  (sleep 2 && open "http://localhost:5173" 2>/dev/null) &
+  if command -v open &>/dev/null; then
+    (sleep 2 && open "$ui_url" 2>/dev/null) &
+  elif command -v xdg-open &>/dev/null; then
+    (sleep 2 && xdg-open "$ui_url" 2>/dev/null) &
+  fi
 
+  export PORT="$server_port"
+  export SERVER_PORT="$server_port"
+  export VITE_PORT="$ui_port"
+  export AGENTDOCK_HOST="$host"
   exec "$bun_bin" run --cwd "$WEB_UI_DIR" dev
 }
 

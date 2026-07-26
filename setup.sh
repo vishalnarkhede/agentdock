@@ -16,15 +16,20 @@ echo ""
 
 # 0. Create config directory
 mkdir -p "$CONFIG_DIR"
+echo "$SCRIPT_DIR" > "${CONFIG_DIR}/install-dir"
 
 # 1. Check / install bun
 if command -v bun &>/dev/null; then
   echo "[ok] bun $(bun --version)"
 else
-  echo "[installing] bun..."
-  curl -fsSL https://bun.sh/install | bash
-  export PATH="${HOME}/.bun/bin:${PATH}"
-  echo "[ok] bun $(bun --version)"
+  echo "[missing] bun not found"
+  echo "  Install Bun, then rerun ./setup.sh:"
+  if command -v brew &>/dev/null; then
+    echo "    brew install bun"
+  else
+    echo "    https://bun.com/docs/installation"
+  fi
+  exit 1
 fi
 
 # 2. Check / install tmux
