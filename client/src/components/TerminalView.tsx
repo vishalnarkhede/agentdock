@@ -8,7 +8,8 @@ import "@xterm/xterm/css/xterm.css";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
-import { openInIterm, uploadFile, switchAgent } from "../api";
+import { openTerminal, uploadFile, switchAgent, fetchSettingsHealth, type SettingsHealth } from "../api";
+import { SwitchAgentModal } from "./SwitchAgentModal";
 
 import type { AgentType } from "../types";
 
@@ -44,6 +45,28 @@ const DARK_TERM_THEME = {
   brightWhite: "#c0caf5",
 };
 
+const AURORA_TERM_THEME = {
+  foreground: "#c0caf5",
+  cursor: "#f9e2af",
+  selectionBackground: "#3b4261",
+  black: "#15161e",
+  red: "#f7768e",
+  green: "#b9f27c",
+  yellow: "#ffd866",
+  blue: "#7aa2f7",
+  magenta: "#bb9af7",
+  cyan: "#7dcfff",
+  white: "#c0caf5",
+  brightBlack: "#565f89",
+  brightRed: "#ff8fa3",
+  brightGreen: "#c3f88a",
+  brightYellow: "#ffe98a",
+  brightBlue: "#9ab8ff",
+  brightMagenta: "#d4b2ff",
+  brightCyan: "#9be8ff",
+  brightWhite: "#ffffff",
+};
+
 const LIGHT_TERM_THEME = {
   foreground: "#24292e",
   cursor: "#044289",
@@ -70,8 +93,47 @@ function getTermTheme() {
   const appTheme = document.documentElement.getAttribute("data-theme") || "terminal";
   const cs = getComputedStyle(document.documentElement);
   const bg = cs.getPropertyValue("--term-bg").trim() || "#1a1b26";
-  const colors = LIGHT_THEMES.has(appTheme) ? LIGHT_TERM_THEME : DARK_TERM_THEME;
+  const colors = appTheme === "aurora"
+    ? AURORA_TERM_THEME
+    : LIGHT_THEMES.has(appTheme)
+      ? LIGHT_TERM_THEME
+      : DARK_TERM_THEME;
   return { background: bg, ...colors };
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      if (navigator.clipboard.readText) {
+        try {
+          return (await navigator.clipboard.readText()) === text;
+        } catch {
+          // Some browsers allow writes but deny reads; a resolved write still counts.
+        }
+      }
+      return true;
+    }
+  } catch {
+    // Fall back to a temporary textarea below.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 interface Props {
@@ -80,27 +142,97 @@ interface Props {
   onClosed?: () => void;
   onAgentSwitched?: () => void;
   toolbarPortal?: React.RefObject<HTMLDivElement | null>;
+  fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
+  onFullscreenChange?: (fullscreen: boolean) => void;
+  onFullscreenPanelShortcut?: () => boolean;
   onSwipeBack?: () => void;
   onKeyboardVisibilityChange?: (visible: boolean) => void;
   isActive?: boolean;
+  /** View-only stream: the pane belongs to a terminal the user is attached to. */
+  readOnly?: boolean;
+  /**
+   * Rendered inside a panel that supplies its own chrome — the Shell tab.
+   * Drops the connection status and the agent-session affordances (Open in
+   * Terminal, Maximize, Fullscreen), which either duplicate the panel's own
+   * controls or refer to an agent this terminal is not. Esc stays: it is the one
+   * control that acts on the shell itself.
+   */
+  embedded?: boolean;
 }
 
-export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive }: Props) {
+export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, fullscreenTargetRef, onFullscreenChange, onFullscreenPanelShortcut, onSwipeBack, onKeyboardVisibilityChange, isActive, readOnly, embedded }: Props) {
   const { settings, updateSetting } = useSettings();
+  const fullscreenRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  // Read through a ref: handleData is a useCallback with empty deps, so reading
+  // settings directly there would freeze the value at first render and a toggle
+  // in Settings would not take effect until the terminal remounted.
+  // 5 = blinking bar, 6 = steady bar (DECSCUSR).
+  const cursorShapeRef = useRef("\x1b[5 q");
+  cursorShapeRef.current = settings.cursorBlink ? "\x1b[5 q" : "\x1b[6 q";
   const [lastContent, setLastContent] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenMode, setFullscreenMode] = useState<"none" | "browser" | "app">("none");
+  const fullscreen = fullscreenMode !== "none";
+  const browserFullscreen = fullscreenMode === "browser";
   const [dragging, setDragging] = useState(false);
   const [focused, setFocused] = useState(true);
   const [switchingAgent, setSwitchingAgent] = useState(false);
   const [switchStep, setSwitchStep] = useState("");
+  const [switchModalOpen, setSwitchModalOpen] = useState(false);
+  const [switchError, setSwitchError] = useState("");
+  const [agentHealth, setAgentHealth] = useState<SettingsHealth | null>(null);
+  const [agentHealthLoading, setAgentHealthLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showPasteInput, setShowPasteInput] = useState(false);
   const [pasteError, setPasteError] = useState("");
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const setFullscreenState = useCallback((value: boolean, mode: "browser" | "app" = "browser") => {
+    setFullscreenMode(value ? mode : "none");
+    onFullscreenChange?.(value);
+  }, [onFullscreenChange]);
+
+  const getFullscreenTarget = useCallback(() => {
+    return fullscreenTargetRef?.current ?? fullscreenRef.current;
+  }, [fullscreenTargetRef]);
+
+  const enterMaximized = useCallback(() => {
+    setFullscreenState(true, "app");
+  }, [setFullscreenState]);
+
+  const enterFullscreen = useCallback(async () => {
+    setFullscreenState(true, "browser");
+    const element = getFullscreenTarget();
+    if (!element?.requestFullscreen || document.fullscreenElement) return;
+    try {
+      await element.requestFullscreen();
+    } catch {
+      // Keep CSS fullscreen as a fallback when the browser API is unavailable or denied.
+    }
+  }, [getFullscreenTarget, setFullscreenState]);
+
+  const exitFullscreen = useCallback(async () => {
+    setFullscreenState(false);
+    const element = getFullscreenTarget();
+    if (document.fullscreenElement !== element) return;
+    try {
+      await document.exitFullscreen();
+    } catch {
+      // The CSS state is already cleared; browser fullscreen will clear itself if needed.
+    }
+  }, [getFullscreenTarget, setFullscreenState]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (fullscreen) void exitFullscreen();
+    else void enterFullscreen();
+  }, [enterFullscreen, exitFullscreen, fullscreen]);
+
+  const toggleMaximized = useCallback(() => {
+    if (fullscreen) void exitFullscreen();
+    else enterMaximized();
+  }, [enterMaximized, exitFullscreen, fullscreen]);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -124,6 +256,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
+
   // Custom keyboard only makes sense on mobile — never activate it on desktop
   // even if the preference was saved while on a mobile device.
   const customKb = settings.customKeyboard && window.innerWidth <= 900;
@@ -207,6 +340,14 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       fontSize: isMobile ? Math.min(settings.terminalFontSize, 13) : settings.terminalFontSize,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace",
       cursorBlink: settings.cursorBlink,
+      // A bar sits between characters, so it reads as an insertion point rather
+      // than as part of the captured tmux output the way a block does.
+      cursorStyle: "bar",
+      // The pair is the point: solid bar when this pane has keyboard focus,
+      // hollow outline when it does not. Several terminals are on screen at once,
+      // and without this there is nothing to say which one your typing reaches.
+      cursorInactiveStyle: "outline",
+      allowTransparency: true,
       disableStdin: false,
       convertEol: true,
       scrollback: settings.scrollback,
@@ -349,7 +490,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
     // Skip rendering when user has paused scrolling
     if (scrollPausedRef.current) {
-      // Still update lastContent so copy works with latest data
+      // Still update lastContent so notifications use the latest data.
       setLastContent(snapshot.content);
       return;
     }
@@ -359,13 +500,32 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     // \x1b[H = cursor to home, \x1b[2J = erase display, \x1bc = full reset (parser + screen).
     // Using \x1bc inside write() resets the ANSI parser AND clears the screen within
     // the same render pass, eliminating the flicker that term.reset() caused.
-    const row = snapshot.cursorY + 1;
+    // Place the cursor relative to the end of what was just written, not with an
+    // absolute \x1b[row;colH. Absolute rows are viewport coordinates, so they only
+    // land correctly when xterm's row count equals the tmux pane height AND
+    // nothing was trimmed off the end — neither holds reliably. On a full-screen
+    // TUI that drifts the cursor a few rows above the line it belongs on.
+    const body = snapshot.content.replace(/\n+$/, "");
+    // Newline *characters* stripped, which is one more than the blank rows they
+    // represent: capture-pane terminates the last row, so "…text\n\n\n" is one
+    // row of text followed by two blank rows. Subtracting the raw count put the
+    // cursor a row low. max(1, …) covers a capture with no trailing newline,
+    // where the last written row is simply the last pane row.
+    const trimmedNewlines = snapshot.content.length - body.length;
+    const lastWrittenPaneRow = Math.max(0, snapshot.paneHeight - Math.max(1, trimmedNewlines));
+    const rowsUp = Math.max(0, lastWrittenPaneRow - snapshot.cursorY);
     const col = snapshot.cursorX + 1;
+    // DECSCUSR has to be re-sent after every \x1bc: a full reset restores the
+    // cursor to the default block, so the constructor's cursorStyle only ever
+    // survived until the first snapshot landed.
+    const cursorShape = cursorShapeRef.current;
     term.write(
       "\x1bc" +         // full reset (parser + screen) — atomic with content below
       "\x1b[?25l" +     // hide cursor during render
-      snapshot.content.replace(/\n+$/, "") +
-      `\x1b[${row};${col}H` +
+      body +
+      (rowsUp > 0 ? `\x1b[${rowsUp}A` : "") + // up from the last written row
+      `\x1b[${col}G` +  // absolute column, unaffected by where the row ended
+      cursorShape +
       "\x1b[?25h"       // show cursor at final position
     );
     setLastContent(snapshot.content);
@@ -401,8 +561,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   }, [handleData]);
 
   const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(sessionName, handleWsData, onClosed);
-  sendInputRef.current = sendInput;
-  sendShiftEnterRef.current = sendShiftEnter;
+  // Every path that writes to the pane — keystrokes, paste, the mobile keyboard —
+  // funnels through these two refs, so read-only is enforced in one place. The
+  // server drops writes for external agents regardless; this keeps the UI honest.
+  sendInputRef.current = readOnly ? () => {} : sendInput;
+  sendShiftEnterRef.current = readOnly ? () => {} : sendShiftEnter;
   const sendResizeRef = useRef<(cols: number, rows: number) => void>(() => {});
   sendResizeRef.current = sendResize;
 
@@ -428,15 +591,76 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [fullscreen]);
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const element = getFullscreenTarget();
+      if (document.fullscreenElement === element) {
+        setFullscreenState(true, "browser");
+      } else if (!document.fullscreenElement) {
+        setFullscreenState(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [getFullscreenTarget, setFullscreenState]);
+
+  useEffect(() => {
+    return () => onFullscreenChange?.(false);
+  }, [onFullscreenChange]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === "q" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        if (onFullscreenPanelShortcut?.()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (event.key === "Escape" && !document.fullscreenElement) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (onFullscreenPanelShortcut?.()) return;
+        void exitFullscreen();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [exitFullscreen, fullscreen, onFullscreenPanelShortcut]);
+
   useNotifications(sessionName, lastContent, settings.notificationsEnabled);
 
 
-  const handleSwitchAgent = useCallback(async () => {
-    if (!agentType) return;
-    
-    const newAgentType: AgentType = agentType === "claude" ? "cursor" : "claude";
-    if (!confirm(`Switch from ${agentType} to ${newAgentType}?`)) return;
-    
+  useEffect(() => {
+    if (!switchModalOpen) return;
+    let cancelled = false;
+    setAgentHealthLoading(true);
+    fetchSettingsHealth()
+      .then((health) => {
+        if (!cancelled) setAgentHealth(health);
+      })
+      .catch(() => {
+        if (!cancelled) setAgentHealth(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAgentHealthLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [switchModalOpen]);
+
+  const openSwitchAgentModal = useCallback(() => {
+    setSwitchError("");
+    setSwitchModalOpen(true);
+  }, []);
+
+  const handleSwitchAgent = useCallback(async (newAgentType: AgentType) => {
+    if (!agentType || newAgentType === agentType || switchingAgent) return;
+
+    setSwitchModalOpen(false);
+    setSwitchError("");
     setSwitchingAgent(true);
     setSwitchStep("Starting switch...");
     try {
@@ -448,12 +672,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       );
       onAgentSwitched?.();
     } catch (err: any) {
-      alert(`Failed to switch agent: ${err.message}`);
+      setSwitchError(err?.message || "Failed to switch agent");
+      setSwitchModalOpen(true);
     } finally {
       setSwitchingAgent(false);
       setSwitchStep("");
     }
-  }, [sessionName, agentType, onAgentSwitched]);
+  }, [sessionName, agentType, onAgentSwitched, switchingAgent]);
 
 
 
@@ -506,23 +731,12 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
   const toolbarContent = (
     <div className={`terminal-toolbar ${connected ? "connected" : "disconnected"}`}>
-      <span className="terminal-toolbar-status">
-        {connected ? "Connected" : "Connecting..."}
-      </span>
+      {!embedded && (
+        <span className="terminal-toolbar-status">
+          {connected ? "Connected" : "Connecting..."}
+        </span>
+      )}
       <div className="terminal-status-actions">
-        {lastContent && (
-          <button
-            className="terminal-copy-btn"
-            onClick={() => {
-              const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-              navigator.clipboard.writeText(clean.trim());
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? "copied" : "copy"}
-          </button>
-        )}
         {connected && (
           <button
             className="terminal-copy-btn terminal-esc-btn"
@@ -532,44 +746,72 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             Esc
           </button>
         )}
-        {connected && (
+        {readOnly && (
+          <span className="terminal-readonly-tag" title="Agentdock did not start this agent, so it is view-only">
+            read-only
+          </span>
+        )}
+        {connected && !readOnly && !embedded && (
           <button
-            className="terminal-copy-btn"
-            onClick={() => openInIterm(sessionName)}
-            title="Open in iTerm2"
+            className="terminal-copy-btn terminal-open-external-btn"
+            onClick={() => openTerminal(sessionName)}
+            title="Open this agent's tmux session in your terminal app"
           >
-            iTerm
+            Open in Terminal
           </button>
         )}
-        {agentType && connected && (
+        {agentType && connected && !readOnly && (
           <button
             className="terminal-copy-btn"
-            onClick={handleSwitchAgent}
+            onClick={openSwitchAgentModal}
             disabled={switchingAgent}
-            title={`Switch to ${agentType === "claude" ? "Cursor" : "Claude"}`}
+            title="Switch agent"
           >
-            {switchingAgent ? "..." : agentType === "claude" ? "→ Cursor" : "→ Claude"}
+            {switchingAgent ? "..." : "Switch agent"}
           </button>
         )}
-        <button
-          className="terminal-copy-btn"
-          onClick={() => setFullscreen((f) => !f)}
-          title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
-        >
-          {fullscreen ? "exit" : "full"}
-        </button>
+        {!fullscreen && !embedded && (
+          <>
+            <button
+              className="terminal-copy-btn"
+              onClick={toggleMaximized}
+              title="Maximize"
+            >
+              Maximize
+            </button>
+            <button
+              className="terminal-copy-btn"
+              onClick={toggleFullscreen}
+              title="Browser fullscreen"
+            >
+              Fullscreen
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 
   return (
     <div
-      className={`terminal-container ${fullscreen ? "terminal-fullscreen" : ""}`}
+      ref={fullscreenRef}
+      className={`terminal-container ${fullscreen && !fullscreenTargetRef ? "terminal-fullscreen" : ""}`}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
+      {switchModalOpen && agentType && (
+        <SwitchAgentModal
+          currentAgent={agentType}
+          health={agentHealth}
+          healthLoading={agentHealthLoading}
+          error={switchError}
+          disabled={switchingAgent}
+          onClose={() => setSwitchModalOpen(false)}
+          onSelect={handleSwitchAgent}
+        />
+      )}
       {switchingAgent && (
         <div className="terminal-switch-overlay">
           <div className="terminal-switch-content">
@@ -583,9 +825,18 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           Drop files here
         </div>
       )}
-      {toolbarPortal?.current
-        ? createPortal(toolbarContent, toolbarPortal.current)
-        : toolbarContent}
+      {fullscreen || !toolbarPortal?.current
+        ? toolbarContent
+        : createPortal(toolbarContent, toolbarPortal.current)}
+      {fullscreen && (
+        <button
+          className="terminal-fullscreen-exit"
+          onClick={exitFullscreen}
+          title={browserFullscreen ? "Exit fullscreen (Esc)" : "Exit maximized view (Esc)"}
+        >
+          {browserFullscreen ? "Exit fullscreen" : "Exit maximize"}
+        </button>
+      )}
       {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
       <div className="term-scrollbar-area">
         {scrollThumb.size < 0.99 && (
@@ -731,24 +982,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             >
               Paste
             </button>
-            <button
-              onClick={() => {
-                setContextMenu(null);
-                const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-                navigator.clipboard.writeText(clean.trim());
-              }}
-            >
-              Copy All
-            </button>
             {termRef.current?.getSelection() && (
               <button
                 onClick={() => {
                   setContextMenu(null);
                   const sel = termRef.current?.getSelection() || "";
-                  navigator.clipboard.writeText(sel);
+                  void copyTextToClipboard(sel);
                 }}
               >
-                Copy Selection
+                Copy selection
               </button>
             )}
           </div>
@@ -774,37 +1016,41 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           <button className="terminal-paste-bar-cancel" onClick={() => setShowPasteInput(false)}>✕</button>
         </div>
       )}
-      {/* Mobile bottom toolbar — Stop / Copy / Keyboard toggle */}
+      {/* Mobile bottom toolbar — Esc / Paste / Keyboard toggle */}
       <div className="mobile-terminal-toolbar">
         {connected ? (
-          <button className="mobile-term-btn mobile-term-btn-stop" onClick={() => sendInput("\x1b")}>
-            ESC
+          <button
+            className="mobile-term-btn mobile-term-btn-stop"
+            onClick={() => sendInput("\x1b")}
+            aria-label="Send escape"
+          >
+            <span className="mobile-term-label">esc</span>
           </button>
         ) : (
           <div className="mobile-term-btn mobile-term-btn-placeholder" />
         )}
-        {lastContent && (
-          <button className="mobile-term-btn" onClick={() => {
-            const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-            navigator.clipboard.writeText(clean.trim());
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}>
-            {copied ? "✓ Copied" : "⎘ Copy"}
-          </button>
-        )}
-        <button className={`mobile-term-btn${showPasteInput ? " mobile-term-btn-active" : ""}`} onClick={handlePaste}>
-          ⊕ Paste
+        <button
+          className={`mobile-term-btn${showPasteInput ? " mobile-term-btn-active" : ""}`}
+          onClick={handlePaste}
+          aria-label="Paste into terminal"
+        >
+          <span className="mobile-term-icon" aria-hidden="true">⊕</span>
+          <span className="mobile-term-label">paste</span>
         </button>
-        <button className="mobile-term-btn" onClick={() => {
-          if (!customKb) {
-            updateSetting("customKeyboard", true);
-            setKbVisible(true);
-          } else {
-            setKbVisible((v) => !v);
-          }
-        }}>
-          {customKb && kbVisible ? "⌨ hide" : "⌨ write"}
+        <button
+          className={`mobile-term-btn${customKb && kbVisible ? " mobile-term-btn-active" : ""}`}
+          onClick={() => {
+            if (!customKb) {
+              updateSetting("customKeyboard", true);
+              setKbVisible(true);
+            } else {
+              setKbVisible((v) => !v);
+            }
+          }}
+          aria-label={customKb && kbVisible ? "Hide terminal keyboard" : "Show terminal keyboard"}
+        >
+          <span className="mobile-term-icon" aria-hidden="true">⌨</span>
+          <span className="mobile-term-label">{customKb && kbVisible ? "hide" : "write"}</span>
         </button>
       </div>
       {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={handlePaste} />}

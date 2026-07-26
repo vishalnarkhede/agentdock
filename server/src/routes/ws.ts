@@ -1,4 +1,5 @@
-import { capturePaneSnapshot, hasSession, sendKeysRaw, sendSpecialKey, resizePane } from "../services/tmux";
+import { capturePaneSnapshot, hasSession, hasPane, sendKeysRaw, sendSpecialKey, resizePane } from "../services/tmux";
+import { paneIdFromExternalName } from "../services/external-agents";
 
 export function handleWebSocket(server: any) {
   // WebSocket upgrade and handling is done in the Bun.serve config
@@ -15,8 +16,15 @@ const HEARTBEAT_TIMEOUT_MS = 60_000;
 export async function handleWsOpen(ws: any, sessionName: string) {
   console.log(`[ws] open: session="${sessionName}"`);
 
+  // An external agent is one pane inside a session Agentdock does not own, so it is
+  // addressed by pane id and watched for that pane's death rather than the session's.
+  // The stream is view-only: input would land in a terminal the user is typing in.
+  const paneId = paneIdFromExternalName(sessionName);
+  const captureOpts = paneId ? { target: paneId } : undefined;
+  const isAlive = () => (paneId ? hasPane(paneId) : hasSession(sessionName));
+
   // Send initial snapshot
-  const result = await capturePaneSnapshot(sessionName);
+  const result = await capturePaneSnapshot(sessionName, captureOpts);
   if (!result.ok) {
     console.error(`[ws] snapshot failed: ${result.error}`);
     ws.send(JSON.stringify({ type: "error", data: result.error }));
@@ -46,14 +54,14 @@ export async function handleWsOpen(ws: any, sessionName: string) {
     if (stopped) return;
 
     try {
-      const exists = await hasSession(sessionName);
+      const exists = await isAlive();
       if (!exists) {
         ws.send(JSON.stringify({ type: "closed", data: "Session ended" }));
         cleanup();
         ws.close();
         return;
       }
-      const snap = await capturePaneSnapshot(sessionName);
+      const snap = await capturePaneSnapshot(sessionName, captureOpts);
       if (snap.ok) {
         const serialized = JSON.stringify(snap.data);
         if (serialized !== lastSnapshot) {
@@ -98,7 +106,7 @@ export async function handleWsOpen(ws: any, sessionName: string) {
   }
 
   // Store cleanup handles
-  ws.data = { cleanup, heartbeatInterval, sessionName, nudgePoll, touchActivity: () => { lastClientActivity = Date.now(); } };
+  ws.data = { cleanup, heartbeatInterval, sessionName, readOnly: Boolean(paneId), nudgePoll, touchActivity: () => { lastClientActivity = Date.now(); } };
 }
 
 const SPECIAL_KEYS: Record<string, string> = {
@@ -128,6 +136,10 @@ export async function handleWsMessage(ws: any, message: string | Buffer) {
       ws.send(JSON.stringify({ type: "pong" }));
       return;
     }
+
+    // Everything below writes into the pane. For an external agent that pane is the
+    // user's own terminal, so the stream stays view-only however the client behaves.
+    if (ws.data?.readOnly) return;
 
     // Shift+Enter: send the CSI u escape sequence for Shift+Enter
     // Claude Code detects this via extended key encoding (kitty keyboard protocol)

@@ -36,9 +36,12 @@ app.route("/api/fs", fsRoutes);
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 const PORT = parseInt(process.env.PORT || "4800");
+const HOST = process.env.AGENTDOCK_HOST || "127.0.0.1";
+const DISPLAY_HOST = HOST === "0.0.0.0" || HOST === "127.0.0.1" ? "localhost" : HOST;
 
 const server = Bun.serve({
   port: PORT,
+  hostname: HOST,
   fetch(req, server) {
     const url = new URL(req.url);
 
@@ -73,7 +76,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Server running at http://localhost:${PORT}`);
+console.log(`Server running at http://${DISPLAY_HOST}:${PORT}`);
 
 // Periodically sync repos with base path
 syncRepos();

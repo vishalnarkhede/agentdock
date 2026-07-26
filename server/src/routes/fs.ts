@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, resolve, extname, basename } from "path";
-import { getBasePath } from "../services/config";
+import { getBasePath, getRepos, getAllSessionMetas } from "../services/config";
+import { spawnTool } from "../services/spawn";
 
 const app = new Hono();
 
@@ -56,10 +57,48 @@ function getLanguage(filePath: string): string {
  * Validate that a path is within the configured base path (projects dir).
  * This prevents the API from serving files outside the user's project directory.
  */
-function isWithinBasePath(targetPath: string): boolean {
-  const base = resolve(getBasePath());
+/**
+ * Directories the file endpoints may read from.
+ *
+ * The base path alone is the wrong shape for this: repos legitimately live in
+ * several places at once — two drives, a sibling worktree directory — and no
+ * single ancestor covers them short of "/", which is no guard at all. Users hit
+ * an opaque 403 whose only remedy was widening the base path until it stopped
+ * protecting anything.
+ *
+ * Registering a repo, or running an agent in a worktree, is already the act of
+ * granting access, so the allow-list is derived from that rather than configured
+ * separately. Read fresh each call: repos and sessions change while the server
+ * runs, and a cached list would 403 on a repo the user just added.
+ */
+function allowedRoots(): string[] {
+  const roots = [resolve(getBasePath())];
+
+  for (const repo of getRepos()) {
+    if (repo.path) roots.push(resolve(repo.path));
+  }
+
+  for (const metas of Object.values(getAllSessionMetas())) {
+    for (const meta of metas) {
+      if (meta.wtDir) roots.push(resolve(meta.wtDir));
+      if (meta.repoPath) roots.push(resolve(meta.repoPath));
+    }
+  }
+
+  return [...new Set(roots)];
+}
+
+function isAllowedPath(targetPath: string): boolean {
   const resolved = resolve(targetPath);
-  return resolved === base || resolved.startsWith(base + "/");
+  return allowedRoots().some((root) => resolved === root || resolved.startsWith(root + "/"));
+}
+
+// Name the path and the base path. "outside allowed directory" gave the user
+// nothing to act on — the usual cause is a base path pointing somewhere their
+// repos are not, and they cannot see what it is from the error.
+function deniedMessage(targetPath: string): string {
+  return `${resolve(targetPath)} is outside the allowed directories. `
+    + `Add its repo in Settings > Repositories, or set the base path (currently ${resolve(getBasePath())}) to cover it.`;
 }
 
 function isWithinRoots(targetPath: string, roots: string[]): boolean {
@@ -87,8 +126,8 @@ app.get("/list", async (c) => {
   const resolvedPath = resolve(path);
 
   // Validate path is within base path (e.g. ~/projects)
-  if (!isWithinBasePath(resolvedPath)) {
-    return c.json({ error: "path is outside allowed directory" }, 403);
+  if (!isAllowedPath(resolvedPath)) {
+    return c.json({ error: deniedMessage(resolvedPath) }, 403);
   }
 
   // If roots are provided, also validate path is within those roots
@@ -140,8 +179,8 @@ app.get("/read", async (c) => {
 
   const resolvedPath = resolve(path);
 
-  if (!isWithinBasePath(resolvedPath)) {
-    return c.json({ error: "path is outside allowed directory" }, 403);
+  if (!isAllowedPath(resolvedPath)) {
+    return c.json({ error: deniedMessage(resolvedPath) }, 403);
   }
 
   if (rootsParam) {
@@ -250,10 +289,9 @@ app.get("/search", async (c) => {
   const roots = parseRoots(rootsParam);
   const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
 
-  // Validate all roots are within base path
   for (const root of searchRoots) {
-    if (!isWithinBasePath(root)) {
-      return c.json({ error: "roots outside allowed directory" }, 403);
+    if (!isAllowedPath(root)) {
+      return c.json({ error: deniedMessage(root) }, 403);
     }
   }
 
@@ -300,7 +338,7 @@ async function grepContent(roots: string[], query: string, maxMatches: number): 
   let usedTool = "";
 
   try {
-    const proc = Bun.spawn(["rg", ...rgArgs], { stdout: "pipe", stderr: "pipe" });
+    const proc = spawnTool("rg", rgArgs, { stdout: "pipe", stderr: "pipe" });
     rawOutput = await new Response(proc.stdout).text();
     usedTool = "rg";
   } catch {
@@ -316,7 +354,7 @@ async function grepContent(roots: string[], query: string, maxMatches: number): 
         query,
         ...roots,
       ];
-      const proc = Bun.spawn(["grep", ...grepArgs], { stdout: "pipe", stderr: "pipe" });
+      const proc = spawnTool("grep", grepArgs, { stdout: "pipe", stderr: "pipe" });
       rawOutput = await new Response(proc.stdout).text();
       usedTool = "grep";
     } catch {
@@ -341,7 +379,7 @@ async function grepContent(roots: string[], query: string, maxMatches: number): 
     const lineNumber = parseInt(rawLine.slice(first + 1, second), 10);
     const line = rawLine.slice(second + 1);
     if (!filePath || isNaN(lineNumber)) continue;
-    if (!isWithinBasePath(filePath)) continue;
+    if (!isAllowedPath(filePath)) continue;
 
     results.push({ path: filePath, name: basename(filePath), lineNumber, line });
   }
@@ -365,8 +403,8 @@ app.get("/grep", async (c) => {
     const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
 
     for (const root of searchRoots) {
-      if (!isWithinBasePath(root)) {
-        return c.json({ error: "roots outside allowed directory" }, 403);
+      if (!isAllowedPath(root)) {
+        return c.json({ error: deniedMessage(root) }, 403);
       }
     }
 

@@ -102,7 +102,7 @@ function TooltipBox({
     <div className="tutorial-tooltip" style={{ ...style, width: tooltipWidth }}>
       <div className="tutorial-tooltip-header">
         <span className="tutorial-step-count">{stepIdx + 1} / {total}</span>
-        <button className="tutorial-skip-btn" onClick={onSkip}>skip tour</button>
+        <button className="tutorial-skip-btn" onClick={onSkip}>Skip tour</button>
       </div>
       <div className="tutorial-tooltip-title">{step.title}</div>
       <div className="tutorial-tooltip-body">
@@ -112,7 +112,7 @@ function TooltipBox({
       </div>
       {isActionStep ? (
         <div className="tutorial-tooltip-action-hint">
-          ↑ click to continue
+          ↑ Click to continue
         </div>
       ) : (
         <div className="tutorial-tooltip-footer">
@@ -181,24 +181,39 @@ export function TutorialOverlay({ onClose }: { onClose: () => void }) {
     const selector = step.target.startsWith("@")
       ? `[data-tutorial="${step.target.slice(1)}"]`
       : step.target;
-    const el = document.querySelector(selector);
-    if (!el) return;
-    const handler = () => {
+    // Delegate from the document rather than binding to the element directly: a step
+    // whose target only renders after onEnter runs (an item inside a menu the step
+    // just opened) would otherwise never get a listener, stranding the tutorial.
+    let fired = false;
+    const handler = (e: MouseEvent) => {
+      if (fired) return;
+      if (!(e.target as HTMLElement)?.closest?.(selector)) return;
+      fired = true;
       // Small delay so the click's effect (tab switch etc.) happens first
       setTimeout(() => setStepIdx((i) => i + 1), 150);
     };
-    el.addEventListener("click", handler, { once: true });
-    return () => el.removeEventListener("click", handler);
+    // Capture phase, so it still fires when the click unmounts its own target.
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
   }, [step.action, step.target, stepIdx]);
 
-  // Keyboard: Escape = skip, Right arrow = next
+  // Keyboard: Escape = skip, Right arrow = next.
+  // Capture phase on window, because the tour runs over the live dashboard: a focused
+  // xterm swallows Escape to send \x1b to the shell, and modals close on it too. The
+  // tour has to win that race, and stopping propagation keeps the same keypress from
+  // also collapsing a pane or closing a modal behind the overlay.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
       if (e.key === "ArrowRight" && !step.action) goNext();
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [onClose, goNext, step.action]);
 
   const isCenter = step.position === "center" || !rect;

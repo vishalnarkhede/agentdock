@@ -51,7 +51,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "click-session",
     title: "Click to open the terminal",
-    body: "Click the auth fix session to see the live agent output.",
+    body: "Click the auth fix agent to see the live agent output.",
     target: "@session-auth-fix",
     position: "right",
     action: "click-target",
@@ -90,8 +90,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     id: "click-changes-tab",
-    title: "Watch code being written",
-    body: "Click the Changes tab to see the real-time git diff.",
+    title: "Review code changes",
+    body: "Click the Review tab to see the real-time git diff.",
     target: "@tab-changes",
     position: "bottom",
     action: "click-target",
@@ -115,7 +115,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "comment-batch-bar",
     title: "Send all comments at once",
-    body: "Comments from both Plan and Changes batch up here. Hit \"Send to Claude\" and they're injected directly into the agent's context — with the quoted code as reference.",
+    body: "Comments from both Plan and Review batch up here. Hit \"Send to Claude\" and they're injected directly into the agent's context — with the quoted code as reference.",
     target: "@comment-batch-bar",
     position: "top",
     padding: 4,
@@ -130,32 +130,45 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     id: "group-by",
-    title: "Organize your sessions",
-    body: "Group sessions by status, customer, project — or any custom tag you define. Useful when you're running 10+ agents at once.",
+    title: "Organize your agents",
+    body: "Group agents by status, customer, project — or any custom tag you define. Useful when you're running 10+ agents at once.",
     target: "@group-by-select",
     position: "bottom",
   },
   {
     id: "new-session",
     title: "Launch an agent in seconds",
-    body: "Pick a repo, write a task prompt, hit create. AgentDock opens a tmux session and starts the agent automatically.",
+    body: "Pick a repo, write a task prompt, hit Launch agent. AgentDock opens a terminal and starts the agent automatically.",
     target: "@new-session-btn",
     position: "bottom",
   },
   {
     id: "stopped-session",
-    title: "Sessions survive reboots",
-    body: "After a Mac restart, stopped sessions appear here. Click ↺ restore to relaunch Claude — it resumes the exact conversation, including full history.",
+    title: "Agents survive reboots",
+    body: "After a restart, stopped agents appear here. Click restore to relaunch Claude — it resumes the exact conversation, including full history.",
     target: "@session-stopped",
     position: "right",
   },
   {
-    id: "open-settings",
-    title: "Configure everything",
-    body: "Click the ⚙ gear to open Settings — repos, MCP servers, appearance, and more.",
-    target: "@settings-btn",
+    id: "open-menu",
+    title: "Everything else lives here",
+    body: "Click the ⋯ menu — Settings, this tour, and Fix AgentDock are all under it.",
+    target: "@menu-btn",
     position: "bottom",
     action: "click-target",
+  },
+  {
+    id: "open-settings",
+    title: "Configure everything",
+    body: "Open Settings — repos, MCP servers, appearance, and more.",
+    target: "@settings-menu-item",
+    position: "bottom",
+    action: "click-target",
+    // The menu closes on any outside click, so make sure it's open before
+    // spotlighting an item inside it.
+    onEnter: () => {
+      window.dispatchEvent(new CustomEvent("agentdock-tutorial-open-menu"));
+    },
   },
   {
     id: "settings-modal",
@@ -166,7 +179,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "settings-repos",
     title: "Add your repositories",
-    body: "Click Repositories to register the repos you want agents to work in. Give each one an alias — you'll use the alias to launch sessions.",
+    body: "Click Repositories to register the repos you want agents to work in. Give each one an alias — you'll use the alias to launch agents.",
     target: "@settings-tab-repos",
     position: "right",
     action: "click-target",

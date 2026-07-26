@@ -6,6 +6,7 @@ import { Login } from "./pages/Login";
 import { SettingsProvider } from "./hooks/useSettings";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { MobileNavProvider } from "./MobileNavContext";
+import { ShareLinkProvider } from "./hooks/useShareLink";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { ready, enabled, loggedIn } = useAuth();
@@ -25,15 +26,17 @@ export function App() {
       <AuthProvider>
         <SettingsProvider>
           <AuthGate>
-            <MobileNavProvider>
-              <Header />
-              <main>
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/create" element={<CreateSession />} />
-                </Routes>
-              </main>
-            </MobileNavProvider>
+            <ShareLinkProvider>
+              <MobileNavProvider>
+                <Header />
+                <main>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/create" element={<CreateSession />} />
+                  </Routes>
+                </main>
+              </MobileNavProvider>
+            </ShareLinkProvider>
           </AuthGate>
         </SettingsProvider>
       </AuthProvider>

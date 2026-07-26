@@ -3,7 +3,7 @@
 # Used by agents running inside agentdock to delegate work to child agents.
 #
 # Usage:
-#   ad-agent spawn --repo <alias> [--prompt "..."] [--agent-type claude|cursor] [--skip-perms]
+#   ad-agent spawn --repo <alias> [--prompt "..."] [--agent-type claude|cursor|codex] [--skip-perms]
 #   ad-agent status <session-name>
 #   ad-agent output <session-name> [--lines N]
 #   ad-agent wait <session-name> [--timeout SECONDS]
@@ -264,7 +264,7 @@ cmd_help() {
 ad-agent — manage sub-agents from within a parent session
 
 Commands:
-  spawn   --repo <alias> [--prompt "..."] [--agent-type claude|cursor] [--skip-perms] [--name <name>]
+  spawn   --repo <alias> [--prompt "..."] [--agent-type claude|cursor|codex] [--skip-perms] [--name <name>]
   status  <session-name>
   output  <session-name> [--lines N]
   wait    <session-name> [--timeout SECONDS] [--poll SECONDS]

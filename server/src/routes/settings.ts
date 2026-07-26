@@ -22,7 +22,20 @@ import {
   setNgrokBasicAuth,
   deleteNgrokBasicAuth,
 } from "../services/config";
-import type { RepoConfig } from "../types";
+import type {
+  CreateRepoWorktreeRequest,
+  DeleteRepoWorktreeRequest,
+  RepoConfig,
+} from "../types";
+import {
+  createRepoWorktree,
+  deleteRepoWorktree,
+  discoverRepoWorktrees,
+  listRepoBranches,
+  BranchUnmergedError,
+  WorktreeDirtyError,
+} from "../services/repo-worktrees";
+import { spawnTool } from "../services/spawn";
 
 const app = new Hono();
 
@@ -41,6 +54,26 @@ app.post("/repos", async (c) => {
   return c.json({ ok: true }, 201);
 });
 
+// Must stay above DELETE /repos/:alias — Hono matches in registration order, so the
+// parameterized route would otherwise swallow this as alias="worktrees" and no-op.
+app.delete("/repos/worktrees", async (c) => {
+  const body = (await c.req.json()) as DeleteRepoWorktreeRequest;
+  if (!body.path) return c.json({ error: "path is required" }, 400);
+  try {
+    return c.json(await deleteRepoWorktree(body));
+  } catch (err: any) {
+    // Signal the dirty and unmerged cases explicitly so the client can offer to
+    // force rather than having to match on the message text.
+    if (err instanceof WorktreeDirtyError) {
+      return c.json({ error: err.message, needsForce: true, changes: err.changes }, 409);
+    }
+    if (err instanceof BranchUnmergedError) {
+      return c.json({ error: err.message, needsBranchForce: true, branch: err.branch }, 409);
+    }
+    return c.json({ error: err?.message || "Failed to delete worktree" }, 400);
+  }
+});
+
 app.delete("/repos/:alias", (c) => {
   const alias = c.req.param("alias");
   removeRepo(alias);
@@ -49,6 +82,30 @@ app.delete("/repos/:alias", (c) => {
 
 app.get("/repos/scan", (c) => {
   return c.json(scanBasePath());
+});
+
+app.get("/repos/worktrees", async (c) => {
+  return c.json(await discoverRepoWorktrees());
+});
+
+app.post("/repos/worktrees", async (c) => {
+  const body = (await c.req.json()) as CreateRepoWorktreeRequest;
+  if (!body.repoAlias || !body.branch) {
+    return c.json({ error: "repoAlias and branch are required" }, 400);
+  }
+  try {
+    return c.json(await createRepoWorktree(body), 201);
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to create worktree" }, 400);
+  }
+});
+
+app.get("/repos/:alias/branches", async (c) => {
+  try {
+    return c.json(await listRepoBranches(c.req.param("alias")));
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to list branches" }, 400);
+  }
 });
 
 // ─── Base path ───
@@ -69,7 +126,7 @@ app.put("/base-path", async (c) => {
 
 async function checkTool(cmd: string, args: string[]): Promise<{ installed: boolean; version: string }> {
   try {
-    const proc = Bun.spawn([cmd, ...args], { stdout: "pipe", stderr: "pipe" });
+    const proc = spawnTool(cmd, args, { stdout: "pipe", stderr: "pipe" });
     const stdout = await new Response(proc.stdout).text();
     const exitCode = await proc.exited;
     if (exitCode !== 0) return { installed: false, version: "" };
@@ -80,16 +137,19 @@ async function checkTool(cmd: string, args: string[]): Promise<{ installed: bool
 }
 
 app.get("/health", async (c) => {
-  const [tmux, claude, cursor, git, gh, bun, psql] = await Promise.all([
+  const [tmux, claude, cursor, codex, git, gh, bun, jq, psql, ngrok] = await Promise.all([
     checkTool("tmux", ["-V"]),
     checkTool("claude", ["--version"]),
     checkTool("agent", ["--version"]),
+    checkTool("codex", ["--version"]),
     checkTool("git", ["--version"]),
     checkTool("gh", ["--version"]),
     checkTool("bun", ["--version"]),
+    checkTool("jq", ["--version"]), // plan-hook.sh exits silently without it
     checkTool("psql", ["--version"]),
+    checkTool("ngrok", ["version"]), // ngrok uses a subcommand, not --version
   ]);
-  return c.json({ tmux, claude, cursor, git, gh, bun, psql });
+  return c.json({ tmux, claude, cursor, codex, git, gh, bun, jq, psql, ngrok });
 });
 
 // ─── Status (first-run detection) ───

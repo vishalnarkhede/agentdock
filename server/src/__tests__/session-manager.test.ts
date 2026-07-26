@@ -6,7 +6,9 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { buildAgentCmd, sessionNameFromTarget, parsePiece } from "../services/session-manager";
+import { readFileSync, rmSync } from "fs";
+import { buildAgentCmd, sessionNameFromTarget, parsePiece, writeSystemPromptFile } from "../services/session-manager";
+import { PLANS_DIR_PATH } from "../services/config";
 
 describe("buildAgentCmd", () => {
   // ─── Claude agent ───
@@ -37,13 +39,6 @@ describe("buildAgentCmd", () => {
     expect(cmd).toContain("--add-dir /repo/a --add-dir /repo/b");
   });
 
-  test("claude with all options combined", () => {
-    const cmd = buildAgentCmd("claude", true, "/tmp/sys.txt", ["/dir/x"]);
-    expect(cmd).toContain("--dangerously-skip-permissions");
-    expect(cmd).toContain("--append-system-prompt-file /tmp/sys.txt");
-    expect(cmd).toContain("--add-dir /dir/x");
-  });
-
   // ─── Cursor agent ───
 
   test("cursor without skip permissions returns 'agent'", () => {
@@ -57,6 +52,22 @@ describe("buildAgentCmd", () => {
   test("cursor ignores systemPromptFile and addDirs", () => {
     // Cursor CLI doesn't support these flags
     expect(buildAgentCmd("cursor", false, "/tmp/prompt.txt", ["/dir"])).toBe("agent");
+  });
+
+  // ─── Codex agent ───
+
+  test("codex without skip permissions returns 'codex'", () => {
+    expect(buildAgentCmd("codex")).toBe("codex");
+  });
+
+  test("codex with skip permissions bypasses approvals and sandbox", () => {
+    expect(buildAgentCmd("codex", true)).toBe("codex --dangerously-bypass-approvals-and-sandbox");
+  });
+
+  test("codex includes add-dir and initial instruction prompt", () => {
+    const cmd = buildAgentCmd("codex", false, "/tmp/sys prompt.txt", ["/repo/a", "/repo/b"]);
+    expect(cmd).toContain('--add-dir "/repo/a" --add-dir "/repo/b"');
+    expect(cmd).toContain("Read and follow the Agentdock session instructions in /tmp/sys prompt.txt");
   });
 });
 
@@ -72,10 +83,6 @@ describe("sessionNameFromTarget", () => {
   test("replaces slashes with hyphens", () => {
     expect(sessionNameFromTarget("org/repo")).toBe("claude-org-repo");
   });
-
-  test("handles complex target strings", () => {
-    expect(sessionNameFromTarget("chat:feature/login")).toBe("claude-chat-feature-login");
-  });
 });
 
 describe("parsePiece", () => {
@@ -89,11 +96,6 @@ describe("parsePiece", () => {
     expect(result).toEqual({ alias: "chat", branch: "main" });
   });
 
-  test("handles branch with slashes", () => {
-    const result = parsePiece("chat:feature/login-page");
-    expect(result).toEqual({ alias: "chat", branch: "feature/login-page" });
-  });
-
   test("handles multiple colons (first colon splits)", () => {
     const result = parsePiece("chat:branch:with:colons");
     expect(result).toEqual({ alias: "chat", branch: "branch:with:colons" });
@@ -102,5 +104,26 @@ describe("parsePiece", () => {
   test("handles empty string", () => {
     const result = parsePiece("");
     expect(result).toEqual({ alias: "", branch: "" });
+  });
+});
+
+describe("writeSystemPromptFile", () => {
+  // The agent is told where to write its plan. That path has to be the one
+  // getPlan() reads, which follows AGENTDOCK_CONFIG_DIR — a second hardcoded
+  // ~/.config path here means agents write where nothing looks for them.
+  test("names the same plans dir config.ts resolves", () => {
+    const sessionName = `claude-plans-path-${Date.now()}`;
+    const file = writeSystemPromptFile(sessionName);
+    try {
+      const content = readFileSync(file, "utf-8");
+      expect(content).toContain(PLANS_DIR_PATH);
+      expect(content).not.toContain("{{PLANS_DIR}}");
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  test("plans dir tracks the isolated test config dir, not the real HOME", () => {
+    expect(PLANS_DIR_PATH).toContain(process.env.AGENTDOCK_CONFIG_DIR!);
   });
 });

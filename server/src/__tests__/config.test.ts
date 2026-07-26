@@ -24,6 +24,88 @@ afterAll(() => {
   rmSync(join(CONFIG_DIR, "..", ".."), { recursive: true, force: true });
 });
 
+// ─── Plans ───
+
+describe("getPlan", () => {
+  const PLANS_DIR = join(CONFIG_DIR, "plans");
+
+  test("returns the plan filed under the agent's own key", () => {
+    mkdirSync(PLANS_DIR, { recursive: true });
+    writeFileSync(join(PLANS_DIR, "external-44.md"), "# Pane plan\n");
+
+    expect(config.getPlan("external-44")).toBe("# Pane plan\n");
+  });
+
+  test("returns null when this agent has no plan, even if others do", () => {
+    // The old fallback returned the most recently modified plan in the directory.
+    // Once the directory holds one plan per agent that means confidently showing
+    // someone else's — worse than showing nothing.
+    mkdirSync(PLANS_DIR, { recursive: true });
+    writeFileSync(join(PLANS_DIR, "external-44.md"), "# Someone else's plan\n");
+
+    expect(config.getPlan("claude-mine")).toBeNull();
+  });
+
+  test("returns null when no plans exist at all", () => {
+    expect(config.getPlan("claude-mine")).toBeNull();
+  });
+});
+
+// ─── Hook registration ───
+
+describe("syncHooksToClaudeSettings", () => {
+  // HOME is a temp dir courtesy of test-preload, so this writes to a throwaway
+  // settings.json rather than the real one.
+  const SETTINGS = join(process.env.HOME!, ".claude", "settings.json");
+  const readSettings = () => JSON.parse(readFileSync(SETTINGS, "utf-8"));
+
+  test("registers the plan hook on PostToolUse for Write and Edit", () => {
+    config.syncHooksToClaudeSettings();
+    const entry = readSettings().hooks.PostToolUse.find((h: any) =>
+      h.hooks?.some((hh: any) => hh.command?.includes("plan-hook.sh")),
+    );
+
+    expect(entry).toBeDefined();
+    expect(entry.matcher).toBe("Write|Edit");
+    // Synchronous by design — async failure handling is undocumented, and a plan
+    // that copies unreliably is worse than no plan at all.
+    expect(entry.hooks[0].async).toBeUndefined();
+  });
+
+  test("installs the plan hook script as executable next to the plans dir", () => {
+    config.syncHooksToClaudeSettings();
+    // The script locates the plans dir relative to itself, so this layout is load-bearing.
+    expect(existsSync(join(CONFIG_DIR, "hooks", "plan-hook.sh"))).toBe(true);
+  });
+
+  test("does not register a second copy when run again", () => {
+    // Runs on every server start, and the settings file is the user's own.
+    config.syncHooksToClaudeSettings();
+    config.syncHooksToClaudeSettings();
+    config.syncHooksToClaudeSettings();
+
+    const planHooks = readSettings().hooks.PostToolUse.filter((h: any) =>
+      h.hooks?.some((hh: any) => hh.command?.includes("plan-hook.sh")),
+    );
+    expect(planHooks).toHaveLength(1);
+  });
+
+  test("leaves hooks it does not own alone", () => {
+    mkdirSync(join(process.env.HOME!, ".claude"), { recursive: true });
+    writeFileSync(SETTINGS, JSON.stringify({
+      hooks: { PostToolUse: [{ hooks: [{ type: "command", command: "workmux set-window-status working" }] }] },
+    }));
+
+    config.syncHooksToClaudeSettings();
+
+    const commands = readSettings().hooks.PostToolUse.flatMap((h: any) =>
+      h.hooks.map((hh: any) => hh.command),
+    );
+    expect(commands).toContain("workmux set-window-status working");
+    expect(commands.some((c: string) => c.includes("plan-hook.sh"))).toBe(true);
+  });
+});
+
 // ─── Preferences ───
 
 describe("Preferences", () => {
@@ -123,11 +205,6 @@ describe("SessionAgentType", () => {
   test("saveSessionAgentType and getSessionAgentType round-trip", () => {
     config.saveSessionAgentType("test-session", "claude");
     expect(config.getSessionAgentType("test-session")).toBe("claude");
-  });
-
-  test("saveSessionAgentType works for cursor", () => {
-    config.saveSessionAgentType("test-session", "cursor");
-    expect(config.getSessionAgentType("test-session")).toBe("cursor");
   });
 
   test("deleteSessionAgentType removes the file", () => {
@@ -333,6 +410,12 @@ describe("SessionMeta", () => {
     expect(metas).toHaveLength(2);
   });
 
+  test("saveWorktreeMeta can mark Agentdock-managed worktrees", () => {
+    config.saveWorktreeMeta("test-session", "/repo/path", "/worktree/dir", true);
+    const metas = config.getSessionMeta("test-session");
+    expect(metas[0]).toEqual({ repoPath: "/repo/path", wtDir: "/worktree/dir", managed: true });
+  });
+
   test("deleteSessionMeta removes the file", () => {
     config.saveWorktreeMeta("test-session", "/repo", "/wt");
     config.deleteSessionMeta("test-session");
@@ -383,5 +466,81 @@ describe("DbShards", () => {
     config.addDbShard({ name: "my-shard", host: "h", port: 1, database: "d", user: "u", password: "p" });
     expect(config.getDbShard("my-shard")).toBeDefined();
     expect(config.getDbShard("unknown")).toBeUndefined();
+  });
+});
+
+// ─── Base path scanning ───
+
+describe("scanBasePath", () => {
+  const BASE = join(CONFIG_DIR, "scan-base");
+
+  /** A real checkout: .git is a directory. */
+  function makeRepo(name: string, remote?: string): string {
+    const dir = join(BASE, name);
+    mkdirSync(join(dir, ".git"), { recursive: true });
+    if (remote) writeFileSync(join(dir, ".git", "config"), `[remote "origin"]\n\turl = ${remote}\n`);
+    return dir;
+  }
+
+  /** A worktree: .git is a file pointing back at the parent repo. */
+  function makeWorktree(name: string, parent: string): string {
+    const dir = join(BASE, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".git"), `gitdir: ${parent}/.git/worktrees/${name}\n`);
+    return dir;
+  }
+
+  beforeEach(() => {
+    mkdirSync(BASE, { recursive: true });
+    config.setBasePath(BASE);
+  });
+
+  test("finds real checkouts and reads their remote", () => {
+    makeRepo("proj", "git@github.com:me/proj.git");
+    const scanned = config.scanBasePath();
+    expect(scanned).toHaveLength(1);
+    expect(scanned[0].alias).toBe("proj");
+    expect(scanned[0].remote).toBe("git@github.com:me/proj.git");
+  });
+
+  test("skips worktrees, whose .git is a file rather than a directory", () => {
+    const repo = makeRepo("proj");
+    makeWorktree("proj-feature", repo);
+    expect(config.scanBasePath().map((r) => r.alias)).toEqual(["proj"]);
+  });
+
+  test("syncRepos does not auto-register a worktree as a top-level repo", () => {
+    const repo = makeRepo("proj");
+    makeWorktree("proj-feature", repo);
+    config.syncRepos();
+    expect(config.getRepos().map((r) => r.alias)).toEqual(["proj"]);
+  });
+
+  test("a worktree alias, once registered, survives the sweep and can be removed", () => {
+    const repo = makeRepo("proj");
+    const wt = makeWorktree("proj-feature", repo);
+    // Registering it is the deliberate act (importing it from the worktrees tab).
+    config.addRepo({ alias: "my-wt", path: wt });
+
+    config.syncRepos();
+    expect(config.getRepos().map((r) => r.alias).sort()).toEqual(["my-wt", "proj"]);
+
+    // Removal must stick — the sweep used to re-add it under its directory name.
+    config.removeRepo("my-wt");
+    config.syncRepos();
+    expect(config.getRepos().map((r) => r.alias)).toEqual(["proj"]);
+  });
+
+  test("keeps worktree entries auto-added before this rule existed", () => {
+    const repo = makeRepo("proj");
+    const wt = makeWorktree("proj-feature", repo);
+    // Pre-existing repos.json from an older version, where the scan added these.
+    config.addRepo({ alias: "proj", path: repo });
+    config.addRepo({ alias: "proj-feature", path: wt });
+
+    config.syncRepos();
+
+    // Still on disk, so the sweep must not treat it as a stale entry and drop it.
+    expect(config.getRepos().map((r) => r.alias).sort()).toEqual(["proj", "proj-feature"]);
   });
 });

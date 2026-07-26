@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync, statSync } from "fs";
 import { join, resolve } from "path";
 import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
 
@@ -119,6 +119,23 @@ export function syncRepos(): void {
   if (changed) saveReposFile(filtered);
 }
 
+/**
+ * True only for a repo's own checkout. A git worktree (and a submodule) has a .git
+ * *file* pointing back at the parent repo, where a real checkout has a .git directory.
+ *
+ * The distinction matters because worktrees are not separate projects: auto-registering
+ * one as a top-level repo gives it an alias nobody chose, and — since the sweep below
+ * re-adds it every 10s — makes removing that alias impossible. Worktrees become
+ * targetable by being imported from the worktrees tab instead, which is deliberate.
+ */
+function isRepoCheckout(dirPath: string): boolean {
+  try {
+    return statSync(join(dirPath, ".git")).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function scanBasePath(): RepoConfig[] {
   const base = getBasePath();
   if (!existsSync(base)) return [];
@@ -127,7 +144,7 @@ export function scanBasePath(): RepoConfig[] {
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
     const dirPath = join(base, entry.name);
-    if (existsSync(join(dirPath, ".git"))) {
+    if (isRepoCheckout(dirPath)) {
       // Try to get remote URL
       let remote: string | undefined;
       try {
@@ -195,9 +212,11 @@ export function getSessionMeta(sessionName: string): WorktreeMeta[] {
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const [repoPath, wtDir] = trimmed.split("|");
+    const [repoPath, wtDir, ownership] = trimmed.split("|");
     if (repoPath && wtDir) {
-      metas.push({ repoPath, wtDir });
+      const meta: WorktreeMeta = { repoPath, wtDir };
+      if (ownership === "managed") meta.managed = true;
+      metas.push(meta);
     }
   }
   return metas;
@@ -216,9 +235,10 @@ export function saveWorktreeMeta(
   sessionName: string,
   repoPath: string,
   wtDir: string,
+  managed = false,
 ): void {
   mkdirSync(SESSIONS_DIR, { recursive: true });
-  appendFileSync(join(SESSIONS_DIR, sessionName), `${repoPath}|${wtDir}\n`);
+  appendFileSync(join(SESSIONS_DIR, sessionName), `${repoPath}|${wtDir}${managed ? "|managed" : ""}\n`);
 }
 
 export function deleteSessionMeta(sessionName: string): void {
@@ -438,20 +458,13 @@ export function getPlan(sessionName: string): string | null {
   const planFile = join(PLANS_DIR, `${sessionName}.md`);
   if (existsSync(planFile)) return readFileSync(planFile, "utf-8");
 
-  // Fallback: find the most recently modified .md in plans dir.
-  // Handles cases where Claude Code's plan mode writes to a different filename.
-  if (!existsSync(PLANS_DIR)) return null;
-  try {
-    const { statSync } = require("fs") as typeof import("fs");
-    const files = readdirSync(PLANS_DIR).filter((f) => f.endsWith(".md"));
-    if (files.length === 0) return null;
-    const sorted = files
-      .map((f) => ({ f, mtime: statSync(join(PLANS_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    return readFileSync(join(PLANS_DIR, sorted[0].f), "utf-8");
-  } catch {
-    return null;
-  }
+  // No fallback on purpose. This used to return the most recently modified plan in
+  // the directory, to cover plan mode writing under a name of its own choosing. The
+  // plan hook now files those under the agent's own key, so that guess is no longer
+  // needed — and it stopped being safe once the directory holds one plan per agent,
+  // where "newest wins" means confidently showing someone else's plan. An agent with
+  // no plan should say so.
+  return null;
 }
 
 // ─── Custom quick actions ───
@@ -597,6 +610,8 @@ const CLAUDE_SETTINGS_FILE = join(HOME, ".claude", "settings.json");
 const HOOK_STATUS_DIR = "/tmp/agentdock-status";
 const HOOK_SCRIPT_SOURCE = resolve(__dirname, "..", "hooks", "status-hook.sh");
 const HOOK_SCRIPT_DEST = join(CONFIG_DIR, "hooks", "status-hook.sh");
+const PLAN_HOOK_SOURCE = resolve(__dirname, "..", "hooks", "plan-hook.sh");
+const PLAN_HOOK_DEST = join(CONFIG_DIR, "hooks", "plan-hook.sh");
 
 /**
  * Install the agentdock status hook script and inject hooks into Claude's settings.json.
@@ -617,6 +632,8 @@ export function syncHooksToClaudeSettings(): void {
   mkdirSync(hooksDir, { recursive: true });
   writeFileSync(HOOK_SCRIPT_DEST, readFileSync(HOOK_SCRIPT_SOURCE, "utf-8"));
   chmodSync(HOOK_SCRIPT_DEST, 0o755);
+  writeFileSync(PLAN_HOOK_DEST, readFileSync(PLAN_HOOK_SOURCE, "utf-8"));
+  chmodSync(PLAN_HOOK_DEST, 0o755);
 
   // 2. Ensure status directory exists
   mkdirSync(HOOK_STATUS_DIR, { recursive: true });
@@ -631,11 +648,12 @@ export function syncHooksToClaudeSettings(): void {
 
   if (!settings.hooks) settings.hooks = {};
 
-  // Helper: check if our hook already exists in a hook array
-  const hasOurHook = (hookArray: any[]) =>
+  // Helper: check if a given hook script is already registered for an event
+  const hasHook = (hookArray: any[], script: string) =>
     Array.isArray(hookArray) && hookArray.some(
-      (h: any) => h.hooks?.some((hh: any) => hh.command?.includes("status-hook.sh"))
+      (h: any) => h.hooks?.some((hh: any) => hh.command?.includes(script))
     );
+  const hasOurHook = (hookArray: any[]) => hasHook(hookArray, "status-hook.sh");
 
   // Helper: inject a hook if not already present
   const ensureHook = (eventName: string, status: string, extra?: Record<string, any>) => {
@@ -656,6 +674,20 @@ export function syncHooksToClaudeSettings(): void {
   ensureHook("PreToolUse", "working");
   ensureHook("SubagentStop", "working");
 
+  // Plan capture. Synchronous on purpose. Async would still receive the payload —
+  // stdin delivery does not depend on it — but async hooks are fire-and-forget and
+  // their failure and timeout behaviour is undocumented, which is a poor trade for
+  // the ~30ms this costs per edit. A plan that copies unreliably is worse than none.
+  // The matcher is pipe-separated literal tool names, not a regex.
+  const postHooks = settings.hooks.PostToolUse || [];
+  if (!hasHook(postHooks, "plan-hook.sh")) {
+    postHooks.push({
+      matcher: "Write|Edit",
+      hooks: [{ type: "command", command: PLAN_HOOK_DEST }],
+    });
+    settings.hooks.PostToolUse = postHooks;
+  }
+
   // 5. Write back
   const settingsDir = join(HOME, ".claude");
   mkdirSync(settingsDir, { recursive: true });
@@ -667,19 +699,29 @@ export function syncHooksToClaudeSettings(): void {
  * Returns "waiting" or "working" if a recent hook status exists (within 60s),
  * or null if no hook data is available (fall back to terminal parsing).
  */
-export function getHookStatus(sessionName: string): "waiting" | "working" | null {
+export interface HookStatusInfo {
+  status: "waiting" | "working";
+  ageSeconds: number;
+}
+
+export function getHookStatusInfo(sessionName: string): HookStatusInfo | null {
   const statusFile = join(HOOK_STATUS_DIR, sessionName);
   if (!existsSync(statusFile)) return null;
   try {
     const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+    if (data.status !== "waiting" && data.status !== "working") return null;
     // Only trust status if it's recent (within 2 minutes).
     // PreToolUse hook fires on every tool call, keeping "working" fresh.
     // If nothing fires for 2 min, the session is likely stuck or disconnected.
-    const age = Math.floor(Date.now() / 1000) - (data.ts || 0);
-    if (age > 120) return null;
-    if (data.status === "waiting" || data.status === "working") return data.status;
+    const ageSeconds = Math.floor(Date.now() / 1000) - (data.ts || 0);
+    if (ageSeconds > 120) return null;
+    return { status: data.status, ageSeconds };
   } catch { /* corrupt file */ }
   return null;
+}
+
+export function getHookStatus(sessionName: string): "waiting" | "working" | null {
+  return getHookStatusInfo(sessionName)?.status ?? null;
 }
 
 /**
