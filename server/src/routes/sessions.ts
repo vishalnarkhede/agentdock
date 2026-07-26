@@ -16,14 +16,140 @@ import {
   deleteSessionProperties,
   getKnownSessionNames,
 } from "../services/config";
-import { detectStatus, extractStatusLine } from "../services/status";
+import { detectStatus, displayStatusLine } from "../services/status";
 import {
   startSession,
   stopSession,
   stopAllSessions,
   restoreSession,
 } from "../services/session-manager";
+import {
+  discoverExternalAgents,
+  externalDisplayName,
+  isExternalAgentName,
+} from "../services/external-agents";
+import { ensureShellSession } from "../services/shell-sessions";
 import type { CreateSessionRequest, SessionInfo, AgentType } from "../types";
+
+/**
+ * External agents run in panes the user owns, so every mutating route refuses them.
+ * Without this a stop or a keystroke from the dashboard would land in a terminal
+ * they are attached to and typing in.
+ */
+function rejectExternal(c: any, name: string) {
+  if (!isExternalAgentName(name)) return null;
+  return c.json(
+    { error: "This agent runs in your own tmux pane and is read-only in Agentdock" },
+    403,
+  );
+}
+
+function shellQuote(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+function appleScriptString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+interface TerminalLaunchCandidate {
+  label: string;
+  cmd: string;
+  args: string[];
+}
+
+function terminalAttachCommand(sessionName: string): string {
+  const shell = process.env.SHELL || "sh";
+  return `tmux attach -t ${shellQuote(sessionName)}; exec ${shellQuote(shell)}`;
+}
+
+function terminalLaunchCandidates(sessionName: string): TerminalLaunchCandidate[] {
+  const attach = terminalAttachCommand(sessionName);
+
+  if (process.platform === "darwin") {
+    const script = [
+      'tell application "Terminal"',
+      "activate",
+      `do script ${appleScriptString(attach)}`,
+      "end tell",
+    ].join("\n");
+    return [{ label: "Terminal.app", cmd: "osascript", args: ["-e", script] }];
+  }
+
+  if (process.platform === "win32") {
+    const winSession = sessionName.replace(/"/g, '\\"');
+    return [{
+      label: "Windows Terminal",
+      cmd: "cmd.exe",
+      args: ["/c", "start", "", "cmd.exe", "/k", `tmux attach -t "${winSession}"`],
+    }];
+  }
+
+  const candidates: TerminalLaunchCandidate[] = [];
+  const customTerminal = process.env.TERMINAL?.trim();
+  if (customTerminal) {
+    candidates.push({ label: `$TERMINAL (${customTerminal})`, cmd: customTerminal, args: ["-e", "sh", "-lc", attach] });
+  }
+
+  candidates.push(
+    { label: "x-terminal-emulator", cmd: "x-terminal-emulator", args: ["-e", "sh", "-lc", attach] },
+    { label: "GNOME Terminal", cmd: "gnome-terminal", args: ["--", "sh", "-lc", attach] },
+    { label: "GNOME Console", cmd: "kgx", args: ["--", "sh", "-lc", attach] },
+    { label: "KDE Konsole", cmd: "konsole", args: ["-e", "sh", "-lc", attach] },
+    { label: "XFCE Terminal", cmd: "xfce4-terminal", args: ["-e", `sh -lc ${shellQuote(attach)}`] },
+    { label: "MATE Terminal", cmd: "mate-terminal", args: ["--", "sh", "-lc", attach] },
+    { label: "Tilix", cmd: "tilix", args: ["-e", "sh", "-lc", attach] },
+    { label: "Kitty", cmd: "kitty", args: ["sh", "-lc", attach] },
+    { label: "Alacritty", cmd: "alacritty", args: ["-e", "sh", "-lc", attach] },
+    { label: "WezTerm", cmd: "wezterm", args: ["start", "--", "sh", "-lc", attach] },
+  );
+  return candidates;
+}
+
+async function tryLaunchTerminal(candidate: TerminalLaunchCandidate): Promise<string | null> {
+  try {
+    const proc = Bun.spawn([candidate.cmd, ...candidate.args], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const exitCode = await Promise.race([
+      proc.exited,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+    ]);
+    if (exitCode === null) return null;
+    if (exitCode === 0) return null;
+
+    const stderr = await new Response(proc.stderr).text();
+    return stderr.trim() || `exited with status ${exitCode}`;
+  } catch (err: any) {
+    return err?.message || "not available";
+  }
+}
+
+async function openTerminalForSession(sessionName: string): Promise<void> {
+  const errors: string[] = [];
+  for (const candidate of terminalLaunchCandidates(sessionName)) {
+    const error = await tryLaunchTerminal(candidate);
+    if (!error) return;
+    errors.push(`${candidate.label}: ${error}`);
+  }
+
+  throw new Error(`Could not open a terminal. Tried: ${errors.join("; ")}`);
+}
+
+async function openTerminalHandler(c: any) {
+  const name = c.req.param("name");
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
+  try {
+    await openTerminalForSession(name);
+    return c.json({ ok: true });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to open terminal" }, 500);
+  }
+}
 
 const app = new Hono();
 
@@ -37,10 +163,10 @@ app.get("/", async (c) => {
       let statusLine: SessionInfo["statusLine"] = undefined;
       const snap = await capturePaneSnapshot(s.name);
       if (snap.ok) {
-        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, s.name);
-        // Only use statusLine when agent isn't actively working — otherwise it's stale from a previous task
-        if (status !== "working") {
-          statusLine = extractStatusLine(snap.data.content) ?? undefined;
+        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, s.name, snap.data.title);
+        statusLine = displayStatusLine(snap.data.content, status) ?? undefined;
+        if (status === "working" && statusLine?.type !== "done" && statusLine?.type !== "error") {
+          statusLine = undefined;
         }
       }
       const agentType = getSessionAgentType(s.name) as AgentType | null;
@@ -95,7 +221,47 @@ app.get("/", async (c) => {
       };
     });
 
-  const allSessions = [...enriched, ...stoppedSessions];
+  // Agents the user started in their own tmux panes. Discovered fresh each poll —
+  // there is no metadata to persist, since Agentdock never created them.
+  const externalSessions: SessionInfo[] = await Promise.all(
+    (await discoverExternalAgents()).map(async (ext) => {
+      let status: SessionInfo["status"] = "unknown";
+      let statusLine: SessionInfo["statusLine"] = undefined;
+      const snap = await capturePaneSnapshot(ext.paneId, { target: ext.paneId });
+      if (snap.ok) {
+        // No hooks fire for a pane Agentdock did not launch, so this is terminal
+        // pattern matching only — less reliable than a native agent's status.
+        status = detectStatus(
+          snap.data.content,
+          snap.data.cursorY,
+          snap.data.scrollPosition,
+          snap.data.command,
+          undefined,
+          snap.data.title,
+        );
+        statusLine = displayStatusLine(snap.data.content, status) ?? undefined;
+        if (status === "working" && statusLine?.type !== "done" && statusLine?.type !== "error") {
+          statusLine = undefined;
+        }
+      }
+      return {
+        name: ext.name,
+        displayName: externalDisplayName(ext),
+        windows: 1,
+        attached: false,
+        created: 0,
+        path: ext.path,
+        worktrees: ext.worktrees,
+        status,
+        statusLine,
+        agentType: ext.agentType,
+        external: true,
+        externalTarget: ext.paneTarget,
+      };
+    }),
+  );
+
+  const allSessions = [...enriched, ...stoppedSessions, ...externalSessions];
 
   // Sort by saved order (unordered sessions appended at end)
   const order = getSessionOrder();
@@ -157,8 +323,11 @@ app.get("/:name/output", async (c) => {
     .replace(/\x1b\][^\x07]*\x07/g, "");
   const allLines = content.split("\n");
   const output = allLines.slice(-lines).join("\n");
-  const status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, name);
-  const statusLine = status !== "working" ? (extractStatusLine(snap.data.content) ?? undefined) : undefined;
+  const status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, name, snap.data.title);
+  let statusLine = displayStatusLine(snap.data.content, status) ?? undefined;
+  if (status === "working" && statusLine?.type !== "done" && statusLine?.type !== "error") {
+    statusLine = undefined;
+  }
   return c.json({ output, status, statusLine });
 });
 
@@ -177,9 +346,10 @@ app.get("/:name/children", async (c) => {
       let statusLine: SessionInfo["statusLine"] = undefined;
       const snap = await capturePaneSnapshot(s.name);
       if (snap.ok) {
-        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, s.name);
-        if (status !== "working") {
-          statusLine = extractStatusLine(snap.data.content) ?? undefined;
+        status = detectStatus(snap.data.content, snap.data.cursorY, snap.data.scrollPosition, snap.data.command, s.name, snap.data.title);
+        statusLine = displayStatusLine(snap.data.content, status) ?? undefined;
+        if (status === "working" && statusLine?.type !== "done" && statusLine?.type !== "error") {
+          statusLine = undefined;
         }
       }
       const agentType = getSessionAgentType(s.name) as AgentType | null;
@@ -201,31 +371,40 @@ app.get("/:name/children", async (c) => {
   return c.json(childSessions.filter(Boolean));
 });
 
-app.post("/:name/open-iterm", async (c) => {
+/**
+ * Open (or reattach to) a plain shell in one of this agent's worktrees.
+ *
+ * wtDir is checked against the agent's own worktrees rather than trusted: without
+ * that this is an endpoint for starting a shell in any directory on the machine.
+ */
+app.post("/:name/shell", async (c) => {
   const name = c.req.param("name");
-  const script = `
-    tell application "iTerm2"
-      activate
-      create window with default profile
-      tell current session of current window
-        write text "tmux attach -t ${name}"
-      end tell
-    end tell
-  `;
-  const proc = Bun.spawn(["osascript", "-e", script], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    return c.json({ error: stderr.trim() || "Failed to open iTerm" }, 500);
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
+
+  const body = await c.req.json().catch(() => ({})) as { wtDir?: string };
+  if (!body.wtDir) return c.json({ error: "wtDir is required" }, 400);
+
+  const worktrees = getSessionMeta(name);
+  const known = worktrees.some((meta) => meta.wtDir === body.wtDir);
+  if (!known) return c.json({ error: "wtDir is not a worktree of this agent" }, 403);
+
+  try {
+    const shellSession = await ensureShellSession(name, body.wtDir);
+    return c.json({ shellSession });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "Failed to open shell" }, 500);
   }
-  return c.json({ ok: true });
 });
+
+app.post("/:name/open-terminal", openTerminalHandler);
+// Backwards compatibility for older clients; behavior is now OS-default terminal.
+app.post("/:name/open-iterm", openTerminalHandler);
 
 app.post("/:name/input", async (c) => {
   const name = c.req.param("name");
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
   const body = await c.req.json() as { text: string };
   if (!body.text) return c.json({ error: "text is required" }, 400);
   await sendKeysRaw(name, body.text);
@@ -235,10 +414,12 @@ app.post("/:name/input", async (c) => {
 
 app.post("/:name/switch-agent", async (c) => {
   const name = c.req.param("name");
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
   const body = await c.req.json() as { agentType: AgentType; contextMessage?: string };
   
-  if (!body.agentType || !["claude", "cursor"].includes(body.agentType)) {
-    return c.json({ error: "agentType must be 'claude' or 'cursor'" }, 400);
+  if (!body.agentType || !["claude", "cursor", "codex"].includes(body.agentType)) {
+    return c.json({ error: "agentType must be 'claude', 'cursor', or 'codex'" }, 400);
   }
   
   const currentAgent = getSessionAgentType(name) || "claude";
@@ -263,7 +444,7 @@ app.post("/:name/switch-agent", async (c) => {
 
           // Step 1: Compress conversation
           send(`Compressing ${currentAgent} conversation...`);
-          const compressCmd = currentAgent === "claude" ? "/compact" : "/summarize";
+          const compressCmd = currentAgent === "cursor" ? "/summarize" : "/compact";
           await sendKeysRaw(name, compressCmd);
           await sendSpecialKey(name, "Enter");
 
@@ -333,13 +514,15 @@ app.post("/:name/switch-agent", async (c) => {
           let agentCmd: string;
           if (body.agentType === "cursor") {
             agentCmd = skipPerms ? "agent --yolo" : "agent";
+          } else if (body.agentType === "codex") {
+            agentCmd = skipPerms ? "codex --dangerously-bypass-approvals-and-sandbox" : "codex";
           } else {
             const base = skipPerms ? "claude --dangerously-skip-permissions" : "claude";
             agentCmd = `${base} --append-system-prompt-file ${sysPromptFile}`;
           }
 
           const contextPrompt = `Read ${contextFile} for context from the previous agent session, then continue the work.`;
-          await sendKeysRaw(name, `${agentCmd} "${contextPrompt}"`);
+          await sendKeysRaw(name, `${agentCmd} ${shellQuote(contextPrompt)}`);
           await sendSpecialKey(name, "Enter");
 
           const { saveSessionAgentType } = await import("../services/config");
@@ -366,6 +549,8 @@ app.post("/:name/switch-agent", async (c) => {
 
 app.patch("/:name/meta", async (c) => {
   const name = c.req.param("name");
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
   const body = await c.req.json() as Record<string, string>;
   const current = getSessionProperties(name);
   const merged = { ...current, ...body };
@@ -379,6 +564,8 @@ app.patch("/:name/meta", async (c) => {
 
 app.post("/:name/restore", async (c) => {
   const name = c.req.param("name");
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
   try {
     await restoreSession(name);
     return c.json({ ok: true });
@@ -389,6 +576,8 @@ app.post("/:name/restore", async (c) => {
 
 app.delete("/:name", async (c) => {
   const name = c.req.param("name");
+  const blocked = rejectExternal(c, name);
+  if (blocked) return blocked;
   try {
     await stopSession(name);
     return c.json({ ok: true });

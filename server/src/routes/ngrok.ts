@@ -1,77 +1,102 @@
 import { Hono } from "hono";
-import { spawn, execSync } from "child_process";
-import type { ChildProcess } from "child_process";
-import { getNgrokBasicAuth } from "../services/config";
+import {
+  fetchNgrokTunnel,
+  getProtection,
+  requiresAcknowledgement,
+  startNgrokTunnel,
+  stopNgrokProcess,
+  tunnelMatchesPort,
+  validPort,
+  type SpawnFn,
+} from "../services/ngrok";
+import type { NgrokStatus } from "../types";
 
 const app = new Hono();
 
-let ngrokProcess: ChildProcess | null = null;
-
-async function fetchNgrokUrl(): Promise<string | null> {
-  try {
-    const res = await fetch("http://127.0.0.1:4040/api/tunnels");
-    if (!res.ok) return null;
-    const data = await res.json() as any;
-    const tunnel = data.tunnels?.find((t: any) => t.proto === "https");
-    return tunnel?.public_url ?? data.tunnels?.[0]?.public_url ?? null;
-  } catch {
-    return null;
-  }
+/** Overridable so route tests can assert the gate rejects before anything is spawned. */
+let spawnFn: SpawnFn | undefined;
+export function __setSpawnFnForTests(fn: SpawnFn | undefined): void {
+  spawnFn = fn;
 }
 
-// Always check the real ngrok local API — works even if server restarted
+// Always ask the real ngrok agent — this stays correct across a server restart, when
+// our own process handle is gone.
 app.get("/status", async (c) => {
-  const url = await fetchNgrokUrl();
-  return c.json({ running: url !== null, url });
+  const tunnel = await fetchNgrokTunnel();
+  const port = validPort(c.req.query("targetPort"));
+  const stale = tunnel !== null && port !== null && !tunnelMatchesPort(tunnel, port);
+
+  return c.json({
+    running: tunnel !== null && !stale,
+    url: stale ? null : tunnel?.url ?? null,
+    protection: getProtection(),
+  } satisfies NgrokStatus);
 });
 
 app.post("/start", async (c) => {
   try {
-    // Already running (externally or via us)
-    const existingUrl = await fetchNgrokUrl();
-    if (existingUrl) {
-      return c.json({ running: true, url: existingUrl });
+    const body = (await c.req.json().catch(() => ({}))) as {
+      targetPort?: string;
+      acknowledgeUnprotected?: boolean;
+    };
+    const port = validPort(body.targetPort) || process.env.NGROK_PORT || "5173";
+
+    // Reuse a tunnel already pointing at the right place; replace one that isn't.
+    const existing = await fetchNgrokTunnel();
+    if (existing && tunnelMatchesPort(existing, port)) {
+      return c.json({
+        running: true,
+        url: existing.url,
+        protection: getProtection(),
+      } satisfies NgrokStatus);
     }
 
-    const port = process.env.NGROK_PORT || "5173";
-    // Vite uses basicSsl (HTTPS), so ngrok must connect via https and rewrite the host header
-    const args = ["http", `https://localhost:${port}`, "--host-header=rewrite"];
-    const basicAuth = getNgrokBasicAuth();
-    if (basicAuth) args.push("--basic-auth", basicAuth);
-    const proc = spawn("ngrok", args, { detached: false });
-
-    proc.on("exit", () => {
-      if (ngrokProcess === proc) ngrokProcess = null;
-    });
-
-    ngrokProcess = proc;
-
-    // Poll until tunnel is up (max 8s)
-    let url: string | null = null;
-    for (let i = 0; i < 16; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      url = await fetchNgrokUrl();
-      if (url) break;
+    // Gate before spawning anything. This publishes a dashboard that can run shell
+    // commands on this machine, so a weak or absent password needs acknowledgement.
+    if (requiresAcknowledgement() && !body.acknowledgeUnprotected) {
+      const protection = getProtection();
+      return c.json(
+        {
+          running: false,
+          url: null,
+          reason: "unprotected",
+          error:
+            protection === "none"
+              ? "No password is set — anyone with the link could run shell commands on this machine."
+              : "Your password is short enough to guess — anyone with the link could run shell commands on this machine.",
+          protection,
+        } satisfies NgrokStatus,
+        409,
+      );
     }
 
-    return c.json({ running: url !== null, url });
+    if (existing) await stopNgrokProcess();
+
+    const result = await startNgrokTunnel({ port, spawnFn });
+    return c.json({
+      running: result.url !== null,
+      url: result.url,
+      error: result.error,
+      reason: result.reason,
+      detail: result.detail,
+      protection: getProtection(),
+    } satisfies NgrokStatus);
   } catch (err: any) {
-    return c.json({ running: false, url: null, error: err?.message ?? "failed to start ngrok" }, 500);
+    return c.json(
+      {
+        running: false,
+        url: null,
+        error: err?.message ?? "Failed to start the share link.",
+        reason: "unknown",
+        protection: getProtection(),
+      } satisfies NgrokStatus,
+      500,
+    );
   }
 });
 
 app.post("/stop", async (c) => {
-  // Kill our tracked process if we have one
-  if (ngrokProcess) {
-    ngrokProcess.kill();
-    ngrokProcess = null;
-  }
-  // Also kill any external ngrok process (e.g. started before server restart)
-  try {
-    execSync("pkill -f 'ngrok http'", { stdio: "ignore" });
-  } catch {
-    // pkill exits non-zero if nothing matched — that's fine
-  }
+  await stopNgrokProcess();
   return c.json({ ok: true });
 });
 

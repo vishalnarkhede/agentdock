@@ -14,6 +14,8 @@ export interface SessionTemplate {
   targets: string[];
   prompt?: string;
   isolated?: boolean;
+  worktreeMode?: "direct" | "fresh-current" | "fresh-main" | "fresh-custom";
+  worktreeBase?: string;
   grouped?: boolean;
   meta?: Record<string, string>;
 }

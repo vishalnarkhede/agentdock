@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getDbShards, getDbShard, addDbShard, removeDbShard } from "../services/config";
 import type { DbShard } from "../types";
+import { spawnTool } from "../services/spawn";
 
 const app = new Hono();
 
@@ -51,9 +52,9 @@ async function runQuery(shard: DbShard, query: string): Promise<{ rows: string; 
   const fullQuery = `SET statement_timeout = '120s'; ${limitedQuery}`;
 
   const start = Date.now();
-  const proc = Bun.spawn(
+  const proc = spawnTool(
+    "psql",
     [
-      "psql",
       "-h", shard.host,
       "-p", String(shard.port),
       "-U", shard.user,
@@ -63,7 +64,6 @@ async function runQuery(shard: DbShard, query: string): Promise<{ rows: string; 
     ],
     {
       env: {
-        ...process.env,
         PGPASSWORD: shard.password,
         PGSSLMODE: shard.sslmode || "require",
       },

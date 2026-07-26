@@ -28,13 +28,17 @@ import {
   deleteHookStatus,
   deleteSessionProperties,
   getSessionProperties,
+  getKnownSessionNames,
   isSessionClaudeNamed,
   markSessionClaudeNamed,
   deleteSessionClaudeNamed,
+  PLANS_DIR_PATH,
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
-import type { CreateSessionRequest, AgentType } from "../types";
+import { killShellSessions } from "./shell-sessions";
+import { spawnTool } from "./spawn";
+import type { CreateSessionRequest, AgentType, WorktreeMode } from "../types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,13 +68,14 @@ const ALLOWED_TOOLS = [
 
 const PROMPT_DIR = "/tmp/agentdock-prompts";
 const SYSTEM_PROMPT_DIR = "/tmp/agentdock-system-prompts";
-const PLANS_DIR = `${HOME_DIR}/.config/agentdock/plans`;
 const SYSTEM_PROMPT_TEMPLATE = join(__dirname, "..", "prompts", "system-prompt.md");
 
 function buildSystemInstructions(sessionName: string): string {
   const template = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
+  // PLANS_DIR_PATH, not a local constant: the agent must be told the same
+  // directory getPlan() reads, which follows AGENTDOCK_CONFIG_DIR.
   return template
-    .replace(/\{\{PLANS_DIR\}\}/g, PLANS_DIR)
+    .replace(/\{\{PLANS_DIR\}\}/g, PLANS_DIR_PATH)
     .replace(/\{\{SESSION_NAME\}\}/g, sessionName);
 }
 
@@ -95,9 +100,93 @@ function writePromptFile(sessionName: string, prompt: string): string {
   return promptFile;
 }
 
+function shellQuote(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+function agentdockServerUrl(): string {
+  const port = process.env.PORT || process.env.SERVER_PORT || "4800";
+  const host = process.env.AGENTDOCK_HOST || "127.0.0.1";
+  const displayHost = host === "0.0.0.0" || host === "127.0.0.1" ? "localhost" : host;
+  return `http://${displayHost}:${port}`;
+}
+
+// Runs as tmux new-session's command, so the agent starts directly and no
+// interactive shell is around to swallow the launch command.
+//
+// The exec is load-bearing, not style: it makes the agent the pane's own process,
+// so tmux reports "claude"/"codex"/"agent" as #{pane_current_command}. Without it
+// the pane reports the shell, and isAgentCommand() — which drives
+// sessionHasAgentPane(), external-pane discovery, and the shell branch of
+// detectStatus() — stops recognising the pane as an agent at all.
+//
+// Surviving a failed launch is handled by remain-on-exit in createSession, not by
+// keeping a shell in front of the agent.
+function asInitialAgentCommand(command: string): string {
+  return `exec ${command}`;
+}
+
+function stripAnsi(value: string): string {
+  return value
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
+}
+
+function promptTail(content: string): string {
+  return stripAnsi(content)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-30)
+    .join("\n");
+}
+
+async function capturePromptTail(sess: string): Promise<string> {
+  const snap = await tmux.capturePaneSnapshot(sess);
+  return snap.ok ? promptTail(snap.data.content) : "";
+}
+
+async function waitForClaudeStartupPrompt(sess: string): Promise<string> {
+  let content = "";
+  for (let i = 0; i < 12; i++) {
+    content = await capturePromptTail(sess);
+    if (/Bypass Permissions mode|Quick safety check|trust this folder/i.test(content)) {
+      return content;
+    }
+    await sleep(500);
+  }
+  return content;
+}
+
+async function acceptClaudeStartupPrompts(sess: string, skipPermissions?: boolean): Promise<void> {
+  let content = await waitForClaudeStartupPrompt(sess);
+
+  if (skipPermissions && /Bypass Permissions mode/i.test(content)) {
+    await tmux.sendKeysRaw(sess, "2");
+    await tmux.sendSpecialKey(sess, "Enter");
+    await sleep(1500);
+    content = await waitForClaudeStartupPrompt(sess);
+  }
+
+  if (/Quick safety check|trust this folder/i.test(content)) {
+    await tmux.sendSpecialKey(sess, "Enter");
+  }
+}
+
 export function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?: boolean, systemPromptFile?: string, addDirs?: string[], claudeSessionName?: string): string {
   if (agentType === "cursor") {
     return dangerouslySkipPermissions ? "agent --yolo" : "agent";
+  }
+
+  if (agentType === "codex") {
+    let cmd = dangerouslySkipPermissions ? "codex --dangerously-bypass-approvals-and-sandbox" : "codex";
+    if (addDirs && addDirs.length > 0) {
+      cmd += ` ${addDirs.map((dir) => `--add-dir ${shellQuote(dir)}`).join(" ")}`;
+    }
+    if (systemPromptFile) {
+      cmd += ` ${shellQuote(`Read and follow the Agentdock session instructions in ${systemPromptFile}.`)}`;
+    }
+    return cmd;
   }
 
   // Claude agent command
@@ -122,9 +211,29 @@ export function buildAgentCmd(agentType: AgentType, dangerouslySkipPermissions?:
 
 function shortId(): string {
   return createHash("sha1")
-    .update(Date.now().toString())
+    .update(`${Date.now()}-${Math.random()}`)
     .digest("hex")
     .slice(0, 6);
+}
+
+function sessionNameSlug(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || shortId();
+}
+
+async function isSessionNameUsed(name: string): Promise<boolean> {
+  return (await tmux.hasSession(name)) || getKnownSessionNames().includes(name);
+}
+
+async function uniqueSessionName(base: string): Promise<string> {
+  if (!(await isSessionNameUsed(base))) return base;
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${base}-${i}`;
+    if (!(await isSessionNameUsed(candidate))) return candidate;
+  }
+  return `${base}-${shortId()}`;
 }
 
 export function sessionNameFromTarget(target: string): string {
@@ -156,6 +265,7 @@ async function resolvePiece(
   workDir: string;
   repoPath: string;
   isWorktree: boolean;
+  managedWorktree: boolean;
 }> {
   const { alias, branch } = parsePiece(piece);
   const repo = resolveAlias(alias);
@@ -163,22 +273,23 @@ async function resolvePiece(
 
   if (branch) {
     const opts = sessionSlug ? { sessionSlug, repoAlias: alias } : undefined;
+    const sourceRepoPath = await worktree.getSourceRepoPath(repo.path);
     const wtDir = await worktree.createWorktree(
       repo.path,
       branch,
       newBranch || undefined,
       opts,
     );
-    return { workDir: wtDir, repoPath: repo.path, isWorktree: true };
+    return { workDir: wtDir, repoPath: sourceRepoPath, isWorktree: true, managedWorktree: true };
   }
 
-  return { workDir: repo.path, repoPath: repo.path, isWorktree: false };
+  return { workDir: repo.path, repoPath: repo.path, isWorktree: false, managedWorktree: false };
 }
 
 async function checkAgentInstalled(agentType: AgentType): Promise<void> {
-  const cmd = agentType === "cursor" ? "agent" : "claude";
+  const cmd = agentType === "cursor" ? "agent" : agentType;
   try {
-    const proc = Bun.spawn([cmd, "--version"], { stdout: "pipe", stderr: "pipe" });
+    const proc = spawnTool(cmd, ["--version"], { stdout: "pipe", stderr: "pipe" });
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
       // Version command failed — still probably installed; proceed
@@ -189,11 +300,15 @@ async function checkAgentInstalled(agentType: AgentType): Promise<void> {
         throw new Error(
           "Cursor agent CLI is not installed. Install the Cursor IDE from cursor.com, then enable the agent CLI."
         );
-      } else {
+      }
+      if (agentType === "codex") {
         throw new Error(
-          "Claude Code is not installed. Install it with:\n  npm install -g @anthropic-ai/claude-code\n  or visit: https://claude.ai/code"
+          "Codex CLI is not installed. Install it with Homebrew or npm, then run `codex login`."
         );
       }
+      throw new Error(
+        "Claude Code is not installed. Install it with:\n  npm install -g @anthropic-ai/claude-code\n  or visit: https://claude.ai/code"
+      );
     }
     // Other errors (permission denied, etc.) — let it proceed and fail naturally
   }
@@ -217,7 +332,7 @@ async function launchAgent(
   const parentName = parentSession || sess;
   const sessionEnv: Record<string, string> = {
     AD_AGENT_PARENT: parentName,
-    AGENTDOCK_SERVER: "http://localhost:4800",
+    AGENTDOCK_SERVER: agentdockServerUrl(),
     DISABLE_UPDATE_PROMPT: "true", // suppress oh-my-zsh update prompt
     NO_COLOR: "", // override NO_COLOR from tmux global env so agents render with colors
     COLORTERM: "truecolor", // enable 24-bit color support
@@ -228,32 +343,29 @@ async function launchAgent(
   if (authPassword) {
     sessionEnv.AD_AUTH_TOKEN = createHash("sha256").update(`ad:${authPassword}`).digest("hex");
   }
-  await tmux.createSession(sess, cwd, sessionEnv);
-  await tmux.setOption(sess, "extended-keys", "on");
-
-  // Write system prompt file with agentdock instructions (plan saving, PR monitoring, etc.)
-  // For Claude, this is injected via --append-system-prompt-file so it's always present
+  // Write system prompt file before creating the tmux session so the agent can
+  // start directly. This avoids interactive shell startup prompts stealing the
+  // launch command before Claude/Codex/Cursor ever starts.
   const systemPromptFile = writeSystemPromptFile(sess, meta);
-
-  // Wait for shell init to complete before sending commands
   const displayName = sess.replace(`${PREFIX}-`, "");
-  await sleep(2000);
-  await tmux.sendKeys(sess, buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile, addDirs, agentType === "claude" ? displayName : undefined));
+  const agentCmd = buildAgentCmd(agentType, dangerouslySkipPermissions, systemPromptFile, addDirs, agentType === "claude" ? displayName : undefined);
+  await tmux.createSession(sess, cwd, sessionEnv, asInitialAgentCommand(agentCmd));
+  await tmux.setOption(sess, "extended-keys", "on");
 
   // Save session metadata
   saveSessionAgentType(sess, agentType);
   saveSessionSkipPerms(sess, !!dangerouslySkipPermissions);
   if (agentType === "claude") markSessionClaudeNamed(sess);
 
+  if (agentType === "claude") {
+    await acceptClaudeStartupPrompts(sess, dangerouslySkipPermissions);
+  }
+
   if (prompt) {
     const promptFile = writePromptFile(sess, prompt);
     console.log(`[launch] ${sess}: prompt written to ${promptFile} (${prompt.length} chars)`);
-    // Wait for agent to show trust prompt (if any), accept it, then wait for full boot
-    await sleep(2000);
-    if (agentType === "claude") {
-      await tmux.sendSpecialKey(sess, "Enter"); // accept trust prompt for Claude
-    }
-    await sleep(3000);
+    // Wait for the TUI to settle before sending the initial task.
+    await sleep(agentType === "claude" ? 3000 : 5000);
 
     if (agentType === "cursor") {
       await tmux.sendKeysRaw(sess, `Follow the instructions in ${promptFile}`);
@@ -267,23 +379,49 @@ async function launchAgent(
   }
 }
 
+function resolveRequestedWorktreeMode(req: CreateSessionRequest): { mode: WorktreeMode; base?: string } {
+  if (req.worktreeMode) {
+    switch (req.worktreeMode) {
+      case "direct":
+        return { mode: "direct" };
+      case "fresh-current":
+        return { mode: "fresh-current", base: "HEAD" };
+      case "fresh-main":
+        return { mode: "fresh-main", base: "main" };
+      case "fresh-custom":
+        return { mode: "fresh-custom", base: (req.worktreeBase || req.newBranch || "").trim() };
+    }
+  }
+
+  if (req.isolated) {
+    return req.newBranch
+      ? { mode: "fresh-custom", base: req.newBranch }
+      : { mode: "fresh-main", base: "main" };
+  }
+
+  return { mode: "direct" };
+}
+
 export async function startSession(req: CreateSessionRequest): Promise<string[]> {
   let targets = [...req.targets];
   let prompt = req.prompt || "";
-  let isolated = req.isolated || false;
-  let newBranch = req.newBranch || "";
+  const requestedWorktree = resolveRequestedWorktreeMode(req);
+  const isolated = requestedWorktree.mode !== "direct";
+  let newBranch = requestedWorktree.base || "";
   let agentType: AgentType = req.agentType || "claude"; // Default to Claude for backward compatibility
 
-  // --isolated: generate worktree branch for every target
+  // Fresh worktree modes generate a temporary branch for every target.
   let sessionSlug: string | undefined;
   if (isolated) {
-    if (!newBranch) newBranch = "main";
+    if (requestedWorktree.mode === "fresh-custom" && !newBranch) {
+      throw new Error("Custom worktree base is required");
+    }
 
-    // Use a short ID for the worktree branch — Claude can rename/create
-    // the real branch as part of its workflow
+    // Use a short ID for the worktree branch — the agent can rename/create
+    // the real branch as part of its workflow.
     const wtBranch = `wt-${shortId()}`;
 
-    // Derive sessionSlug from wtBranch so they always match
+    // Derive sessionSlug from wtBranch so they always match.
     sessionSlug = wtBranch.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
 
     targets = targets.map((t) => {
@@ -307,15 +445,26 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
 
   // No repos selected — launch a plain agent session in ~/projects
   if (targets.length === 0) {
-    const sess = req.name
-      ? `${PREFIX}-${req.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`
+    const baseSessionName = req.name
+      ? `${PREFIX}-${sessionNameSlug(req.name)}`
       : `${PREFIX}-${shortId()}`;
+    let sess = req.name ? baseSessionName : await uniqueSessionName(baseSessionName);
 
-    if (!(await tmux.hasSession(sess))) {
-      await launchAgent(sess, `${HOME_DIR}/projects`, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession, undefined, req.meta);
-      if (req.parentSession) saveSessionParent(sess, req.parentSession);
-      if (req.sessionType) saveSessionType(sess, req.sessionType);
+    if (await tmux.hasSession(sess)) {
+      const existingAgentType = getSessionAgentType(sess) as AgentType | null;
+      const canReuseAgent = existingAgentType ? existingAgentType === agentType : agentType === "claude";
+      if ((await tmux.sessionHasAgentPane(sess)) && canReuseAgent) {
+        console.log(`[session] ${sess} already has a ${agentType} agent, reusing`);
+        return [sess];
+      }
+      const replacement = await uniqueSessionName(`${sess}-${Date.now().toString(36).slice(-4)}`);
+      console.log(`[session] ${sess} cannot be reused for ${agentType}, launching ${replacement} instead`);
+      sess = replacement;
     }
+
+    await launchAgent(sess, `${HOME_DIR}/projects`, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession, undefined, req.meta);
+    if (req.parentSession) saveSessionParent(sess, req.parentSession);
+    if (req.sessionType) saveSessionType(sess, req.sessionType);
     return [sess];
   }
 
@@ -323,18 +472,18 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
     const target = targets[i];
     let sess: string;
     if (req.name) {
-      const safeName = req.name.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const safeName = sessionNameSlug(req.name);
       sess = targets.length === 1
         ? `${PREFIX}-${safeName}`
         : `${PREFIX}-${safeName}-${i + 1}`;
     } else {
-      sess = sessionNameFromTarget(target);
+      sess = await uniqueSessionName(sessionNameFromTarget(target));
     }
 
     if (await tmux.hasSession(sess)) {
       if (prompt) {
         // Session exists but we have a prompt to send — create a new session with unique suffix
-        sess = `${sess}-${Date.now().toString(36).slice(-4)}`;
+        sess = await uniqueSessionName(`${sess}-${Date.now().toString(36).slice(-4)}`);
         console.log(`[session] Original session existed, created unique name: ${sess}`);
       } else {
         console.log(`[session] ${sess} already exists, reusing`);
@@ -352,7 +501,7 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
         const resolved = await resolvePiece(piece, newBranch, sessionSlug);
         workDirs.push(resolved.workDir);
         if (resolved.isWorktree) {
-          saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir);
+          saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir, resolved.managedWorktree);
         }
       }
 
@@ -388,8 +537,9 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
     } else {
       // Single repo
       const resolved = await resolvePiece(target, newBranch, sessionSlug);
-      // Always save path metadata so the session list shows the correct repo path
-      saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir);
+      // Always save path metadata so the session list shows the correct repo path.
+      // Only Agentdock-created worktrees are marked for cleanup on stop.
+      saveWorktreeMeta(sess, resolved.repoPath, resolved.workDir, resolved.managedWorktree);
 
       await launchAgent(sess, resolved.workDir, agentType, prompt || undefined, req.dangerouslySkipPermissions, req.parentSession, undefined, req.meta);
     }
@@ -420,9 +570,20 @@ export async function stopSession(sessionName: string): Promise<void> {
     await tmux.killSession(sessionName);
   }
 
-  // Clean up worktrees
+  // Before worktree removal: a shell sitting in a worktree holds it as its cwd,
+  // and git refuses to remove a worktree that is still in use.
+  await killShellSessions(sessionName);
+
+  // Clean up only Agentdock-owned worktrees. Existing configured worktrees are
+  // tracked for display/restore metadata but must not be deleted on stop.
   const metas = getSessionMeta(sessionName);
-  for (const meta of metas) {
+  const slug = sessionName.replace(`${PREFIX}-`, "");
+  const sessionWorkspace = worktree.sessionWorkspaceDir(slug);
+  const isManagedMeta = (meta: { wtDir: string; managed?: boolean }) => (
+    meta.managed || meta.wtDir === sessionWorkspace || meta.wtDir.startsWith(`${sessionWorkspace}/`)
+  );
+  const managedMetas = metas.filter(isManagedMeta);
+  for (const meta of managedMetas) {
     try {
       await worktree.removeWorktree(meta.repoPath, meta.wtDir);
     } catch {
@@ -431,11 +592,12 @@ export async function stopSession(sessionName: string): Promise<void> {
   }
 
   // Clean up session workspace directory (for isolated sessions)
-  const slug = sessionName.replace(`${PREFIX}-`, "");
-  try {
-    await worktree.removeSessionWorkspace(slug);
-  } catch {
-    // Best effort cleanup
+  if (managedMetas.length > 0) {
+    try {
+      await worktree.removeSessionWorkspace(slug);
+    } catch {
+      // Best effort cleanup
+    }
   }
 
   // Remove metadata files
@@ -503,7 +665,7 @@ export async function restoreSession(sessionName: string): Promise<void> {
 
   const sessionEnv: Record<string, string> = {
     AD_AGENT_PARENT: parentSession,
-    AGENTDOCK_SERVER: "http://localhost:4800",
+    AGENTDOCK_SERVER: agentdockServerUrl(),
     DISABLE_UPDATE_PROMPT: "true",
     NO_COLOR: "",
     COLORTERM: "truecolor",
@@ -514,12 +676,7 @@ export async function restoreSession(sessionName: string): Promise<void> {
     sessionEnv.AD_AUTH_TOKEN = createHash("sha256").update(`ad:${authPassword}`).digest("hex");
   }
 
-  await tmux.createSession(sessionName, cwd, sessionEnv);
-  await tmux.setOption(sessionName, "extended-keys", "on");
-
   const systemPromptFile = writeSystemPromptFile(sessionName, Object.keys(meta).length > 0 ? meta : undefined);
-
-  await sleep(2000);
 
   // Build resume command: --resume <name> resumes Claude conversation history
   let cmd: string;
@@ -538,11 +695,11 @@ export async function restoreSession(sessionName: string): Promise<void> {
     cmd += ` --resume "${displayName}"`;
   }
 
-  await tmux.sendKeys(sessionName, cmd);
+  await tmux.createSession(sessionName, cwd, sessionEnv, asInitialAgentCommand(cmd));
+  await tmux.setOption(sessionName, "extended-keys", "on");
 
-  // Accept trust prompt (if any) then mark as named
-  await sleep(2000);
-  await tmux.sendSpecialKey(sessionName, "Enter");
+  // Accept Claude startup prompts after the resume command starts.
+  await acceptClaudeStartupPrompts(sessionName, skipPerms);
   markSessionClaudeNamed(sessionName);
 
   console.log(`[restore] ${sessionName}: resumed with uuid=${sessionUuid ?? `name:${displayName}`}`);

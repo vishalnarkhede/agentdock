@@ -1,20 +1,141 @@
 import { Hono } from "hono";
+import { spawnTool } from "../services/spawn";
 
 const app = new Hono();
 
-async function runGit(cwd: string, args: string[]): Promise<{ stdout: string; exitCode: number }> {
-  const proc = Bun.spawn(["git", ...args], {
+interface GitStats {
+  files: number;
+  additions: number;
+  deletions: number;
+}
+
+interface GitBranchComparison extends GitStats {
+  ref: string;
+  ahead: number;
+  behind: number;
+}
+
+async function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = spawnTool("git", args, {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const stdout = await new Response(proc.stdout).text();
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   const exitCode = await proc.exited;
-  return { stdout, exitCode };
+  return { stdout, stderr, exitCode };
+}
+
+function parseShortStat(stdout: string): GitStats {
+  const text = stdout.trim();
+  if (!text) return { files: 0, additions: 0, deletions: 0 };
+
+  const files = text.match(/(\d+)\s+files? changed/);
+  const additions = text.match(/(\d+)\s+insertions?\(\+\)/);
+  const deletions = text.match(/(\d+)\s+deletions?\(-\)/);
+
+  return {
+    files: files ? Number(files[1]) : 0,
+    additions: additions ? Number(additions[1]) : 0,
+    deletions: deletions ? Number(deletions[1]) : 0,
+  };
+}
+
+function addStats(a: GitStats, b: GitStats): GitStats {
+  return {
+    files: a.files + b.files,
+    additions: a.additions + b.additions,
+    deletions: a.deletions + b.deletions,
+  };
+}
+
+function parseUntrackedFiles(status: string): string[] {
+  return status
+    .split("\n")
+    .filter((line) => line.startsWith("??"))
+    .map((line) => line.slice(3).trim())
+    .filter(Boolean);
+}
+
+async function getWorkingTreeStats(cwd: string, status: string): Promise<GitStats> {
+  const tracked = await runGit(cwd, ["diff", "--shortstat", "HEAD"]);
+  let stats = parseShortStat(tracked.stdout);
+
+  const untrackedFiles = parseUntrackedFiles(status);
+  if (untrackedFiles.length === 0) return stats;
+
+  const untrackedStats = await Promise.all(
+    untrackedFiles.map((file) =>
+      runGit(cwd, ["diff", "--shortstat", "--no-index", "/dev/null", file])
+        .then((result) => parseShortStat(result.stdout)),
+    ),
+  );
+  for (const item of untrackedStats) {
+    stats = addStats(stats, item);
+  }
+  return stats;
+}
+
+async function refExists(cwd: string, ref: string): Promise<boolean> {
+  const result = await runGit(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  return result.exitCode === 0;
+}
+
+async function resolveBaseComparisonRef(cwd: string, upstream: { stdout: string; exitCode: number }): Promise<string | null> {
+  for (const ref of ["origin/main", "origin/master", "main", "master"]) {
+    if (await refExists(cwd, ref)) return ref;
+  }
+
+  if (upstream.exitCode === 0 && upstream.stdout.trim()) {
+    return upstream.stdout.trim();
+  }
+
+  return null;
+}
+
+async function getBranchComparison(cwd: string, ref: string | null): Promise<GitBranchComparison | null> {
+  if (!ref) return null;
+
+  const [counts, diff] = await Promise.all([
+    runGit(cwd, ["rev-list", "--left-right", "--count", `${ref}...HEAD`]),
+    runGit(cwd, ["diff", "--shortstat", `${ref}...HEAD`]),
+  ]);
+
+  if (counts.exitCode !== 0) return null;
+  const [behindRaw, aheadRaw] = counts.stdout.trim().split(/\s+/);
+  const stats = parseShortStat(diff.stdout);
+
+  return {
+    ref,
+    ahead: Number(aheadRaw || 0),
+    behind: Number(behindRaw || 0),
+    ...stats,
+  };
+}
+
+function parseGitLog(stdout: string): Array<{ hash: string; shortHash: string; author: string; date: string; subject: string; refs: string }> {
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [hash, shortHash, author, date, subject, refs] = line.split("\x1f");
+      return {
+        hash: hash || "",
+        shortHash: shortHash || "",
+        author: author || "",
+        date: date || "",
+        subject: subject || "",
+        refs: refs || "",
+      };
+    })
+    .filter((commit) => commit.hash && commit.subject);
 }
 
 async function runGh(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["gh", ...args], {
+  const proc = spawnTool("gh", args, {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -57,6 +178,67 @@ app.get("/repos", async (c) => {
   return c.json({ repos });
 });
 
+// GET /api/git/summary?path=/Users/.../repo
+app.get("/summary", async (c) => {
+  const cwd = c.req.query("path");
+  if (!cwd) return c.json({ error: "path is required" }, 400);
+
+  const [status, branch, upstream] = await Promise.all([
+    runGit(cwd, ["status", "--porcelain"]),
+    runGit(cwd, ["branch", "--show-current"]),
+    runGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]),
+  ]);
+
+  if (status.exitCode !== 0) {
+    return c.json({ error: status.stderr.trim() || "Failed to read git status" }, 400);
+  }
+
+  const comparisonRef = await resolveBaseComparisonRef(cwd, upstream);
+  const [workingTree, comparison] = await Promise.all([
+    getWorkingTreeStats(cwd, status.stdout),
+    getBranchComparison(cwd, comparisonRef),
+  ]);
+
+  return c.json({
+    branch: branch.stdout.trim() || "detached",
+    upstream: upstream.exitCode === 0 ? upstream.stdout.trim() : null,
+    status: status.stdout,
+    workingTree,
+    comparison,
+  });
+});
+
+// GET /api/git/log?path=/Users/.../repo&limit=50
+app.get("/log", async (c) => {
+  const cwd = c.req.query("path");
+  if (!cwd) return c.json({ error: "path is required" }, 400);
+
+  const parsedLimit = parseInt(c.req.query("limit") || "50", 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(parsedLimit, 100)) : 50;
+
+  const [branch, upstream, log] = await Promise.all([
+    runGit(cwd, ["branch", "--show-current"]),
+    runGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]),
+    runGit(cwd, [
+      "log",
+      `--max-count=${limit}`,
+      "--date=short",
+      "--decorate=short",
+      "--format=%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1f%D",
+    ]),
+  ]);
+
+  if (log.exitCode !== 0) {
+    return c.json({ error: log.stderr.trim() || "Failed to read git log" }, 400);
+  }
+
+  return c.json({
+    branch: branch.stdout.trim() || "detached",
+    upstream: upstream.exitCode === 0 ? upstream.stdout.trim() : null,
+    commits: parseGitLog(log.stdout),
+  });
+});
+
 // GET /api/git/changes?path=/Users/.../repo
 app.get("/changes", async (c) => {
   const cwd = c.req.query("path");
@@ -70,11 +252,7 @@ app.get("/changes", async (c) => {
 
   // Generate diffs for untracked (new) files so they show up in the Changes tab
   let fullDiff = diff.stdout;
-  const untrackedFiles = status.stdout
-    .split("\n")
-    .filter((line) => line.startsWith("??"))
-    .map((line) => line.slice(3).trim())
-    .filter(Boolean);
+  const untrackedFiles = parseUntrackedFiles(status.stdout);
   if (untrackedFiles.length > 0) {
     const untrackedDiffs = await Promise.all(
       untrackedFiles.map((file) =>

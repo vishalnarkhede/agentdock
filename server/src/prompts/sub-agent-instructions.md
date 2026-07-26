@@ -18,7 +18,7 @@ ad-agent spawn --repo <alias> --prompt "task description"
 Options:
 - `--repo <alias>` (required) — repo alias (e.g. `chat`, `django`, `js-sdk`)
 - `--prompt "..."` (required) — task description for the sub-agent
-- `--agent-type claude|cursor` — which agent CLI to use (default: claude)
+- `--agent-type claude|cursor|codex` — which agent CLI to use (default: claude)
 - `--skip-perms` — run with full permissions (--dangerously-skip-permissions / --yolo)
 - `--name <name>` — custom session name
 
@@ -84,7 +84,7 @@ ad-agent kill $AGENT2
 ## Important notes
 
 - Each sub-agent runs in its own tmux session with full agent capabilities
-- Sub-agents inherit the same agent type (Claude/Cursor) unless overridden
+- Sub-agents inherit the same agent type (Claude/Cursor/Codex) unless overridden
 - Sub-agents are automatically cleaned up when the parent session is stopped
 - Use `ad-agent list` to see all your active sub-agents at any time
 - The `[STATUS: done | description]` convention works in sub-agents too — check their output for it
