@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { deleteSession } from "../api";
+import { agentTypeLabel, worktreeClause } from "../session-messages";
+import { ConfirmActionModal, type ConfirmAction } from "./ConfirmActionModal";
 import type { SessionInfo } from "../types";
 
 function timeAgo(unixSeconds: number): string {
@@ -12,14 +14,15 @@ function timeAgo(unixSeconds: number): string {
 
 function getDisplayStatus(session: SessionInfo): string {
   if (session.statusLine?.type) return session.statusLine.type;
-  if (session.status === "shell") return "done";
+  if (session.status === "shell") return "inactive";
+  if (session.status === "unknown") return "sleeping";
   return session.status;
 }
 
 function statusLabel(session: SessionInfo): string {
   const s = getDisplayStatus(session);
   if (s === "working") return "working...";
-  if (s === "waiting") return "idle";
+  if (s === "sleeping") return "idle";
   return s;
 }
 
@@ -32,6 +35,7 @@ interface Props {
 
 export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefresh }: Props) {
   const [killing, setKilling] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
   const parent = sessions.find((s) => s.name === parentSession);
   const childNames = parent?.children ?? [];
@@ -39,20 +43,39 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
     .map((name) => sessions.find((s) => s.name === name))
     .filter(Boolean) as SessionInfo[];
 
-  const handleKill = async (name: string) => {
-    setKilling(name);
-    try {
-      await deleteSession(name);
-      onRefresh();
-    } finally {
-      setKilling(null);
-    }
+  const handleKill = (session: SessionInfo) => {
+    setConfirmAction({
+      title: "Stop sub-agent?",
+      message: `Stop "${session.displayName}"?`,
+      details: ["The terminal will close immediately.", worktreeClause([session]).trim()].filter(Boolean),
+      confirmLabel: "Stop sub-agent",
+      busyLabel: "Stopping...",
+      tone: "danger",
+      onConfirm: async () => {
+        setKilling(session.name);
+        try {
+          await deleteSession(session.name);
+          onRefresh();
+        } finally {
+          setKilling(null);
+        }
+      },
+    });
   };
 
   const handleKillAll = async () => {
-    if (!confirm(`Kill all ${children.length} sub-agents?`)) return;
-    await Promise.all(children.map((c) => deleteSession(c.name).catch(() => {})));
-    onRefresh();
+    setConfirmAction({
+      title: "Stop all sub-agents?",
+      message: `${children.length} sub-agent${children.length === 1 ? "" : "s"} will be stopped.`,
+      details: ["Each terminal will close immediately.", worktreeClause(children, true).trim()].filter(Boolean),
+      confirmLabel: "Stop all",
+      busyLabel: "Stopping...",
+      tone: "danger",
+      onConfirm: async () => {
+        await Promise.all(children.map((c) => deleteSession(c.name).catch(() => {})));
+        onRefresh();
+      },
+    });
   };
 
   if (children.length === 0) {
@@ -69,11 +92,12 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
     );
   }
 
-  const workingCount = children.filter((c) => c.status === "working").length;
-  const doneCount = children.filter((c) => getDisplayStatus(c) === "done" || c.status === "waiting").length;
+  const workingCount = children.filter((c) => getDisplayStatus(c) === "working").length;
+  const doneCount = children.filter((c) => getDisplayStatus(c) === "done").length;
   const errorCount = children.filter((c) => getDisplayStatus(c) === "error").length;
 
   return (
+    <>
     <div className="sub-agents-view">
       <div className="sub-agents-header">
         <div className="sub-agents-summary">
@@ -99,7 +123,7 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
           </div>
         </div>
         <button className="btn btn-stop btn-sm" onClick={handleKillAll}>
-          kill all
+          Stop all
         </button>
       </div>
 
@@ -133,7 +157,7 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
                 <span className="sub-agent-age">{timeAgo(child.created)}</span>
                 {child.agentType && (
                   <span className="sub-agent-agent">
-                    {child.agentType === "claude" ? "Claude" : "Cursor"}
+                    {agentTypeLabel(child.agentType)}
                   </span>
                 )}
                 <button
@@ -143,17 +167,17 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
                     onSelectChild(child.name);
                   }}
                 >
-                  view &rarr;
+                  View &rarr;
                 </button>
                 <button
                   className="sub-agent-kill"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleKill(child.name);
+                    handleKill(child);
                   }}
                   disabled={killing === child.name}
                 >
-                  {killing === child.name ? "..." : "kill"}
+                  {killing === child.name ? "..." : "Stop"}
                 </button>
               </div>
             </div>
@@ -161,5 +185,12 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
         })}
       </div>
     </div>
+    {confirmAction && (
+      <ConfirmActionModal
+        action={confirmAction}
+        onClose={() => setConfirmAction(null)}
+      />
+    )}
+    </>
   );
 }

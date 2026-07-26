@@ -4,7 +4,7 @@ import { fetchPreferences, updatePreferences } from "../api";
 
 export interface Settings {
   // Appearance
-  theme: "terminal" | "dark" | "midnight" | "light" | "minimal" | "glass" | "notion" | "macos" | "win98";
+  theme: "terminal" | "dark" | "aurora" | "midnight" | "light" | "minimal" | "glass" | "notion" | "macos" | "win98";
   fontSize: "small" | "medium" | "large";
 
   // Terminal

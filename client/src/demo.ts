@@ -57,7 +57,7 @@ export const DEMO_SESSIONS: SessionInfo[] = [
     path: "~/projects/mobile-app",
     worktrees: [],
     status: "working",
-    agentType: "cursor",
+    agentType: "codex",
     meta: { project: "mobile" },
   },
   {
@@ -346,10 +346,13 @@ export const DEMO_SETTINGS_HEALTH: SettingsHealth = {
   tmux: { installed: true, version: "3.4" },
   claude: { installed: true, version: "1.0.16" },
   cursor: { installed: true, version: "0.46.8" },
+  codex: { installed: true, version: "codex-cli 0.142.0" },
   git: { installed: true, version: "2.44.0" },
   gh: { installed: true, version: "2.49.0" },
   bun: { installed: true, version: "1.1.42" },
+  jq: { installed: true, version: "jq-1.7.1" },
   psql: { installed: true, version: "16.2" },
+  ngrok: { installed: true, version: "ngrok version 3.18.4" },
 };
 
 

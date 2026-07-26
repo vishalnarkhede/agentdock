@@ -1,22 +1,28 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { MetaSelect } from "../components/MetaSelect";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openTerminal, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchGitSummary, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchRepos, fetchSettingsHealth, setPassword, type GitDiffStats } from "../api";
 import { isDemo } from "../demo";
+import { agentTypeLabel, worktreeClause } from "../session-messages";
+import { NEW_AGENT_SHORTCUT } from "../shortcuts";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
 import { FileExplorer } from "../components/FileExplorer";
+import { ShellView } from "../components/ShellView";
+import { GitLogView } from "../components/GitLogView";
+import { WorktreesView } from "../components/WorktreesView";
+import { ConfirmActionModal, type ConfirmAction } from "../components/ConfirmActionModal";
+import { CreateSessionModal } from "./CreateSession";
 import type { FileExplorerHandle } from "../components/FileExplorer";
 import { useMobileNav } from "../MobileNavContext";
 import { useAuth } from "../hooks/useAuth";
-import type { SessionInfo, MetaPropertyPreset } from "../types";
-import type { QuickLaunch } from "../components/Header";
+import type { SessionInfo, MetaPropertyPreset, QuickLaunch, AgentType } from "../types";
 
 function timeAgo(unixSeconds: number): string {
   const diff = Math.floor(Date.now() / 1000) - unixSeconds;
@@ -26,35 +32,291 @@ function timeAgo(unixSeconds: number): string {
   return `${Math.floor(diff / 86400)}d`;
 }
 
+const NEW_SESSION_FOCUS_TIMEOUT_MS = 10_000;
+
+// Block capitals rather than the old three-row box-drawing font: at that height "c"
+// (┌─┐│  └─┘) and "k" (┬┌─├┴┐┴ ┴) were near-unreadable. Five rows gives each letter
+// a distinct shape, and the wider gap separates the two words. 55 columns, uniform.
 const ASCII_LOGO = `
- ┌─┐┌─┐┌─┐┌┐┌┌┬┐┌┬┐┌─┐┌─┐┬┌─
- ├─┤│ ┬├┤ │││ │  │││ │ │  ├┴┐
- ┴ ┴└─┘└─┘┘└┘ ┴ ─┴┘└─┘└─┘┴ ┴
+ ███   ████ █████ █   █ █████   ████   ███   ████ █   █
+█   █ █     █     ██  █   █     █   █ █   █ █     █  █
+█████ █  ██ ████  █ █ █   █     █   █ █   █ █     ███
+█   █ █   █ █     █  ██   █     █   █ █   █ █     █  █
+█   █  ████ █████ █   █   █     ████   ███   ████ █   █
 `;
+
+/**
+ * Which repo(s) an agent is working in.
+ *
+ * Grouping on the worktree directory would put every agent in its own group, since
+ * each isolated agent gets a fresh one — the repo is the axis that actually gathers
+ * related work. Agents with no worktree (a general chat) return "" and fall into
+ * Ungrouped rather than inventing a bucket for them.
+ */
+function repoLabel(session: SessionInfo): string {
+  const repos = session.worktrees
+    .map((wt) => wt.repoPath.replace(/\/+$/, "").split("/").pop() || "")
+    .filter(Boolean);
+  const unique = [...new Set(repos)];
+  // Multi-repo agents get one combined group; listing them under each repo would
+  // mean rendering the same session more than once.
+  return unique.join(" + ");
+}
 
 function getDemoTutorialAttr(session: SessionInfo): string | undefined {
   if (!isDemo()) return undefined;
   if (session.name === "acme-api-auth-fix") return "session-auth-fix";
-  if (session.status === "working" && session.name === "acme-api-auth-fix") return "session-working";
+  if (getDisplayStatus(session) === "working" && session.name === "acme-api-auth-fix") return "session-working";
   if (session.name === "acme-api-rate-limiter") return "session-done";
   if (session.name === "infra-k8s-migration/api-routes") return "session-input";
   if (session.name === "infra-k8s-migration") return "session-subagents";
   if (session.status === "stopped") return "session-stopped";
-  if (session.status === "working") return "session-working";
+  if (getDisplayStatus(session) === "working") return "session-working";
   return undefined;
 }
 
 function getDisplayStatus(session: SessionInfo): string {
   if (session.status === "stopped") return "stopped";
-  return session.statusLine?.type
-    ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
+  if (session.statusLine?.type) return session.statusLine.type;
+  if (session.status === "shell") return "inactive";
+  if (session.status === "unknown") return "sleeping";
+  return session.status;
+}
+
+function getStatusPriority(session: SessionInfo): number {
+  const status = getDisplayStatus(session) || session.status || "unknown";
+  switch (status) {
+    case "input":
+    case "waiting":
+      return 0;
+    case "error":
+      return 1;
+    case "done":
+      return 2;
+    case "working":
+      return 3;
+    case "background":
+      return 4;
+    case "sleeping":
+      return 5;
+    case "inactive":
+    case "shell":
+      return 6;
+    case "unknown":
+      return 7;
+    case "stopped":
+      return 8;
+    default:
+      return 8;
+  }
+}
+
+function statusIcon(status: string): string {
+  switch (status) {
+    case "working":
+      return "🤖";
+    case "waiting":
+    case "input":
+      return "💬";
+    case "done":
+      return "✅";
+    case "background":
+      return "🔄";
+    case "error":
+      return "⚠️";
+    case "sleeping":
+      return "🌙";
+    case "inactive":
+    case "shell":
+      return "⏸️";
+    case "stopped":
+      return "⏹️";
+    default:
+      return "•";
+  }
+}
+
+function statusTitle(status: string): string {
+  switch (status) {
+    case "working":
+      return "Working";
+    case "waiting":
+    case "input":
+      return "Waiting for input";
+    case "done":
+      return "Done";
+    case "background":
+      return "Running in background";
+    case "error":
+      return "Error";
+    case "sleeping":
+      return "Sleeping";
+    case "inactive":
+    case "shell":
+      return "Inactive";
+    case "stopped":
+      return "Stopped";
+    default:
+      return "Unknown";
+  }
+}
+
+function sortSessionsByPickupPriority(sessions: SessionInfo[]): SessionInfo[] {
+  return sessions
+    .map((session, index) => ({ session, index }))
+    .sort((a, b) => {
+      const priorityDiff = getStatusPriority(a.session) - getStatusPriority(b.session);
+      return priorityDiff || a.index - b.index;
+    })
+    .map(({ session }) => session);
+}
+
+function groupLabel(value: string, groupBy: string): string {
+  if (groupBy !== "__status__") return value;
+  return value.replace(/(^|-)([a-z])/g, (_, separator, letter) => `${separator}${letter.toUpperCase()}`);
+}
+
+interface SessionGitTarget {
+  path: string;
+  name: string;
+  branch: string | null;
+  workingTree: GitDiffStats;
+}
+
+interface SessionGitSeed {
+  path: string;
+  name: string;
+}
+
+function basenameFromPath(path: string): string {
+  return path.replace(/\/$/, "").split("/").filter(Boolean).pop() || path;
+}
+
+function sessionGitSeeds(session: SessionInfo): SessionGitSeed[] {
+  const seeds = session.worktrees?.length
+    ? session.worktrees.map((worktree) => ({
+        path: worktree.wtDir,
+        name: basenameFromPath(worktree.repoPath || worktree.wtDir),
+      }))
+    : [{ path: session.path, name: basenameFromPath(session.path) }];
+
+  const seen = new Set<string>();
+  const unique: SessionGitSeed[] = [];
+  for (const seed of seeds) {
+    if (!seed.path || seen.has(seed.path)) continue;
+    seen.add(seed.path);
+    unique.push(seed);
+  }
+  return unique.slice(0, 4);
+}
+
+function addDiffStats(total: GitDiffStats, item: GitDiffStats): GitDiffStats {
+  return {
+    files: total.files + item.files,
+    additions: total.additions + item.additions,
+    deletions: total.deletions + item.deletions,
+  };
+}
+
+function hasDiffStats(stats: GitDiffStats | null): stats is GitDiffStats {
+  return Boolean(stats && (stats.files > 0 || stats.additions > 0 || stats.deletions > 0));
+}
+
+function cleanBranchName(branch: string | null): string | null {
+  if (!branch) return null;
+  return branch.replace(/^refs\/heads\//, "");
+}
+
+function SessionGitMeta({ session }: { session: SessionInfo }) {
+  const seeds = useMemo(() => sessionGitSeeds(session), [session.path, session.worktrees]);
+  const pathsKey = seeds.map((seed) => `${seed.name}:${seed.path}`).join("||");
+  const [targets, setTargets] = useState<SessionGitTarget[]>(() =>
+    seeds.map((seed) => ({
+      path: seed.path,
+      name: seed.name,
+      branch: null,
+      workingTree: { files: 0, additions: 0, deletions: 0 },
+    })),
+  );
+
+  useEffect(() => {
+    const fallbackTargets = seeds.map((seed) => ({
+      path: seed.path,
+      name: seed.name,
+      branch: null,
+      workingTree: { files: 0, additions: 0, deletions: 0 },
+    }));
+
+    if (!pathsKey) {
+      setTargets([]);
+      return;
+    }
+
+    let cancelled = false;
+    setTargets(fallbackTargets);
+    const load = () => {
+      Promise.all(
+        seeds.map((seed) =>
+          fetchGitSummary(seed.path)
+            .then((summary) => ({
+              path: seed.path,
+              name: seed.name,
+              branch: cleanBranchName(summary.branch),
+              workingTree: summary.workingTree,
+            }))
+            .catch(() => ({
+              path: seed.path,
+              name: seed.name,
+              branch: null,
+              workingTree: { files: 0, additions: 0, deletions: 0 },
+            })),
+        ),
+      ).then((items) => {
+        if (!cancelled) setTargets(items);
+      });
+    };
+
+    load();
+    const interval = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pathsKey]);
+
+  const primary = targets[0];
+  if (!primary) return null;
+
+  const stats = targets.reduce((total, target) => addDiffStats(total, target.workingTree), { files: 0, additions: 0, deletions: 0 });
+  const branch = cleanBranchName(primary.branch);
+  const title = targets
+    .map((target) => `${target.name}${target.branch ? ` (${target.branch})` : ""}\n${target.path}`)
+    .join("\n\n");
+
+  return (
+    <>
+      <span className="session-row-target" title={title}>
+        <span className="session-row-target-name">{primary.name}</span>
+        {branch && <span className="branch-label session-row-target-branch">{branch}</span>}
+        {targets.length > 1 && <span className="session-row-target-extra">+{targets.length - 1}</span>}
+      </span>
+      {hasDiffStats(stats) && (
+        <span className="session-row-diff-chip" title="Uncommitted file diff">
+          <span className="session-row-diff-icon" aria-hidden="true" />
+          <span className="session-row-diff-files">{stats.files} file{stats.files !== 1 ? "s" : ""}</span>
+          {stats.additions > 0 && <span className="diff-stat-add">+{stats.additions}</span>}
+          {stats.deletions > 0 && <span className="diff-stat-del">-{stats.deletions}</span>}
+        </span>
+      )}
+    </>
+  );
 }
 
 function SessionRow({
   session,
   active,
   onSelect,
-  onStopped,
+  onRequestStop,
   isChild,
   isLastChild,
   childrenSummary,
@@ -70,10 +332,11 @@ function SessionRow({
   isDragging,
   isDragOver,
   onEditProps,
-  onPinToHeader,
+  onSaveQuickLaunch,
   onRestore,
   onForkSession,
   dataTutorial,
+  ordinal,
   selectionMode,
   selected,
   onToggleSelect,
@@ -81,7 +344,7 @@ function SessionRow({
   session: SessionInfo;
   active: boolean;
   onSelect: () => void;
-  onStopped: () => void;
+  onRequestStop?: (session: SessionInfo) => void;
   isChild?: boolean;
   isLastChild?: boolean;
   childrenSummary?: { total: number; working: number; done: number; error: number };
@@ -97,10 +360,11 @@ function SessionRow({
   isDragging?: boolean;
   isDragOver?: boolean;
   onEditProps?: () => void;
-  onPinToHeader?: () => void;
+  onSaveQuickLaunch?: () => void;
   onRestore?: () => Promise<void>;
   onForkSession?: () => void;
   dataTutorial?: string;
+  ordinal?: number;
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
@@ -134,9 +398,9 @@ function SessionRow({
     setMenuOpen(false);
   };
 
-  const handleOpenIterm = (e: React.MouseEvent) => {
+  const handleOpenTerminal = (e: React.MouseEvent) => {
     e.stopPropagation();
-    openInIterm(session.name);
+    openTerminal(session.name);
     setMenuOpen(false);
   };
 
@@ -146,16 +410,10 @@ function SessionRow({
     onEditProps?.();
   };
 
-  const handleKill = async (e: React.MouseEvent) => {
+  const handleKill = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Kill session "${session.displayName}"?`)) return;
     setMenuOpen(false);
-    try {
-      await deleteSession(session.name);
-      onStopped();
-    } catch (err: any) {
-      console.error("Failed to delete session:", err);
-    }
+    onRequestStop?.(session);
   };
 
   const handleRestore = async (e: React.MouseEvent) => {
@@ -170,11 +428,13 @@ function SessionRow({
   };
 
   const displayStatus = getDisplayStatus(session);
-  const displayPath = session.worktrees?.[0]?.wtDir || session.path;
+  // Runs in a pane the user owns. Every action that would write to it is withheld —
+  // the server refuses them too, this just avoids offering a button that only errors.
+  const isExternal = Boolean(session.external);
 
   return (
     <div
-      className={`session-row ${active && !selectionMode ? "session-row-active" : ""} ${selected ? "session-row-selected" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""}`}
+      className={`session-row ${active && !selectionMode ? "session-row-active" : ""} ${selected ? "session-row-selected" : ""} ${isChild ? "session-row-child" : ""} ${isChild && isLastChild ? "session-row-child-last" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""} ${session.status === "stopped" ? "session-row-stopped" : ""} ${menuOpen ? "session-row-menu-open" : ""}`}
       data-tutorial={dataTutorial}
       onClick={selectionMode ? (e) => { e.stopPropagation(); onToggleSelect?.(); } : onSelect}
       draggable={selectionMode ? false : draggable}
@@ -184,7 +444,7 @@ function SessionRow({
       onDrop={selectionMode ? undefined : onDrop}
     >
       <div className="session-row-main">
-        {selectionMode && (
+        {selectionMode && !isExternal && (
           <span className={`session-row-select-check${selected ? " session-row-select-check-on" : ""}`} />
         )}
         {isChild && (
@@ -192,11 +452,26 @@ function SessionRow({
             {isLastChild ? "\u2514\u2500" : "\u251C\u2500"}
           </span>
         )}
-        <span className={`session-row-dot status-${displayStatus || session.status}`} />
+        {ordinal && <span className="session-row-number" aria-label={`Agent ${ordinal}`}>{ordinal}</span>}
+        <span
+          className={`session-row-status-icon status-${displayStatus || session.status}`}
+          title={statusTitle(displayStatus || session.status)}
+          aria-label={statusTitle(displayStatus || session.status)}
+        >
+          {statusIcon(displayStatus || session.status)}
+        </span>
         {pinned && <span className="session-row-pin" title="Pinned">&#x25C6;</span>}
         <span className="session-row-name">
           {session.displayName}
         </span>
+        {isExternal && (
+          <span
+            className="session-row-external-badge"
+            title={`Running in your tmux pane ${session.externalTarget ?? ""} — read-only, and status is inferred from the terminal`}
+          >
+            external
+          </span>
+        )}
         {session.sessionType && (
           <span className={`session-row-type-badge ${session.sessionType}`}>
             {session.sessionType === "fix-comments" ? "fix comments" :
@@ -224,17 +499,12 @@ function SessionRow({
             )}
           </button>
         )}
-        {displayStatus && displayStatus !== "stopped" && (
-          <span className={`session-row-status status-${displayStatus}`}>
-            {displayStatus}
-          </span>
-        )}
         {session.status === "stopped" && onRestore && (
           <button
             className={`session-row-restore-btn ${restoring ? "restoring" : ""}`}
             onClick={handleRestore}
             disabled={restoring}
-            title="Restore session"
+            title="Restore agent"
           >
             {restoring ? "restoring…" : "↺ restore"}
           </button>
@@ -249,12 +519,10 @@ function SessionRow({
         </div>
       )}
       <div className="session-row-meta">
-        <span className="session-row-path" title={displayPath}>
-          {displayPath.replace(/^\/Users\/[^/]+\//, "~/")}
-        </span>
+        <SessionGitMeta session={session} />
         {session.agentType && session.agentType !== "claude" && (
-          <span className="session-row-agent" title={`Agent: ${session.agentType}`}>
-            {session.agentType === "cursor" ? "Cursor" : session.agentType}
+          <span className="session-row-agent" title={`Agent type: ${agentTypeLabel(session.agentType)}`}>
+            {agentTypeLabel(session.agentType)}
           </span>
         )}
         {session.meta && Object.keys(session.meta).length > 0 && (
@@ -268,7 +536,7 @@ function SessionRow({
           <button
             className="session-row-menu-btn"
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-            aria-label="Session actions"
+            aria-label="Agent actions"
           >
             ⋯
           </button>
@@ -279,11 +547,11 @@ function SessionRow({
                   {pinned ? "Unpin" : "Pin to top"}
                 </button>
               )}
-              {onEditProps && (
+              {onEditProps && !isExternal && (
                 <button className="session-row-menu-item" onClick={handleEditProps}>Edit properties</button>
               )}
-              {onPinToHeader && (
-                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onPinToHeader(); setMenuOpen(false); }}>Pin to header</button>
+              {onSaveQuickLaunch && !isExternal && (
+                <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onSaveQuickLaunch(); setMenuOpen(false); }}>Save as quick launch</button>
               )}
               {onForkSession && (
                 <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onForkSession(); setMenuOpen(false); }}>
@@ -292,17 +560,23 @@ function SessionRow({
               )}
               <button className="session-row-menu-item" onClick={handleCopy}>Copy name</button>
               <button className="session-row-menu-item" onClick={handleCopyPath}>Copy path</button>
-              {session.status !== "stopped" && (
-                <button className="session-row-menu-item" onClick={handleOpenIterm}>Open in iTerm</button>
+              {session.status !== "stopped" && !isExternal && (
+                <button className="session-row-menu-item" onClick={handleOpenTerminal}>Open terminal</button>
               )}
               {session.status === "stopped" && onRestore && (
                 <button className="session-row-menu-item" onClick={handleRestore} disabled={restoring}>
-                  {restoring ? "Restoring…" : "↺ Restore session"}
+                  {restoring ? "Restoring…" : "↺ Restore agent"}
                 </button>
               )}
-              <button className="session-row-menu-item danger" onClick={handleKill}>
-                {session.status === "stopped" ? "Delete" : "Kill session"}
-              </button>
+              {isExternal ? (
+                <div className="session-row-menu-note">
+                  Read-only — Agentdock did not start this agent
+                </div>
+              ) : (
+                <button className="session-row-menu-item danger" onClick={handleKill}>
+                  {session.status === "stopped" ? "Delete" : "Stop agent"}
+                </button>
+              )}
             </div>
           )}
         </div>}
@@ -909,10 +1183,12 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
 export function Dashboard() {
   const { sessions, loading, refresh } = useSessions();
   const { login: authLogin } = useAuth();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const mobileNav = useMobileNav();
   const [mobileShowTerminal, setMobileShowTerminal] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<"agents" | "worktrees">("agents");
+  const [quickLaunches, setQuickLaunches] = useState<QuickLaunch[]>([]);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth <= 768);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -923,10 +1199,11 @@ export function Dashboard() {
   const activeTab = mobileNav?.activeTab ?? "terminal";
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
-  // Bottom pane (plan/changes/sub-agents) split with terminal
-  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | "files" | null>(null);
+  // Bottom pane (plan/review/sub-agents) split with terminal
+  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "git-log" | "sub-agents" | "files" | "shell" | null>(null);
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
   const [bottomMaximized, setBottomMaximized] = useState(false);
+  const [splitFullscreen, setSplitFullscreen] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
   const [planMenuOpen, setPlanMenuOpen] = useState(false);
   const planMenuRef = useRef<HTMLDivElement>(null);
@@ -960,6 +1237,16 @@ export function Dashboard() {
   useEffect(() => {
     if (!bottomTab) setBottomMaximized(false);
   }, [bottomTab]);
+
+  const handleFullscreenPanelShortcut = useCallback(() => {
+    if (!bottomTab) return false;
+    if (bottomMaximized) {
+      setBottomMaximized(false);
+      return true;
+    }
+    setBottomTab(null);
+    return true;
+  }, [bottomMaximized, bottomTab]);
 
   // Close plan menu on click outside
   useEffect(() => {
@@ -1065,10 +1352,61 @@ export function Dashboard() {
   };
 
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const pendingActiveSessionRef = useRef<{ name: string; expiresAt: number } | null>(null);
   const activeSession = searchParams.get("session");
   const setActiveSession = useCallback((name: string | null) => {
     setSearchParams(name ? { session: name } : {}, { replace: true });
   }, [setSearchParams]);
+
+  const focusCreatedSession = useCallback(async (sessionName: string) => {
+    pendingActiveSessionRef.current = {
+      name: sessionName,
+      expiresAt: Date.now() + NEW_SESSION_FOCUS_TIMEOUT_MS,
+    };
+    setWorkspaceTab("agents");
+    setActiveSession(sessionName);
+    setMobileShowTerminal(true);
+    window.dispatchEvent(new CustomEvent("agentdock-mobile-show-terminal"));
+    await refresh();
+  }, [refresh, setActiveSession]);
+
+  const loadQuickLaunches = useCallback(() => {
+    fetchPreferences().then((p) => setQuickLaunches(p.quickLaunches || []));
+  }, []);
+
+  useEffect(() => {
+    loadQuickLaunches();
+    const handler = () => loadQuickLaunches();
+    window.addEventListener("agentdock-quick-launches-changed", handler);
+    return () => window.removeEventListener("agentdock-quick-launches-changed", handler);
+  }, [loadQuickLaunches]);
+
+  const handleQuickLaunch = useCallback(async (ql: QuickLaunch) => {
+    if (launchingId) return;
+    setLaunchingId(ql.id);
+    try {
+      const { sessions: created } = await createSession({
+        targets: ql.targets,
+        name: ql.sessionName,
+        dangerouslySkipPermissions: true,
+        agentType: (ql.agentType as any) || "claude",
+        grouped: true,
+      });
+      if (created?.[0]) {
+        await focusCreatedSession(created[0]);
+      }
+    } catch (err) {
+      console.error("Failed to launch quick agent:", err);
+    } finally {
+      setLaunchingId(null);
+    }
+  }, [focusCreatedSession, launchingId]);
+
+  const removeQuickLaunch = useCallback(async (id: string) => {
+    const updated = quickLaunches.filter((q) => q.id !== id);
+    setQuickLaunches(updated);
+    await updatePreferences({ quickLaunches: updated });
+  }, [quickLaunches]);
 
   // Tour mode: active when ?tour=1 is in the URL (demo mode only)
   const [tourActive, setTourActive] = useState(() =>
@@ -1120,31 +1458,92 @@ export function Dashboard() {
 
   const togglePin = useCallback((name: string) => {
     setPinnedSessions((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      updatePreferences({ pinnedSessions: [...next] });
-      return next;
+      const alreadyPinned = prev.has(name);
+      const ordered = alreadyPinned
+        ? [...prev].filter((pinned) => pinned !== name)
+        : [name, ...prev].filter((pinned, idx, arr) => arr.indexOf(pinned) === idx);
+      updatePreferences({ pinnedSessions: ordered });
+      return new Set(ordered);
     });
   }, []);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
   const sessionSearchRef = useRef<HTMLInputElement>(null);
+  const [newAgentModal, setNewAgentModal] = useState<{
+    initialMetaValues: Record<string, string>;
+    initialTargetMode?: "checkout" | "general";
+    initialSessionName?: string;
+    initialTargets?: string[];
+    initialAgentType?: AgentType;
+  } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
-  // Cmd+K to focus session search
+  const openNewAgent = useCallback((
+    initialMetaValues: Record<string, string> = {},
+    options: { initialTargetMode?: "checkout" | "general"; initialSessionName?: string; initialTargets?: string[]; initialAgentType?: AgentType } = {},
+  ) => {
+    setWorkspaceTab("agents");
+    setMobileShowTerminal(false);
+    setNewAgentModal({ initialMetaValues, ...options });
+  }, []);
+
+  const closeNewAgent = useCallback(() => {
+    setNewAgentModal(null);
+  }, []);
+
+  const handleNewAgentCreated = useCallback((sessionName: string) => {
+    setNewAgentModal(null);
+    void focusCreatedSession(sessionName);
+  }, [focusCreatedSession]);
+
+  // Cmd+Shift+A creates a new agent from Agents or Worktrees.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== "a") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.isContentEditable || target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") return;
+      e.preventDefault();
+      openNewAgent();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openNewAgent]);
+
+  // Cmd+K focuses the search box for the active workspace tab.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
+        if (workspaceTab === "worktrees") {
+          window.dispatchEvent(new Event("agentdock-focus-worktree-search"));
+          return;
+        }
         sessionSearchRef.current?.focus();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, [workspaceTab]);
+
+  // Option/Alt+W jumps to Worktrees and focuses its search.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.key.toLowerCase() !== "w") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.isContentEditable || target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      e.preventDefault();
+      setWorkspaceTab("worktrees");
+      setMobileShowTerminal(false);
+      window.setTimeout(() => {
+        window.dispatchEvent(new Event("agentdock-focus-worktree-search"));
+      }, 0);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Cmd+P to open file explorer and focus search
+  // Cmd+P to open explorer and focus file search
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1163,13 +1562,14 @@ export function Dashboard() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (newAgentModal) return;
       const tag = (document.activeElement as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       setBottomTab((prev) => (prev ? null : prev));
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [newAgentModal]);
 
   // ─── MRU session switching ───
   // mruList[0] = most recently visited, mruList[1] = previous, etc.
@@ -1218,6 +1618,7 @@ export function Dashboard() {
       // Set flag so the MRU update effect doesn't reorder the list during navigation
       mruNavigating.current = true;
       setActiveSession(list[nextIdx]);
+      setWorkspaceTab("agents");
       setMobileShowTerminal(true);
       // Clear flag after state update has been processed
       setTimeout(() => { mruNavigating.current = false; }, 100);
@@ -1244,11 +1645,16 @@ export function Dashboard() {
       if (s.parentSession) childNames.add(s.name);
     }
 
-    // Separate parents into pinned and unpinned, preserving original order within each group
     const parents = sessions.filter((s) => !childNames.has(s.name));
-    const pinnedParents = parents.filter((s) => pinnedSessions.has(s.name));
+    const parentsByName = new Map(parents.map((session) => [session.name, session]));
+    const pinnedParents = [...pinnedSessions]
+      .map((name) => parentsByName.get(name))
+      .filter(Boolean) as SessionInfo[];
     const unpinnedParents = parents.filter((s) => !pinnedSessions.has(s.name));
-    const sortedParents = [...pinnedParents, ...unpinnedParents];
+    const sortedParents = [
+      ...pinnedParents,
+      ...sortSessionsByPickupPriority(unpinnedParents),
+    ];
 
     const result: { session: SessionInfo; isChild: boolean; isLastChild: boolean; childrenSummary?: { total: number; working: number; done: number; error: number }; childrenExpanded: boolean; parentIdx: number }[] = [];
     let pIdx = 0;
@@ -1260,8 +1666,8 @@ export function Dashboard() {
         .filter(Boolean) as SessionInfo[];
       const childrenSummary = childList.length > 0 ? {
         total: childList.length,
-        working: childList.filter((c) => c.status === "working").length,
-        done: childList.filter((c) => getDisplayStatus(c) === "done" || c.status === "waiting").length,
+        working: childList.filter((c) => getDisplayStatus(c) === "working").length,
+        done: childList.filter((c) => getDisplayStatus(c) === "done").length,
         error: childList.filter((c) => getDisplayStatus(c) === "error").length,
       } : undefined;
 
@@ -1305,9 +1711,14 @@ export function Dashboard() {
     });
   }, [orderedSessions, sessionSearch]);
 
+  // "__"-prefixed groupings are computed from the session itself rather than stored on
+  // it, so they can't be reassigned by dragging or seeded into the create form.
+  const isDerivedGroup = groupBy.startsWith("__");
+
   const groupedSessions = useMemo(() => {
     if (!groupBy) return null;
     const isStatusGroup = groupBy === "__status__";
+    const isRepoGroup = groupBy === "__repo__";
     const groups: Record<string, typeof filteredSessions> = {};
     const ungrouped: typeof filteredSessions = [];
     for (const entry of filteredSessions) {
@@ -1315,6 +1726,8 @@ export function Dashboard() {
       let value: string;
       if (isStatusGroup) {
         value = getDisplayStatus(entry.session) || entry.session.status || "unknown";
+      } else if (isRepoGroup) {
+        value = repoLabel(entry.session);
       } else {
         value = entry.session.meta?.[groupBy] || "";
       }
@@ -1333,7 +1746,7 @@ export function Dashboard() {
     }
     // For status grouping, order groups sensibly
     if (isStatusGroup) {
-      const order = ["working", "background", "input", "error", "waiting", "done", "unknown", "stopped"];
+      const order = ["input", "waiting", "error", "done", "working", "background", "sleeping", "inactive", "shell", "unknown", "stopped"];
       const sorted: Record<string, typeof filteredSessions> = {};
       for (const key of order) {
         if (groups[key]) sorted[key] = groups[key];
@@ -1341,6 +1754,15 @@ export function Dashboard() {
       // Any remaining groups not in the order
       for (const key of Object.keys(groups)) {
         if (!sorted[key]) sorted[key] = groups[key];
+      }
+      return { groups: sorted, ungrouped };
+    }
+    if (isRepoGroup) {
+      // Repo names carry no inherent order, so alphabetical keeps the list stable
+      // as agents come and go.
+      const sorted: Record<string, typeof filteredSessions> = {};
+      for (const key of Object.keys(groups).sort((a, b) => a.localeCompare(b))) {
+        sorted[key] = groups[key];
       }
       return { groups: sorted, ungrouped };
     }
@@ -1381,14 +1803,37 @@ export function Dashboard() {
 
   const handleKillSelected = async () => {
     if (selectedSessions.size === 0) return;
-    await Promise.all([...selectedSessions].map(name => deleteSession(name).catch(() => {})));
-    if (activeSession && selectedSessions.has(activeSession)) {
-      const remaining = sessions.filter(s => !selectedSessions.has(s.name));
-      setActiveSession(remaining.length > 0 ? remaining[0].name : null);
-    }
-    setSelectedSessions(new Set());
-    setSelectionMode(false);
-    refresh();
+    const selectedNames = [...selectedSessions];
+    const selected = sessions.filter((s) => selectedSessions.has(s.name));
+    const liveCount = selected.filter((s) => s.status !== "stopped").length;
+    const stoppedCount = selected.length - liveCount;
+    const title = liveCount > 0 && stoppedCount > 0
+      ? "Stop or delete selected agents?"
+      : liveCount > 0 ? "Stop selected agents?" : "Delete selected agents?";
+    const details = [
+      liveCount > 0 ? `${liveCount} active agent${liveCount === 1 ? "" : "s"} will have their terminal closed.` : "",
+      stoppedCount > 0 ? `${stoppedCount} stopped agent${stoppedCount === 1 ? "" : "s"} will be removed from AgentDock.` : "",
+      worktreeClause(selected, true).trim(),
+    ].filter(Boolean);
+
+    setConfirmAction({
+      title,
+      message: `${selected.length} selected agent${selected.length === 1 ? "" : "s"} will be updated.`,
+      details,
+      confirmLabel: liveCount > 0 && stoppedCount > 0 ? "Stop/delete" : liveCount > 0 ? "Stop selected" : "Delete selected",
+      busyLabel: liveCount > 0 && stoppedCount > 0 ? "Updating..." : liveCount > 0 ? "Stopping..." : "Deleting...",
+      tone: "danger",
+      onConfirm: async () => {
+        await Promise.all(selectedNames.map(name => deleteSession(name).catch(() => {})));
+        if (activeSession && selectedNames.includes(activeSession)) {
+          const remaining = sessions.filter(s => !selectedNames.includes(s.name));
+          setActiveSession(remaining.length > 0 ? remaining[0].name : null);
+        }
+        setSelectedSessions(new Set());
+        setSelectionMode(false);
+        refresh();
+      },
+    });
   };
 
   const handleExitSelectionMode = () => {
@@ -1396,28 +1841,42 @@ export function Dashboard() {
     setSelectedSessions(new Set());
   };
 
+  // External agents can't be stopped from here, so they stay out of bulk selection
+  // entirely — otherwise "All" would arm a Stop that silently fails for some of them.
+  const selectableSessions = useMemo(() => sessions.filter((s) => !s.external), [sessions]);
+
   const handleToggleSelectAll = () => {
-    if (selectedSessions.size === sessions.length) {
+    if (selectedSessions.size === selectableSessions.length) {
       setSelectedSessions(new Set());
     } else {
-      setSelectedSessions(new Set(sessions.map(s => s.name)));
+      setSelectedSessions(new Set(selectableSessions.map(s => s.name)));
     }
   };
 
   const handleStopAll = async () => {
-    if (!confirm("Stop all sessions?")) return;
-    try {
-      await deleteAllSessions();
-      setActiveSession(null);
-      refresh();
-    } catch (err: any) {
-      console.error("Failed to stop all sessions:", err);
-    }
+    const active = sessions.filter((s) => s.status !== "stopped" && !s.external);
+    if (active.length === 0) return;
+    setConfirmAction({
+      title: "Stop all active agents?",
+      message: `${active.length} active agent${active.length === 1 ? "" : "s"} will be stopped.`,
+      details: [
+        "Each terminal will close immediately.",
+        worktreeClause(active, true).trim(),
+      ].filter(Boolean),
+      confirmLabel: "Stop all",
+      busyLabel: "Stopping...",
+      tone: "danger",
+      onConfirm: async () => {
+        await deleteAllSessions();
+        setActiveSession(null);
+        refresh();
+      },
+    });
   };
 
-  const handleStopped = () => {
-    if (activeSession) {
-      const remaining = sessions.filter((s) => s.name !== activeSession);
+  const handleStopped = useCallback((stoppedName?: string) => {
+    if (activeSession && (!stoppedName || activeSession === stoppedName)) {
+      const remaining = sessions.filter((s) => s.name !== (stoppedName || activeSession));
       if (remaining.length > 0) {
         setActiveSession(remaining[0].name);
       } else {
@@ -1425,9 +1884,29 @@ export function Dashboard() {
       }
     }
     refresh();
-  };
+  }, [activeSession, refresh, sessions, setActiveSession]);
 
-  const handlePinToHeader = useCallback(async (session: SessionInfo) => {
+  const requestStopSession = useCallback((session: SessionInfo) => {
+    const stopped = session.status === "stopped";
+    setConfirmAction({
+      title: stopped ? "Delete stopped agent?" : "Stop agent?",
+      message: stopped
+        ? `Delete "${session.displayName}" from AgentDock?`
+        : `Stop "${session.displayName}"?`,
+      details: stopped
+        ? ["This removes saved AgentDock metadata for the stopped agent.", "The git branch is not deleted."]
+        : ["The terminal will close immediately.", worktreeClause([session]).trim()].filter(Boolean),
+      confirmLabel: stopped ? "Delete agent" : "Stop agent",
+      busyLabel: stopped ? "Deleting..." : "Stopping...",
+      tone: "danger",
+      onConfirm: async () => {
+        await deleteSession(session.name);
+        handleStopped(session.name);
+      },
+    });
+  }, [handleStopped]);
+
+  const handleSaveQuickLaunch = useCallback(async (session: SessionInfo) => {
     // Derive targets from the session's repos
     const targets = session.worktrees?.length
       ? session.worktrees.map(wt => {
@@ -1447,8 +1926,8 @@ export function Dashboard() {
     // Don't add duplicates (same targets)
     if (existing.some(q => q.targets.join(",") === targets.join(","))) return;
     const updated = [...existing, ql];
+    setQuickLaunches(updated);
     await updatePreferences({ quickLaunches: updated });
-    // Notify Header to refresh
     window.dispatchEvent(new CustomEvent("agentdock-quick-launches-changed"));
   }, []);
 
@@ -1499,28 +1978,57 @@ export function Dashboard() {
   }, [refresh]);
 
   const handleForkSession = useCallback(async (session: SessionInfo) => {
-    const worktree = session.worktrees?.[0];
-    const path = worktree?.wtDir || worktree?.repoPath || session.path;
-    if (!path) return;
+    const normalizePath = (path: string) => path.replace(/\/+$/, "");
+    const sessionPaths = [
+      ...(session.worktrees || []).map((wt) => wt.wtDir),
+      session.path,
+    ].filter(Boolean).map(normalizePath);
+    const sourcePaths = (session.worktrees || []).map((wt) => wt.repoPath).filter(Boolean).map(normalizePath);
+    let initialTargets: string[] = [];
+
     try {
-      const { sessions: created } = await createSession({
-        targets: [path],
-        dangerouslySkipPermissions: true,
-        agentType: session.agentType || "claude",
-      });
-      if (created?.[0]) {
-        setActiveSession(created[0]);
-        setMobileShowTerminal(true);
-        refresh();
-      }
+      const repos = await fetchRepos();
+      const aliasByPath = new Map(repos.map((repo) => [normalizePath(repo.path), repo.alias]));
+      initialTargets = [...new Set(
+        [...sessionPaths, ...sourcePaths]
+          .map((path) => aliasByPath.get(path))
+          .filter((alias): alias is string => Boolean(alias)),
+      )];
     } catch (err) {
-      console.error("Failed to fork session:", err);
+      console.error("Failed to resolve session target:", err);
     }
-  }, [refresh]);
+
+    openNewAgent({}, {
+      initialTargetMode: sessionPaths.length > 0 ? "checkout" : "general",
+      initialTargets,
+      initialAgentType: session.agentType || "claude",
+    });
+  }, [openNewAgent]);
 
   // Auto-select first session if none selected, or fix stale selection
   useEffect(() => {
     if (loading) return; // don't touch URL param while sessions are loading
+
+    const pending = pendingActiveSessionRef.current;
+    if (pending) {
+      const pendingExists = sessions.some((s) => s.name === pending.name);
+      if (pendingExists) {
+        pendingActiveSessionRef.current = null;
+        if (activeSession !== pending.name) setActiveSession(pending.name);
+        return;
+      }
+      const activeExists = activeSession ? sessions.some((s) => s.name === activeSession) : false;
+      if (activeSession && activeSession !== pending.name && activeExists) {
+        pendingActiveSessionRef.current = null;
+        return;
+      }
+      if (Date.now() < pending.expiresAt) {
+        if (activeSession !== pending.name) setActiveSession(pending.name);
+        return;
+      }
+      pendingActiveSessionRef.current = null;
+    }
+
     if (!sessions.length) {
       if (activeSession) setActiveSession(null);
       return;
@@ -1541,7 +2049,10 @@ export function Dashboard() {
 
   // Show terminal when fix-me / quick-launch navigates to a session
   useEffect(() => {
-    const handler = () => { if (isMobile) setMobileShowTerminal(true); };
+    const handler = () => {
+      setWorkspaceTab("agents");
+      if (isMobile) setMobileShowTerminal(true);
+    };
     window.addEventListener("agentdock-mobile-show-terminal", handler);
     return () => window.removeEventListener("agentdock-mobile-show-terminal", handler);
   }, [isMobile]);
@@ -1549,14 +2060,14 @@ export function Dashboard() {
   // Sync mobile nav context
   const { setInSession, setGoBack, setSessionTitle } = mobileNav ?? {};
   useEffect(() => {
-    setInSession?.(!!(mobileShowTerminal && activeSession));
-  }, [mobileShowTerminal, activeSession, setInSession]);
+    setInSession?.(!!(workspaceTab === "agents" && mobileShowTerminal && activeSession));
+  }, [workspaceTab, mobileShowTerminal, activeSession, setInSession]);
 
   useEffect(() => {
     setGoBack?.(() => setMobileShowTerminal(false));
   }, [setGoBack]);
 
-  const mobileInSession = mobileShowTerminal && !!activeSession;
+  const mobileInSession = workspaceTab === "agents" && mobileShowTerminal && !!activeSession;
 
   // Sync session title for mobile header
   useEffect(() => {
@@ -1576,33 +2087,95 @@ export function Dashboard() {
 
   return (
     <>
+    <div className={`dashboard-shell ${mobileInSession ? "dashboard-shell-mobile-session" : ""}`}>
+      <div className="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
+        <button
+          className={`dashboard-tab ${workspaceTab === "agents" ? "dashboard-tab-active" : ""}`}
+          onClick={() => setWorkspaceTab("agents")}
+        >
+          <span>Agents</span>
+        </button>
+        <button
+          className={`dashboard-tab ${workspaceTab === "worktrees" ? "dashboard-tab-active" : ""}`}
+          onClick={() => { setWorkspaceTab("worktrees"); setMobileShowTerminal(false); }}
+        >
+          <span>Worktrees</span>
+        </button>
+      </div>
+      {workspaceTab === "agents" ? (
     <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div className="split-sidebar">
         <div className="sidebar-header">
-          <span className="sidebar-title">sessions</span>
-          <div className="sidebar-actions">
-            {selectionMode ? (
-              <button className="btn btn-sm" onClick={handleExitSelectionMode}>cancel</button>
-            ) : (
-              <>
+          {selectionMode ? (
+            <button className="btn btn-sm sidebar-cancel-selection" onClick={handleExitSelectionMode}>Cancel selection</button>
+          ) : (
+            <>
+              <button
+                className="btn btn-primary btn-sm sidebar-new-agent-btn"
+                onClick={() => openNewAgent()}
+                data-tutorial="new-session-btn"
+                title={`New agent (${NEW_AGENT_SHORTCUT})`}
+              >
+                New agent
+              </button>
+              <div className="sidebar-actions">
                 {sessions.length > 1 && (
-                  <button className="sidebar-select-link" onClick={() => setSelectionMode(true)}>select</button>
+                  <button className="sidebar-select-link" onClick={() => setSelectionMode(true)}>Select</button>
                 )}
                 {sessions.length > 0 && (
-                  <button className="btn btn-stop btn-sm" onClick={handleStopAll}>kill --all</button>
+                  <button className="sidebar-stop-all-link" onClick={handleStopAll}>Stop all</button>
                 )}
-                <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")} data-tutorial="new-session-btn">+ new</button>
-              </>
-            )}
-            <button
-              className="btn btn-sm sidebar-collapse-btn"
-              onClick={() => setSidebarCollapsed(true)}
-              title="Collapse sidebar"
+              </div>
+            </>
+          )}
+          <button
+            className="btn btn-sm sidebar-collapse-btn"
+            onClick={() => setSidebarCollapsed(true)}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+          >
+            {/* Same doubled chevron as collapse-all, turned to point at the edge it
+                folds toward. The guillemet this replaces had font-dependent spacing. */}
+            <svg
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
             >
-              &laquo;
-            </button>
-          </div>
+              <polyline points="13 4 9.5 8 13 12" />
+              <polyline points="6.5 4 3 8 6.5 12" />
+            </svg>
+          </button>
         </div>
+
+        {!selectionMode && quickLaunches.length > 0 && (
+          <div className="agent-shortcuts-row">
+            {quickLaunches.map((ql) => (
+              <div key={ql.id} className="agent-quick-launch">
+                <button
+                  className="agent-shortcut-btn"
+                  onClick={() => handleQuickLaunch(ql)}
+                  disabled={launchingId === ql.id}
+                  title={ql.targets.join(", ")}
+                >
+                  {launchingId === ql.id ? "..." : ql.label}
+                </button>
+                <button
+                  className="agent-quick-launch-remove"
+                  onClick={() => removeQuickLaunch(ql.id)}
+                  title="Remove quick launch"
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="session-toolbar-row">
         {sessions.length > 0 && (
@@ -1611,7 +2184,7 @@ export function Dashboard() {
               ref={sessionSearchRef}
               type="text"
               className="session-search"
-              placeholder="Search sessions... (⌘K)"
+              placeholder="Search agents... (⌘K)"
               value={sessionSearch}
               onChange={(e) => setSessionSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -1624,7 +2197,6 @@ export function Dashboard() {
           </div>
         )}
         <div className="session-group-by-wrap">
-          <span className="session-group-by-icon">&#x25A4;</span>
           <select
             className="session-group-by-select"
             data-tutorial="group-by-select"
@@ -1636,13 +2208,14 @@ export function Dashboard() {
           >
             <option value="">No grouping</option>
             <option value="__status__">Status</option>
+            <option value="__repo__">Project</option>
             {metaPresets.map((p) => (
               <option key={p.key} value={p.key}>{p.label}</option>
             ))}
           </select>
           {groupBy && groupedSessions && (
             <button
-              className="session-group-collapse-all"
+              className={`session-group-collapse-all ${collapsedGroups.size > 0 ? "" : "is-up"}`}
               onClick={() => {
                 const allKeys = [...Object.keys(groupedSessions.groups)];
                 if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
@@ -1652,8 +2225,25 @@ export function Dashboard() {
                 updatePreferences({ collapsedGroups: [...next] });
               }}
               title={collapsedGroups.size > 0 ? "Expand all" : "Collapse all"}
+              aria-label={collapsedGroups.size > 0 ? "Expand all groups" : "Collapse all groups"}
             >
-              {collapsedGroups.size > 0 ? "\u25B8\u25B8" : "\u25BE\u25BE"}
+              {/* Doubled chevron: same family as the per-group \u25B8/\u25BE, with the second
+                  stroke reading as "all of them". Points down to expand, up to
+                  collapse. */}
+              <svg
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="4 3 8 6.5 12 3" />
+                <polyline points="4 9.5 8 13 12 9.5" />
+              </svg>
             </button>
           )}
         </div>
@@ -1673,11 +2263,17 @@ export function Dashboard() {
           {loading ? (
             <div className="loading">LOADING...</div>
           ) : sessions.length === 0 ? (
+            // Nothing here: the logo is 27 columns of un-wrappable <pre> and just
+            // clipped at this width, and the main view alongside already explains
+            // the empty state.
+            null
+          ) : filteredSessions.length === 0 && sessionSearch.trim() ? (
+            // Agents exist but the search hides them all — without this the list
+            // renders blank, which reads as "they're gone".
             <div className="empty-state">
-              <pre className="ascii-art">{ASCII_LOGO}</pre>
-              <p>no active sessions</p>
-              <button className="btn btn-primary" onClick={() => navigate("/create")}>
-                ./create-session
+              <p>no agents match “{sessionSearch.trim()}”</p>
+              <button className="btn btn-sm" onClick={() => setSessionSearch("")}>
+                Clear search
               </button>
             </div>
           ) : groupBy && groupedSessions ? (
@@ -1685,9 +2281,9 @@ export function Dashboard() {
               {Object.entries(groupedSessions.groups).map(([value, entries]) => (
                 <div
                   key={value}
-                  className={`session-group ${groupBy !== "__status__" && dragIdx !== null ? "session-group-drop-target" : ""}`}
-                  onDragOver={groupBy !== "__status__" ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
-                  onDrop={groupBy !== "__status__" ? (e) => {
+                  className={`session-group ${!isDerivedGroup && dragIdx !== null ? "session-group-drop-target" : ""}`}
+                  onDragOver={!isDerivedGroup ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
+                  onDrop={!isDerivedGroup ? (e) => {
                     e.preventDefault();
                     const sessionName = e.dataTransfer.getData("text/plain");
                     if (sessionName) {
@@ -1701,17 +2297,19 @@ export function Dashboard() {
                     onClick={() => toggleGroup(value)}
                   >
                     <span className="session-group-chevron">{collapsedGroups.has(value) ? "\u25B8" : "\u25BE"}</span>
-                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""}`}>{value}</span>
+                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""}`}>{groupLabel(value, groupBy)}</span>
                     <span className="session-group-count">{entries.filter(e => !e.isChild).length}</span>
-                    {groupBy !== "__status__" && (
+                    {/* Seeds the create form with this meta property. A derived group
+                        has no property to seed, so it gets no + button. */}
+                    {!isDerivedGroup && (
                       <button
                         className="session-group-add"
-                        onClick={(e) => { e.stopPropagation(); navigate(`/create?${groupBy}=${encodeURIComponent(value)}`); }}
-                        title={`New session in ${value}`}
+                        onClick={(e) => { e.stopPropagation(); openNewAgent({ [groupBy]: value }); }}
+                        title={`New agent in ${value}`}
                       >+</button>
                     )}
                   </div>
-                  {!collapsedGroups.has(value) && entries.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
+                  {!collapsedGroups.has(value) && entries.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }, index) => (
                     <SessionRow
                       key={session.name}
                       session={session}
@@ -1727,19 +2325,20 @@ export function Dashboard() {
                         setActiveSession(session.name);
                         setMobileShowTerminal(true);
                       }}
-                      onStopped={handleStopped}
+                      onRequestStop={requestStopSession}
                       draggable={!isChild}
                       onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
-                      onPinToHeader={() => handlePinToHeader(session)}
+                      onSaveQuickLaunch={() => handleSaveQuickLaunch(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                       dataTutorial={getDemoTutorialAttr(session)}
+                      ordinal={index + 1}
                       selectionMode={selectionMode}
                       selected={selectedSessions.has(session.name)}
-                      onToggleSelect={() => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
+                      onToggleSelect={session.external ? undefined : () => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
                     />
                   ))}
                 </div>
@@ -1765,7 +2364,7 @@ export function Dashboard() {
                     <span className="session-group-label">Ungrouped</span>
                     <span className="session-group-count">{groupedSessions.ungrouped.filter(e => !e.isChild).length}</span>
                   </div>
-                  {!collapsedGroups.has("__ungrouped__") && groupedSessions.ungrouped.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
+                  {!collapsedGroups.has("__ungrouped__") && groupedSessions.ungrouped.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }, index) => (
                     <SessionRow
                       key={session.name}
                       session={session}
@@ -1781,26 +2380,27 @@ export function Dashboard() {
                         setActiveSession(session.name);
                         setMobileShowTerminal(true);
                       }}
-                      onStopped={handleStopped}
+                      onRequestStop={requestStopSession}
                       draggable={!isChild}
                       onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
                       onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
-                      onPinToHeader={() => handlePinToHeader(session)}
+                      onSaveQuickLaunch={() => handleSaveQuickLaunch(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                       dataTutorial={getDemoTutorialAttr(session)}
+                      ordinal={index + 1}
                       selectionMode={selectionMode}
                       selected={selectedSessions.has(session.name)}
-                      onToggleSelect={() => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
+                      onToggleSelect={session.external ? undefined : () => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
                     />
                   ))}
                 </div>
               )}
             </>
           ) : (
-            filteredSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }) => (
+            filteredSessions.map(({ session, isChild, isLastChild, childrenSummary, childrenExpanded, parentIdx }, index) => (
               <SessionRow
                 key={session.name}
                 session={session}
@@ -1816,7 +2416,7 @@ export function Dashboard() {
                   setActiveSession(session.name);
                   setMobileShowTerminal(true);
                 }}
-                onStopped={handleStopped}
+                onRequestStop={requestStopSession}
                 draggable={!isChild}
                 onDragStart={!isChild ? handleDragStart(parentIdx) : undefined}
                 onDragOver={!isChild ? handleDragOver(parentIdx) : undefined}
@@ -1825,12 +2425,14 @@ export function Dashboard() {
                 isDragging={!isChild && dragIdx === parentIdx}
                 isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
                 onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
-                onPinToHeader={() => handlePinToHeader(session)}
+                onSaveQuickLaunch={() => handleSaveQuickLaunch(session)}
                 onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
+                onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
                 dataTutorial={getDemoTutorialAttr(session)}
+                ordinal={index + 1}
                 selectionMode={selectionMode}
                 selected={selectedSessions.has(session.name)}
-                onToggleSelect={() => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
+                onToggleSelect={session.external ? undefined : () => setSelectedSessions(prev => { const next = new Set(prev); next.has(session.name) ? next.delete(session.name) : next.add(session.name); return next; })}
               />
             ))
           )}
@@ -1838,40 +2440,58 @@ export function Dashboard() {
         {selectionMode && (
           <div className="selection-action-bar">
             <button className="selection-select-all" onClick={handleToggleSelectAll}>
-              {selectedSessions.size === sessions.length ? "none" : "all"}
+              {selectedSessions.size === selectableSessions.length ? "None" : "All"}
             </button>
             <span className="selection-count">
-              {selectedSessions.size > 0 ? `${selectedSessions.size} selected` : "tap to select"}
+              {selectedSessions.size > 0 ? `${selectedSessions.size} selected` : "Tap to select"}
             </span>
             <button
               className="btn btn-stop btn-sm"
               onClick={handleKillSelected}
               disabled={selectedSessions.size === 0}
             >
-              kill {selectedSessions.size > 0 ? selectedSessions.size : ""}
+              {selectedSessions.size > 0 ? `Stop ${selectedSessions.size}` : "Stop"}
             </button>
           </div>
         )}
       </div>
 
+      {/* Lives between the panes rather than inside the tab bar, so it survives both
+          cases the old placement missed: no agent selected (tab bar absent) and
+          mobile (tab bar hidden). Takes layout space, so it never covers content. */}
+      {sidebarCollapsed && (
+        <button
+          className="sidebar-expand-rail"
+          onClick={() => setSidebarCollapsed(false)}
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="12"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="3 4 6.5 8 3 12" />
+            <polyline points="9.5 4 13 8 9.5 12" />
+          </svg>
+        </button>
+      )}
+
       <div className="split-main">
         {activeSession ? (
           <>
             <div className="main-tabs">
-              {sidebarCollapsed && (
-                <button
-                  className="main-tab sidebar-expand-btn"
-                  onClick={() => setSidebarCollapsed(false)}
-                  title="Expand sidebar"
-                >
-                  &raquo;
-                </button>
-              )}
               <button
                 className="main-tab mobile-back-btn"
                 onClick={() => setMobileShowTerminal(false)}
               >
-                &lt; sessions
+                &lt; agents
               </button>
               {parentSessionInfo && (
                 <button
@@ -1889,18 +2509,21 @@ export function Dashboard() {
               )}
               <div className="main-tabs-toolbar" ref={toolbarRef} />
             </div>
-            <div className="main-content main-content-split" ref={splitContainerRef}>
+            <div className={`main-content main-content-split${splitFullscreen ? " main-content-fullscreen" : ""}`} ref={splitContainerRef}>
               <div className="split-terminal-pane" data-tutorial="terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
                 {activeSessionInfo?.status === "stopped" ? (
-                  <div className="stopped-session-placeholder">
-                    <div className="stopped-session-icon">◎</div>
-                    <div className="stopped-session-title">{activeSessionInfo.displayName}</div>
-                    <div className="stopped-session-desc">This session stopped (e.g. after a reboot).<br />Restore it to resume with full conversation history.</div>
+                  <div className="stopped-session-placeholder" role="status" aria-live="polite">
+                    <div className="stopped-session-icon" aria-hidden="true">⏹</div>
+                    <div className="stopped-session-copy">
+                      <div className="stopped-session-kicker">Agent stopped</div>
+                      <div className="stopped-session-title">{activeSessionInfo.displayName}</div>
+                      <div className="stopped-session-desc">Restore this agent to continue with its saved conversation history.</div>
+                    </div>
                     <button
                       className="btn btn-primary stopped-session-restore-btn"
                       onClick={() => handleRestoreSession(activeSession)}
                     >
-                      ↺ Restore Session
+                      ↺ Restore agent
                     </button>
                   </div>
                 ) : (!isMobile || mobileShowTerminal) && (
@@ -1911,9 +2534,13 @@ export function Dashboard() {
                     onClosed={handleSessionClosed}
                     onAgentSwitched={refresh}
                     toolbarPortal={toolbarRef}
+                    fullscreenTargetRef={splitContainerRef}
+                    onFullscreenChange={setSplitFullscreen}
+                    onFullscreenPanelShortcut={handleFullscreenPanelShortcut}
                     onSwipeBack={() => setMobileShowTerminal(false)}
                     onKeyboardVisibilityChange={setKbOpen}
                     isActive={!bottomTab}
+                    readOnly={sessions.find((s) => s.name === activeSession)?.external}
                   />
                 )}
               </div>
@@ -1968,7 +2595,13 @@ export function Dashboard() {
                     data-tutorial="tab-changes"
                     onClick={() => setBottomTab(bottomTab === "changes" ? null : "changes")}
                   >
-                    changes
+                    review
+                  </button>
+                  <button
+                    className={`main-tab ${bottomTab === "git-log" ? "main-tab-active" : ""}`}
+                    onClick={() => setBottomTab(bottomTab === "git-log" ? null : "git-log")}
+                  >
+                    git log
                   </button>
                   {hasChildren && (
                     <button
@@ -1982,16 +2615,29 @@ export function Dashboard() {
                   <button
                     className={`main-tab ${bottomTab === "files" ? "main-tab-active" : ""}`}
                     onClick={() => setBottomTab(bottomTab === "files" ? null : "files")}
+                    title="Browse repository files"
+                    aria-label="Browse repository files"
                   >
-                    files
+                    explorer
+                  </button>
+                  <button
+                    className={`main-tab ${bottomTab === "shell" ? "main-tab-active" : ""}`}
+                    onClick={() => setBottomTab(bottomTab === "shell" ? null : "shell")}
+                    title="Open a shell in this agent's worktree"
+                    aria-label="Open a shell in this agent's worktree"
+                  >
+                    shell
                   </button>
                   {bottomTab && (
                     <button
                       className="main-tab split-maximize-btn"
                       onClick={() => setBottomMaximized(!bottomMaximized)}
-                      title={bottomMaximized ? "Restore split" : "Maximize"}
+                      title={bottomMaximized ? "Restore split view" : "Expand panel"}
+                      aria-label={bottomMaximized ? "Restore split view" : "Expand panel"}
+                      aria-pressed={bottomMaximized}
                     >
-                      {bottomMaximized ? "\u25BD" : "\u25B3"}
+                      <span className="split-maximize-icon" aria-hidden="true">{bottomMaximized ? "▭" : "⛶"}</span>
+                      <span className="split-maximize-label">{bottomMaximized ? "split" : "expand"}</span>
                     </button>
                   )}
                 </div>
@@ -2004,6 +2650,11 @@ export function Dashboard() {
                       sessionName={activeSession}
                       sessionPaths={activeSessionPaths}
                       onCommentsSent={() => setBottomTab(null)}
+                    />
+                  ) : bottomTab === "git-log" ? (
+                    <GitLogView
+                      key={activeSession}
+                      sessionPaths={activeSessionPaths}
                     />
                   ) : bottomTab === "sub-agents" && hasChildren ? (
                     <SubAgentsView
@@ -2026,6 +2677,13 @@ export function Dashboard() {
                         setTimeout(() => window.dispatchEvent(new Event("agentdock-focus-terminal")), 50);
                       }}
                     />
+                  ) : bottomTab === "shell" ? (
+                    <ShellView
+                      key={activeSession}
+                      sessionName={activeSession}
+                      worktrees={activeSessionInfo?.worktrees ?? []}
+                      onClose={() => setBottomTab(null)}
+                    />
                   ) : (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
                   )}
@@ -2035,7 +2693,17 @@ export function Dashboard() {
           </>
         ) : (
           <div className="split-empty">
-            <span className="split-empty-text">select a session</span>
+            {/* "Select an agent" only makes sense when there is something to select. */}
+            {sessions.length === 0 ? (
+              <>
+                <pre className="split-empty-logo" aria-hidden="true">{ASCII_LOGO}</pre>
+                <button className="btn btn-primary" onClick={() => openNewAgent()}>
+                  New agent
+                </button>
+              </>
+            ) : (
+              <span className="split-empty-text">Select an agent</span>
+            )}
           </div>
         )}
       </div>
@@ -2167,6 +2835,23 @@ export function Dashboard() {
           </div>
         </div>
       )}
+      {confirmAction && (
+        <ConfirmActionModal
+          action={confirmAction}
+          onClose={() => setConfirmAction(null)}
+        />
+      )}
+      {newAgentModal && (
+        <CreateSessionModal
+          initialMetaValues={newAgentModal.initialMetaValues}
+          initialTargetMode={newAgentModal.initialTargetMode}
+          initialSessionName={newAgentModal.initialSessionName}
+          initialTargets={newAgentModal.initialTargets}
+          initialAgentType={newAgentModal.initialAgentType}
+          onClose={closeNewAgent}
+          onCreated={handleNewAgentCreated}
+        />
+      )}
       {editingSession && metaPresets.length > 0 && (
         <SessionEditModal
           session={editingSession}
@@ -2183,22 +2868,27 @@ export function Dashboard() {
       )}
       {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
     </div>
+      ) : (
+        <WorktreesView onAgentCreated={handleNewAgentCreated} />
+      )}
+    </div>
 
-    {/* FAB: new session, only on session list */}
-    {!mobileInSession && (
-      <button className="session-fab" onClick={() => navigate("/create")} aria-label="New session">
+    {/* FAB: new agent, only on the agents list */}
+    {!mobileInSession && workspaceTab === "agents" && (
+      <button className="session-fab" onClick={() => openNewAgent()} aria-label="New agent" title={`New agent (${NEW_AGENT_SHORTCUT})`}>
         +
       </button>
     )}
 
     {/* Bottom navigation bar */}
+    {workspaceTab === "agents" && (
     <nav className="mobile-bottom-nav">
       <button
         className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
         onClick={() => setMobileShowTerminal(false)}
       >
         <span className="mobile-nav-icon">⊟</span>
-        <span className="mobile-nav-label">Sessions</span>
+        <span className="mobile-nav-label">Agents</span>
       </button>
       {mobileInSession && (
         <>
@@ -2221,18 +2911,28 @@ export function Dashboard() {
             onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
           >
             <span className="mobile-nav-icon">±</span>
-            <span className="mobile-nav-label">Changes</span>
+            <span className="mobile-nav-label">Review</span>
+          </button>
+          <button
+            className={`mobile-nav-item ${bottomTab === "git-log" ? "mobile-nav-item-active" : ""}`}
+            onClick={() => { setBottomTab("git-log"); setBottomMaximized(true); }}
+          >
+            <span className="mobile-nav-icon">≣</span>
+            <span className="mobile-nav-label">Log</span>
           </button>
           <button
             className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
             onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
+            title="Browse repository files"
+            aria-label="Browse repository files"
           >
             <span className="mobile-nav-icon">⊞</span>
-            <span className="mobile-nav-label">Files</span>
+            <span className="mobile-nav-label">Explorer</span>
           </button>
         </>
       )}
     </nav>
+    )}
     {mruSwitcherVisible && createPortal(
       <div className="mru-switcher">
         {mruList.current
@@ -2243,7 +2943,7 @@ export function Dashboard() {
             const display = name.replace(/^claude-/, "");
             return (
               <div key={name} className={`mru-switcher-item${name === activeSession ? " mru-switcher-item-active" : ""}`}>
-                <span className={`mru-switcher-status mru-status-${sess?.status ?? "unknown"}`} />
+                <span className={`mru-switcher-status mru-status-${sess ? getDisplayStatus(sess) : "unknown"}`} />
                 <span className="mru-switcher-name">{display}</span>
                 {idx === 0 && <span className="mru-switcher-badge">now</span>}
               </div>

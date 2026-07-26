@@ -9,6 +9,7 @@ import {
   updateBasePath,
   addSettingsRepo,
   deleteSettingsRepo,
+  fetchRepoWorktrees,
   setPassword as apiSetPassword,
   fetchMcpServers,
   addMcpServerApi,
@@ -21,7 +22,7 @@ import {
   type SettingsHealth,
   type McpServerInfo,
 } from "../api";
-import type { RepoConfig, MetaPropertyPreset } from "../types";
+import type { RepoConfig, RepoWorktreeInfo, MetaPropertyPreset } from "../types";
 
 type Category =
   | "appearance"
@@ -49,6 +50,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
 const THEMES: { id: Settings["theme"]; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "dark", label: "Dark" },
+  { id: "aurora", label: "Aurora" },
   { id: "midnight", label: "Midnight" },
   { id: "light", label: "Light" },
   { id: "minimal", label: "Minimal" },
@@ -292,10 +294,13 @@ function HealthPanel() {
     { name: "tmux", ...health.tmux, required: true, install: "brew install tmux  •  apt install tmux" },
     { name: "claude", ...health.claude, required: true, install: "npm i -g @anthropic-ai/claude-code  •  claude.ai/code" },
     { name: "cursor (agent CLI)", ...health.cursor, required: false, install: "Install Cursor IDE from cursor.com" },
+    { name: "codex", ...health.codex, required: false, install: "brew install codex  •  npm i -g @openai/codex" },
     { name: "git", ...health.git, required: true, install: "brew install git  •  apt install git" },
     { name: "gh (GitHub CLI)", ...health.gh, required: false, install: "brew install gh  •  cli.github.com" },
-    { name: "bun", ...health.bun, required: true, install: "curl -fsSL https://bun.sh/install | bash" },
+    { name: "bun", ...health.bun, required: true, install: "brew install bun" },
+    { name: "jq (plan capture)", ...health.jq, required: false, install: "brew install jq  •  apt install jq" },
     { name: "psql", ...health.psql, required: false, install: "brew install postgresql  •  apt install postgresql-client" },
+    { name: "ngrok (share link)", ...health.ngrok, required: false, install: "brew install ngrok  •  ngrok.com/download" },
   ];
 
   return (
@@ -331,6 +336,39 @@ function ReposPanel() {
   const [newAlias, setNewAlias] = useState("");
   const [newPath, setNewPath] = useState("");
   const [newRemote, setNewRemote] = useState("");
+  const [showWorktrees, setShowWorktrees] = useState(false);
+  const [worktrees, setWorktrees] = useState<RepoWorktreeInfo[]>([]);
+  const [worktreesLoading, setWorktreesLoading] = useState(false);
+  const [worktreesError, setWorktreesError] = useState<string | null>(null);
+  const [selectedWorktrees, setSelectedWorktrees] = useState<Record<string, boolean>>({});
+  const [worktreeAliases, setWorktreeAliases] = useState<Record<string, string>>({});
+
+  const prepareWorktreeSelection = useCallback((items: RepoWorktreeInfo[]) => {
+    const nextSelected: Record<string, boolean> = {};
+    const nextAliases: Record<string, string> = {};
+    for (const wt of items) {
+      if (!wt.configured && !wt.bare && !wt.isMain) {
+        nextSelected[wt.path] = true;
+        nextAliases[wt.path] = wt.suggestedAlias;
+      }
+    }
+    setSelectedWorktrees(nextSelected);
+    setWorktreeAliases(nextAliases);
+  }, []);
+
+  const refreshWorktrees = useCallback(async (showErrors = true) => {
+    setWorktreesLoading(true);
+    if (showErrors) setWorktreesError(null);
+    try {
+      const discovered = await fetchRepoWorktrees();
+      setWorktrees(discovered);
+      prepareWorktreeSelection(discovered);
+    } catch (err: any) {
+      if (showErrors) setWorktreesError(err?.message || "Failed to discover worktrees");
+    } finally {
+      setWorktreesLoading(false);
+    }
+  }, [prepareWorktreeSelection]);
 
   const load = useCallback(() => {
     fetchSettingsRepos().then(setRepos);
@@ -338,9 +376,23 @@ function ReposPanel() {
       setBasePath(p);
       setBaseInput(p);
     });
-  }, []);
+    refreshWorktrees(false);
+  }, [refreshWorktrees]);
 
   useEffect(() => { load(); }, [load]);
+
+  const linkedWorktreeByPath = new Map(
+    worktrees
+      .filter((wt) => wt.configured && !wt.bare && !wt.isMain)
+      .map((wt) => [wt.path, wt]),
+  );
+  const sourceInfoByPath = new Map(
+    worktrees
+      .filter((wt) => wt.configured && (wt.bare || wt.isMain))
+      .map((wt) => [wt.path, wt]),
+  );
+  const projectRepos = repos.filter((repo) => !linkedWorktreeByPath.has(repo.path));
+  const worktreeRepos = repos.filter((repo) => linkedWorktreeByPath.has(repo.path));
 
   const handleSaveBase = async () => {
     await updateBasePath(baseInput);
@@ -361,6 +413,74 @@ function ReposPanel() {
   const handleDelete = async (alias: string) => {
     await deleteSettingsRepo(alias);
     load();
+  };
+
+  const handleFindWorktrees = async () => {
+    setShowWorktrees(true);
+    await refreshWorktrees(true);
+  };
+
+  const importableWorktrees = worktrees.filter((wt) => !wt.configured && !wt.bare && !wt.isMain);
+  const selectedImportable = importableWorktrees.filter((wt) => selectedWorktrees[wt.path]);
+  const selectedAliasCounts = selectedImportable.reduce<Record<string, number>>((acc, wt) => {
+    const alias = (worktreeAliases[wt.path] || "").trim();
+    if (alias) acc[alias] = (acc[alias] || 0) + 1;
+    return acc;
+  }, {});
+  const hasAliasConflict = selectedImportable.some((wt) => {
+    const alias = (worktreeAliases[wt.path] || "").trim();
+    if (!alias) return true;
+    if (selectedAliasCounts[alias] > 1) return true;
+    return repos.some((repo) => repo.alias === alias && repo.path !== wt.path);
+  });
+  const canImportWorktrees = selectedImportable.length > 0 && !hasAliasConflict && !worktreesLoading;
+
+  const handleImportWorktrees = async () => {
+    if (!canImportWorktrees) return;
+    setWorktreesLoading(true);
+    setWorktreesError(null);
+    try {
+      await Promise.all(selectedImportable.map((wt) => addSettingsRepo({
+        alias: (worktreeAliases[wt.path] || wt.suggestedAlias).trim(),
+        path: wt.path,
+        remote: wt.remote,
+      })));
+      const [updatedRepos, discovered] = await Promise.all([
+        fetchSettingsRepos(),
+        fetchRepoWorktrees(),
+      ]);
+      setRepos(updatedRepos);
+      setWorktrees(discovered);
+      prepareWorktreeSelection(discovered);
+    } catch (err: any) {
+      setWorktreesError(err?.message || "Failed to import worktrees");
+    } finally {
+      setWorktreesLoading(false);
+    }
+  };
+
+  const renderRepoRow = (repo: RepoConfig, worktreeInfo?: RepoWorktreeInfo) => {
+    const sourceInfo = sourceInfoByPath.get(repo.path);
+    const detail = worktreeInfo
+      ? `${worktreeInfo.repoAlias} / ${worktreeInfo.branch || "detached"}${worktreeInfo.head ? ` @ ${worktreeInfo.head.slice(0, 7)}` : ""}`
+      : sourceInfo?.bare
+        ? "source repo (bare, hidden from new agents)"
+        : sourceInfo?.isMain
+          ? `source checkout${sourceInfo.branch ? ` / ${sourceInfo.branch}` : ""}`
+          : repo.remote;
+
+    return (
+      <div key={repo.alias} className="settings-repo-row">
+        <div className="settings-repo-info">
+          <span className="settings-repo-alias">{repo.alias}</span>
+          <span className="settings-repo-path">{repo.path}</span>
+          {detail && <span className="settings-repo-remote">{detail}</span>}
+        </div>
+        <button className="btn btn-danger-sm" onClick={() => handleDelete(repo.alias)}>
+          Remove
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -387,10 +507,15 @@ function ReposPanel() {
       </div>
 
       <div className="settings-row">
-        <label className="settings-label">Repos</label>
-        <button className="btn btn-primary settings-add-btn" onClick={() => setShowAdd(!showAdd)}>
-          {showAdd ? "Cancel" : "+ Add"}
-        </button>
+        <label className="settings-label">Targets</label>
+        <div className="settings-inline-form">
+          <button className="btn settings-add-btn" onClick={handleFindWorktrees} disabled={worktreesLoading}>
+            {worktreesLoading && showWorktrees ? "Scanning..." : "Scan Worktrees"}
+          </button>
+          <button className="btn btn-primary settings-add-btn" onClick={() => setShowAdd(!showAdd)}>
+            {showAdd ? "Cancel" : "+ Add Path"}
+          </button>
+        </div>
       </div>
 
       {showAdd && (
@@ -414,27 +539,98 @@ function ReposPanel() {
             placeholder="Remote URL (optional)"
           />
           <button className="btn btn-primary" onClick={handleAddRepo} disabled={!newAlias || !newPath}>
-            Add Repository
+            Add Path
           </button>
         </div>
       )}
 
-      <div className="settings-repo-list">
-        {repos.length === 0 && (
-          <div className="settings-empty">No repositories configured.</div>
-        )}
-        {repos.map((repo) => (
-          <div key={repo.alias} className="settings-repo-row">
-            <div className="settings-repo-info">
-              <span className="settings-repo-alias">{repo.alias}</span>
-              <span className="settings-repo-path">{repo.path}</span>
-              {repo.remote && <span className="settings-repo-remote">{repo.remote}</span>}
+      {showWorktrees && (
+        <div className="settings-worktree-panel">
+          <div className="settings-worktree-header">
+            <div>
+              <span className="settings-repo-alias">Discovered Worktrees</span>
+              <span className="settings-repo-path">{worktrees.length} paths found, {importableWorktrees.length} importable worktree{importableWorktrees.length === 1 ? "" : "s"}</span>
             </div>
-            <button className="btn btn-danger-sm" onClick={() => handleDelete(repo.alias)}>
-              Remove
-            </button>
+            <button className="btn" onClick={() => setShowWorktrees(false)}>Close</button>
           </div>
-        ))}
+          {worktreesError && <div className="form-error">{worktreesError}</div>}
+          {!worktreesLoading && worktrees.length === 0 && (
+            <div className="settings-empty">No worktrees found.</div>
+          )}
+          <div className="settings-worktree-list">
+            {worktrees.map((wt) => {
+              const isSource = wt.bare || wt.isMain;
+              const importable = !wt.configured && !isSource;
+              return (
+                <div key={wt.path} className={`settings-worktree-row ${!importable ? "settings-worktree-row-disabled" : ""}`}>
+                  <input
+                    className="settings-worktree-check"
+                    type="checkbox"
+                    disabled={!importable}
+                    checked={!!selectedWorktrees[wt.path]}
+                    onChange={(e) => setSelectedWorktrees((prev) => ({ ...prev, [wt.path]: e.target.checked }))}
+                  />
+                  <div className="settings-repo-info settings-worktree-info">
+                    <span className={isSource ? "settings-repo-alias" : `settings-repo-alias branch-label${(wt.branch || "detached") === "detached" ? " branch-label-muted" : ""}`}>{isSource ? wt.repoAlias : wt.branch || "detached"}</span>
+                    <span className="settings-repo-path">{wt.path}</span>
+                    <span className="settings-repo-remote">
+                      {isSource
+                        ? `source ${wt.bare ? "repo (bare)" : "checkout"}`
+                        : wt.configured
+                          ? `configured as ${wt.suggestedAlias}`
+                          : `source: ${wt.repoAlias}${wt.head ? ` @ ${wt.head.slice(0, 7)}` : ""}`}
+                    </span>
+                  </div>
+                  {importable ? (
+                    <input
+                      className="form-input settings-worktree-alias-input"
+                      value={worktreeAliases[wt.path] || ""}
+                      onChange={(e) => setWorktreeAliases((prev) => ({ ...prev, [wt.path]: e.target.value }))}
+                      placeholder="alias"
+                    />
+                  ) : (
+                    <span className="settings-worktree-status">{isSource ? "source" : "configured"}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {hasAliasConflict && (
+            <div className="form-error">Selected worktree aliases must be unique and not already configured.</div>
+          )}
+          <div className="settings-worktree-actions">
+            <button className="btn btn-primary" onClick={handleImportWorktrees} disabled={!canImportWorktrees}>
+              Import {selectedImportable.length} Worktree{selectedImportable.length === 1 ? "" : "s"}
+            </button>
+            <button className="btn" onClick={handleFindWorktrees} disabled={worktreesLoading}>Refresh</button>
+          </div>
+        </div>
+      )}
+
+      <div className="settings-target-section">
+        <div className="settings-target-heading">
+          <span>Projects / Source Repos</span>
+          <span>{projectRepos.length}</span>
+        </div>
+        <div className="settings-repo-list">
+          {projectRepos.length === 0 && (
+            <div className="settings-empty">No source projects configured.</div>
+          )}
+          {projectRepos.map((repo) => renderRepoRow(repo))}
+        </div>
+      </div>
+
+      <div className="settings-target-section">
+        <div className="settings-target-heading">
+          <span>Worktrees</span>
+          <span>{worktreeRepos.length}</span>
+        </div>
+        <div className="settings-repo-list">
+          {worktreeRepos.length === 0 && (
+            <div className="settings-empty">No worktrees configured.</div>
+          )}
+          {worktreeRepos.map((repo) => renderRepoRow(repo, linkedWorktreeByPath.get(repo.path)))}
+        </div>
       </div>
     </>
   );
@@ -492,7 +688,7 @@ function McpServersPanel() {
   return (
     <>
       <p className="settings-security-desc">
-        MCP servers are synced to all agent configs (Claude, Cursor) so every session has access.
+        MCP servers are synced to all agent configs (Claude, Cursor) so every agent has access.
       </p>
       <div className="settings-row">
         <label className="settings-label">Servers</label>
@@ -590,7 +786,7 @@ function MetaPropertiesPanel() {
   return (
     <>
       <p className="settings-security-desc">
-        Define meta properties that can be assigned to sessions (e.g., customer, org ID, priority).
+        Define meta properties that can be assigned to agents (e.g., customer, org ID, priority).
         Properties with preset values show as dropdowns; empty values allow free-text input.
       </p>
       <div className="settings-row">
@@ -787,7 +983,7 @@ function SecurityPanel() {
     <>
       <p className="settings-security-desc">
         {enabled
-          ? "Auth is enabled. You can change your password below."
+          ? "Auth is enabled. You can change your password below. Use at least 12 characters if you share a public link — that password is all that stands between the internet and a shell on this machine."
           : "No password set. Set one to protect access from your network."}
       </p>
       <div className="settings-security-form">
@@ -825,11 +1021,11 @@ function SecurityPanel() {
       )}
 
       <div className="settings-section-divider" />
-      <p className="settings-label" style={{ marginBottom: 6 }}>Ngrok Basic Auth</p>
+      <p className="settings-label" style={{ marginBottom: 6 }}>Share link basic auth</p>
       <p className="settings-security-desc">
         {ngrokConfigured
-          ? "Basic auth is configured. Anyone accessing via ngrok will be prompted for credentials."
-          : "Optionally protect your ngrok tunnel with HTTP basic auth (user:password)."}
+          ? "Basic auth is configured. Anyone opening the share link is prompted for these credentials before reaching AgentDock."
+          : "Optionally add a second challenge (user:password) in front of the share link. Note that basic auth requires a paid ngrok plan — if yours doesn't support it, the tunnel won't start."}
       </p>
       <div className="settings-security-form">
         <input
@@ -872,15 +1068,17 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: "Navigation",
     shortcuts: [
-      { keys: ["⌘K"], description: "Focus session search" },
-      { keys: ["⌘P"], description: "Open file explorer / focus file search" },
-      { keys: ["Ctrl", "Shift", "["], description: "Go back to previous session (MRU)" },
-      { keys: ["Ctrl", "Shift", "]"], description: "Go forward to next session (MRU)" },
-      { keys: ["Esc"], description: "Close bottom pane (plan / changes / files)" },
+      { keys: ["⌘K"], description: "Focus active search" },
+      { keys: ["⌘", "Shift", "A"], description: "Create a new agent" },
+      { keys: ["⌥", "W"], description: "Open Worktrees and focus search" },
+      { keys: ["⌘P"], description: "Open explorer / focus file search" },
+      { keys: ["Ctrl", "Shift", "["], description: "Go back to previous agent (MRU)" },
+      { keys: ["Ctrl", "Shift", "]"], description: "Go forward to next agent (MRU)" },
+      { keys: ["Esc"], description: "Close bottom pane (plan / review / git log / explorer)" },
     ],
   },
   {
-    title: "File Explorer",
+    title: "Explorer",
     shortcuts: [
       { keys: ["↑", "↓"], description: "Navigate search results" },
       { keys: ["Enter"], description: "Open selected file" },
@@ -898,7 +1096,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
-    title: "Session Search",
+    title: "Agent Search",
     shortcuts: [
       { keys: ["Esc"], description: "Clear search and blur input" },
     ],
