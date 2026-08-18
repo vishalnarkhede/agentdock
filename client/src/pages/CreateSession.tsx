@@ -31,6 +31,7 @@ export function CreateSession() {
   const [metaPresets, setMetaPresets] = useState<MetaPropertyPreset[]>([]);
   const [metaValues, setMetaValues] = useState<Record<string, string>>({});
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
+  const [primaryRepo, setPrimaryRepo] = useState<string>("");
 
   useEffect(() => {
     fetchTemplates().then(setTemplates);
@@ -46,6 +47,7 @@ export function CreateSession() {
     });
     fetchPreferences().then((p) => {
       if (p.recentRepos) setRecentRepos(p.recentRepos);
+      if (p.primaryRepo) setPrimaryRepo(p.primaryRepo);
     });
   }, []);
 
@@ -170,7 +172,16 @@ export function CreateSession() {
           />
         </div>
 
-        <RepoSelector selected={targets} onChange={setTargets} recentRepos={recentRepos} />
+        <RepoSelector
+          selected={targets}
+          onChange={setTargets}
+          recentRepos={recentRepos}
+          primaryRepo={primaryRepo}
+          onSetPrimary={(alias) => {
+            setPrimaryRepo(alias);
+            updatePreferences({ primaryRepo: alias });
+          }}
+        />
 
         <div className="form-row">
           <label className="form-label">Agent Type</label>

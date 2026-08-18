@@ -95,6 +95,10 @@ export async function killSession(name: string): Promise<void> {
   await run(["kill-session", "-t", `=${name}`]);
 }
 
+export async function renameSession(name: string, newName: string): Promise<void> {
+  await run(["rename-session", "-t", `=${name}`, newName]);
+}
+
 export async function setOption(
   name: string,
   option: string,

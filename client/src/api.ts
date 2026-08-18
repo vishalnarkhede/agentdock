@@ -636,6 +636,23 @@ export async function updateSessionMeta(
   return res.json();
 }
 
+export async function renameSession(
+  sessionName: string,
+  newName: string,
+): Promise<{ name: string; displayName: string }> {
+  if (isDemo()) return { name: sessionName, displayName: newName };
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to rename session");
+  }
+  return res.json();
+}
+
 // ─── Ngrok API ───
 
 export interface NgrokStatus {

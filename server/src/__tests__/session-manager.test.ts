@@ -6,7 +6,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { buildAgentCmd, sessionNameFromTarget, parsePiece } from "../services/session-manager";
+import { buildAgentCmd, sessionNameFromTarget, parsePiece, reorderTargetsForPrimary } from "../services/session-manager";
 
 describe("buildAgentCmd", () => {
   // ─── Claude agent ───
@@ -102,5 +102,41 @@ describe("parsePiece", () => {
   test("handles empty string", () => {
     const result = parsePiece("");
     expect(result).toEqual({ alias: "", branch: "" });
+  });
+});
+
+describe("reorderTargetsForPrimary", () => {
+  test("moves the primary repo to the front", () => {
+    expect(
+      reorderTargetsForPrimary(["volt-dashboard", "chat", "django"], "chat"),
+    ).toEqual(["chat", "volt-dashboard", "django"]);
+  });
+
+  test("matches by alias when targets carry a branch", () => {
+    expect(
+      reorderTargetsForPrimary(["volt-dashboard:main", "chat:main"], "chat"),
+    ).toEqual(["chat:main", "volt-dashboard:main"]);
+  });
+
+  test("no-op when primary is already first", () => {
+    expect(
+      reorderTargetsForPrimary(["chat", "django"], "chat"),
+    ).toEqual(["chat", "django"]);
+  });
+
+  test("no-op when primary is not among the targets", () => {
+    expect(
+      reorderTargetsForPrimary(["volt-dashboard", "django"], "chat"),
+    ).toEqual(["volt-dashboard", "django"]);
+  });
+
+  test("no-op when primary is unset", () => {
+    expect(
+      reorderTargetsForPrimary(["volt-dashboard", "chat"], undefined),
+    ).toEqual(["volt-dashboard", "chat"]);
+  });
+
+  test("no-op for a single target", () => {
+    expect(reorderTargetsForPrimary(["chat"], "chat")).toEqual(["chat"]);
   });
 });

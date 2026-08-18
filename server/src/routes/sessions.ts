@@ -22,6 +22,7 @@ import {
   stopSession,
   stopAllSessions,
   restoreSession,
+  renameSession,
 } from "../services/session-manager";
 import type { CreateSessionRequest, SessionInfo, AgentType } from "../types";
 
@@ -375,6 +376,20 @@ app.patch("/:name/meta", async (c) => {
   }
   saveSessionProperties(name, merged);
   return c.json(merged);
+});
+
+app.post("/:name/rename", async (c) => {
+  const name = c.req.param("name");
+  const body = await c.req.json() as { name?: string };
+  if (!body.name || !body.name.trim()) {
+    return c.json({ error: "name is required" }, 400);
+  }
+  try {
+    const newName = await renameSession(name, body.name);
+    return c.json({ name: newName, displayName: newName.replace(`${PREFIX}-`, "") });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 409);
+  }
 });
 
 app.post("/:name/restore", async (c) => {

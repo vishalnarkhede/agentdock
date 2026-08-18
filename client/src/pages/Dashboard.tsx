@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
+import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, renameSession, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { TerminalView } from "../components/TerminalView";
@@ -164,6 +164,8 @@ function SessionRow({
     setRestoring(true);
     try {
       await onRestore?.();
+    } catch (err: any) {
+      console.error("Failed to restore session:", err);
     } finally {
       setRestoring(false);
     }
@@ -320,10 +322,13 @@ function SessionEditModal({
 }: {
   session: SessionInfo;
   presets: MetaPropertyPreset[];
-  onSave: (meta: Record<string, string>, updatedPresets: MetaPropertyPreset[]) => void;
+  onSave: (meta: Record<string, string>, updatedPresets: MetaPropertyPreset[], newDisplayName: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [meta, setMeta] = useState<Record<string, string>>(session.meta || {});
+  const [name, setName] = useState(session.displayName);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -333,6 +338,21 @@ function SessionEditModal({
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  const handleSave = async () => {
+    if (!name.trim()) {
+      setError("Name cannot be empty");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(meta, presets, name.trim());
+    } catch (err: any) {
+      setError(err?.message || "Failed to save");
+      setSaving(false);
+    }
+  };
+
   return createPortal(
     <div className="settings-overlay" onClick={onClose}>
       <div className="session-edit-modal" onClick={(e) => e.stopPropagation()}>
@@ -341,6 +361,18 @@ function SessionEditModal({
           <button className="settings-close-btn" onClick={onClose}>&times;</button>
         </div>
         <div className="session-edit-body">
+          <div className="session-edit-field">
+            <label className="session-edit-label">Name</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Session name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+              autoFocus
+            />
+          </div>
           {presets.map((preset) => (
             <div key={preset.key} className="session-edit-field">
               <label className="session-edit-label">{preset.label}</label>
@@ -367,9 +399,10 @@ function SessionEditModal({
             </div>
           ))}
         </div>
+        {error && <div className="session-edit-error">{error}</div>}
         <div className="session-edit-footer">
-          <button className="btn btn-primary" onClick={() => onSave(meta, presets)}>Save</button>
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
         </div>
       </div>
     </div>,
@@ -1090,6 +1123,34 @@ export function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<string>("");
+  const [sortBy, setSortBy] = useState<string>("");
+  const [sessionStats, setSessionStats] = useState<Record<string, { count: number; last: number }>>({});
+  const sessionStatsRef = useRef<Record<string, { count: number; last: number }>>({});
+  const statsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Frozen display order for the "recently used" sort. Recency is recorded in
+  // sessionStats on every click, but this ordering only changes at non-disruptive
+  // moments (load, session add/remove, and after you settle on a session) so the
+  // list does not reshuffle each time you click through sessions.
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [recentOrder, setRecentOrder] = useState<string[]>([]);
+  const recentInitedRef = useRef(false);
+  const recentSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionNamesRef = useRef<string[]>([]);
+  const RECENT_SETTLE_MS = 8000;
+  const sortNamesByRecency = useCallback((names: string[], prevOrder: string[]): string[] => {
+    const prevIdx = new Map(prevOrder.map((n, i) => [n, i]));
+    return [...names].sort((a, b) => {
+      const la = sessionStatsRef.current[a]?.last ?? 0;
+      const lb = sessionStatsRef.current[b]?.last ?? 0;
+      if (lb !== la) return lb - la;
+      // Stable tie-break: keep prior frozen position, then name — never depends on
+      // the volatile server/tmux order, so equal-recency rows don't shuffle on poll.
+      const pa = prevIdx.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const pb = prevIdx.get(b) ?? Number.MAX_SAFE_INTEGER;
+      if (pa !== pb) return pa - pb;
+      return a.localeCompare(b);
+    });
+  }, []);
   const [metaPresets, setMetaPresets] = useState<MetaPropertyPreset[]>([]);
   const [editingSession, setEditingSession] = useState<SessionInfo | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -1108,10 +1169,17 @@ export function Dashboard() {
   useEffect(() => {
     fetchPreferences().then((p) => {
       if (p.pinnedSessions) setPinnedSessions(new Set(p.pinnedSessions));
-      if (p.groupBy) setGroupBy(p.groupBy);
+      // Sort and grouping are mutually exclusive; a saved sort takes precedence.
+      if (p.sortBy) setSortBy(p.sortBy);
+      else if (p.groupBy) setGroupBy(p.groupBy);
       if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
       if (p.mruSessions) mruList.current = p.mruSessions;
-    });
+      if (p.sessionStats) {
+        sessionStatsRef.current = p.sessionStats;
+        setSessionStats(p.sessionStats);
+      }
+      setPrefsLoaded(true);
+    }).catch(() => setPrefsLoaded(true));
     fetchMetaPropertyPresets().then(setMetaPresets);
     const handler = () => fetchMetaPropertyPresets().then(setMetaPresets);
     window.addEventListener("agentdock-meta-presets-changed", handler);
@@ -1192,7 +1260,64 @@ export function Dashboard() {
     mruSaveTimer.current = setTimeout(() => {
       updatePreferences({ mruSessions: mruList.current });
     }, 1000);
+
+    // Usage stats drive the "recently/frequently used" sort. They change ONLY
+    // here (on a deliberate session switch), never on the status poll, so the
+    // sorted list stays stable between navigations instead of flickering.
+    const cur = sessionStatsRef.current[activeSession] || { count: 0, last: 0 };
+    const nextStats = {
+      ...sessionStatsRef.current,
+      [activeSession]: { count: cur.count + 1, last: Date.now() },
+    };
+    sessionStatsRef.current = nextStats;
+    setSessionStats(nextStats);
+    if (statsSaveTimer.current) clearTimeout(statsSaveTimer.current);
+    statsSaveTimer.current = setTimeout(() => {
+      updatePreferences({ sessionStats: sessionStatsRef.current });
+    }, 1000);
+
+    // "Recently used" freeze: don't reorder the list on this click. Only re-sort
+    // once the user has settled on a session (no further switches for a while).
+    // Each switch resets the timer, so browsing through sessions never reshuffles.
+    if (recentSettleTimer.current) clearTimeout(recentSettleTimer.current);
+    recentSettleTimer.current = setTimeout(() => {
+      setRecentOrder((prev) => sortNamesByRecency(sessionNamesRef.current, prev));
+    }, RECENT_SETTLE_MS);
   }, [activeSession]);
+
+  // Keep a live snapshot of session names for the recency helpers (avoids stale closures)
+  useEffect(() => {
+    sessionNamesRef.current = sessions.map((s) => s.name);
+  }, [sessions]);
+
+  // Initialise the frozen recency order once prefs + sessions are available, then
+  // reconcile it on add/remove: new sessions go to the top, removed ones drop out,
+  // existing sessions keep their frozen positions (no reshuffle).
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    const names = sessions.map((s) => s.name);
+    if (names.length === 0) return;
+    setRecentOrder((prev) => {
+      if (!recentInitedRef.current) {
+        recentInitedRef.current = true;
+        return sortNamesByRecency(names, []);
+      }
+      const nameSet = new Set(names);
+      const prevSet = new Set(prev);
+      const kept = prev.filter((n) => nameSet.has(n));
+      const added = names.filter((n) => !prevSet.has(n));
+      if (added.length === 0 && kept.length === prev.length) return prev;
+      return [...added, ...kept];
+    });
+  }, [prefsLoaded, sessions]);
+
+  // Refresh the recency order when the user switches INTO "recently used" so it
+  // reflects current activity immediately (a deliberate mode change, not a click).
+  useEffect(() => {
+    if (sortBy === "recent" && recentInitedRef.current) {
+      setRecentOrder((prev) => sortNamesByRecency(sessionNamesRef.current, prev));
+    }
+  }, [sortBy, sortNamesByRecency]);
 
   // Close bottom pane when switching sessions
   useEffect(() => {
@@ -1235,6 +1360,8 @@ export function Dashboard() {
   useEffect(() => () => {
     if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
     if (mruSaveTimer.current) clearTimeout(mruSaveTimer.current);
+    if (statsSaveTimer.current) clearTimeout(statsSaveTimer.current);
+    if (recentSettleTimer.current) clearTimeout(recentSettleTimer.current);
   }, []);
 
   // Build ordered session list: pinned first, then parents, then their children indented below
@@ -1248,7 +1375,31 @@ export function Dashboard() {
     const parents = sessions.filter((s) => !childNames.has(s.name));
     const pinnedParents = parents.filter((s) => pinnedSessions.has(s.name));
     const unpinnedParents = parents.filter((s) => !pinnedSessions.has(s.name));
-    const sortedParents = [...pinnedParents, ...unpinnedParents];
+
+    // Sort by usage when requested. Array.sort is stable, so never-used sessions
+    // (missing stats) keep their existing server/manual order — no flip-flopping.
+    const byUsage = (list: SessionInfo[]): SessionInfo[] => {
+      if (sortBy === "recent") {
+        // Use the frozen recency order (recentOrder), NOT live sessionStats, so
+        // clicking a session doesn't reorder the list — see the settle logic above.
+        const idx = new Map(recentOrder.map((n, i) => [n, i]));
+        return [...list].sort(
+          (a, b) =>
+            (idx.get(a.name) ?? Number.MAX_SAFE_INTEGER) -
+            (idx.get(b.name) ?? Number.MAX_SAFE_INTEGER),
+        );
+      }
+      if (sortBy === "frequent") {
+        return [...list].sort((a, b) => {
+          const ca = sessionStats[a.name]?.count ?? 0;
+          const cb = sessionStats[b.name]?.count ?? 0;
+          if (cb !== ca) return cb - ca;
+          return (sessionStats[b.name]?.last ?? 0) - (sessionStats[a.name]?.last ?? 0);
+        });
+      }
+      return list;
+    };
+    const sortedParents = [...byUsage(pinnedParents), ...byUsage(unpinnedParents)];
 
     const result: { session: SessionInfo; isChild: boolean; isLastChild: boolean; childrenSummary?: { total: number; working: number; done: number; error: number }; childrenExpanded: boolean; parentIdx: number }[] = [];
     let pIdx = 0;
@@ -1284,7 +1435,7 @@ export function Dashboard() {
       }
     }
     return result;
-  }, [sessions, collapsedParents, pinnedSessions]);
+  }, [sessions, collapsedParents, pinnedSessions, sortBy, sessionStats, recentOrder]);
 
   const filteredSessions = useMemo(() => {
     if (!sessionSearch.trim()) return orderedSessions;
@@ -1494,7 +1645,11 @@ export function Dashboard() {
   };
 
   const handleRestoreSession = useCallback(async (name: string) => {
-    await restoreSession(name);
+    try {
+      await restoreSession(name);
+    } catch (err) {
+      console.error("Failed to restore session:", err);
+    }
     refresh();
   }, [refresh]);
 
@@ -1628,17 +1783,32 @@ export function Dashboard() {
           <select
             className="session-group-by-select"
             data-tutorial="group-by-select"
-            value={groupBy}
+            title="Sort or group sessions"
+            value={sortBy || groupBy}
             onChange={(e) => {
-              setGroupBy(e.target.value);
-              updatePreferences({ groupBy: e.target.value });
+              const v = e.target.value;
+              if (v === "recent" || v === "frequent") {
+                setSortBy(v);
+                setGroupBy("");
+                updatePreferences({ sortBy: v, groupBy: "" });
+              } else {
+                setGroupBy(v);
+                setSortBy("");
+                updatePreferences({ groupBy: v, sortBy: "" });
+              }
             }}
           >
             <option value="">No grouping</option>
-            <option value="__status__">Status</option>
-            {metaPresets.map((p) => (
-              <option key={p.key} value={p.key}>{p.label}</option>
-            ))}
+            <optgroup label="Sort by">
+              <option value="recent">Recently used</option>
+              <option value="frequent">Most used</option>
+            </optgroup>
+            <optgroup label="Group by">
+              <option value="__status__">Status</option>
+              {metaPresets.map((p) => (
+                <option key={p.key} value={p.key}>{p.label}</option>
+              ))}
+            </optgroup>
           </select>
           {groupBy && groupedSessions && (
             <button
@@ -1732,7 +1902,7 @@ export function Dashboard() {
                       onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
-                      onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                      onEditProps={() => setEditingSession(session)}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
@@ -1786,7 +1956,7 @@ export function Dashboard() {
                       onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
-                      onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                      onEditProps={() => setEditingSession(session)}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
@@ -1817,14 +1987,14 @@ export function Dashboard() {
                   setMobileShowTerminal(true);
                 }}
                 onStopped={handleStopped}
-                draggable={!isChild}
-                onDragStart={!isChild ? handleDragStart(parentIdx) : undefined}
-                onDragOver={!isChild ? handleDragOver(parentIdx) : undefined}
-                onDragEnd={!isChild ? handleDragEnd : undefined}
-                onDrop={!isChild ? handleDrop(parentIdx) : undefined}
-                isDragging={!isChild && dragIdx === parentIdx}
-                isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
-                onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                draggable={!isChild && sortBy === ""}
+                onDragStart={!isChild && sortBy === "" ? handleDragStart(parentIdx) : undefined}
+                onDragOver={!isChild && sortBy === "" ? handleDragOver(parentIdx) : undefined}
+                onDragEnd={!isChild && sortBy === "" ? handleDragEnd : undefined}
+                onDrop={!isChild && sortBy === "" ? handleDrop(parentIdx) : undefined}
+                isDragging={!isChild && sortBy === "" && dragIdx === parentIdx}
+                isDragOver={!isChild && sortBy === "" && dragOverIdx === parentIdx && dragIdx !== parentIdx}
+                onEditProps={() => setEditingSession(session)}
                 onPinToHeader={() => handlePinToHeader(session)}
                 onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                 dataTutorial={getDemoTutorialAttr(session)}
@@ -2167,15 +2337,21 @@ export function Dashboard() {
           </div>
         </div>
       )}
-      {editingSession && metaPresets.length > 0 && (
+      {editingSession && (
         <SessionEditModal
           session={editingSession}
           presets={metaPresets}
           onClose={() => setEditingSession(null)}
-          onSave={async (meta, updatedPresets) => {
+          onSave={async (meta, updatedPresets, newDisplayName) => {
             await updateSessionMeta(editingSession.name, meta);
-            await saveMetaPropertyPresets(updatedPresets);
-            setMetaPresets([...updatedPresets]);
+            if (updatedPresets.length > 0) {
+              await saveMetaPropertyPresets(updatedPresets);
+              setMetaPresets([...updatedPresets]);
+            }
+            if (newDisplayName && newDisplayName !== editingSession.displayName) {
+              const { name: renamed } = await renameSession(editingSession.name, newDisplayName);
+              if (activeSession === editingSession.name) setActiveSession(renamed);
+            }
             setEditingSession(null);
             refresh();
           }}

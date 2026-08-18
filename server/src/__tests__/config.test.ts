@@ -340,6 +340,66 @@ describe("SessionMeta", () => {
   });
 });
 
+// ─── Rename Session Config ───
+
+describe("renameSessionConfig", () => {
+  test("moves worktree meta and all per-session flag files", () => {
+    config.saveWorktreeMeta("claude-old", "/repo", "/wt");
+    config.saveSessionAgentType("claude-old", "claude");
+    config.saveSessionProperties("claude-old", { priority: "high" });
+    config.saveSessionType("claude-old", "ticket");
+    config.saveSessionSkipPerms("claude-old", true);
+
+    config.renameSessionConfig("claude-old", "claude-new");
+
+    expect(config.getSessionMeta("claude-old")).toEqual([]);
+    expect(config.getSessionMeta("claude-new")).toEqual([{ repoPath: "/repo", wtDir: "/wt" }]);
+    expect(config.getSessionAgentType("claude-new")).toBe("claude");
+    expect(config.getSessionProperties("claude-new")).toEqual({ priority: "high" });
+    expect(config.getSessionType("claude-new")).toBe("ticket");
+    expect(config.getSessionSkipPerms("claude-new")).toBe(true);
+    expect(config.getSessionAgentType("claude-old")).toBeNull();
+  });
+
+  test("repoints children whose parent references the old name", () => {
+    config.saveSessionParent("claude-old-sub-1", "claude-old");
+    config.saveSessionParent("claude-other-sub-1", "claude-other");
+
+    config.renameSessionConfig("claude-old", "claude-new");
+
+    expect(config.getSessionParent("claude-old-sub-1")).toBe("claude-new");
+    expect(config.getSessionParent("claude-other-sub-1")).toBe("claude-other");
+    expect(config.getSessionChildren("claude-new")).toContain("claude-old-sub-1");
+  });
+
+  test("preserves position in the session order", () => {
+    config.saveSessionOrder(["claude-a", "claude-old", "claude-b"]);
+    config.renameSessionConfig("claude-old", "claude-new");
+    expect(config.getSessionOrder()).toEqual(["claude-a", "claude-new", "claude-b"]);
+  });
+
+  test("updates pinned sessions preference", () => {
+    config.savePreferences({ pinnedSessions: ["claude-old", "claude-x"] });
+    config.renameSessionConfig("claude-old", "claude-new");
+    expect(config.getPreferences().pinnedSessions).toEqual(["claude-new", "claude-x"]);
+  });
+
+  test("moves the plan file", () => {
+    const plansDir = join(CONFIG_DIR, "plans");
+    mkdirSync(plansDir, { recursive: true });
+    writeFileSync(join(plansDir, "claude-old.md"), "# my plan");
+    config.renameSessionConfig("claude-old", "claude-new");
+    expect(existsSync(join(plansDir, "claude-old.md"))).toBe(false);
+    expect(readFileSync(join(plansDir, "claude-new.md"), "utf-8")).toBe("# my plan");
+  });
+
+  test("is a no-op when names are equal", () => {
+    config.saveSessionProperties("claude-same", { a: "b" });
+    config.renameSessionConfig("claude-same", "claude-same");
+    expect(config.getSessionProperties("claude-same")).toEqual({ a: "b" });
+  });
+});
+
 // ─── DB Shards ───
 
 describe("DbShards", () => {

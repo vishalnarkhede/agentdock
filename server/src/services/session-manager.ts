@@ -28,9 +28,12 @@ import {
   deleteHookStatus,
   deleteSessionProperties,
   getSessionProperties,
+  renameSessionConfig,
+  getKnownSessionNames,
   isSessionClaudeNamed,
   markSessionClaudeNamed,
   deleteSessionClaudeNamed,
+  getPreferences,
 } from "./config";
 import * as tmux from "./tmux";
 import * as worktree from "./worktree";
@@ -130,6 +133,23 @@ function shortId(): string {
 export function sessionNameFromTarget(target: string): string {
   const name = target.replace(/:/g, "-").replace(/\//g, "-");
   return `${PREFIX}-${name}`;
+}
+
+/**
+ * Move the configured primary repo to the front of the target list so it
+ * becomes the working directory (workDirs[0]) of grouped/isolated multi-repo
+ * sessions. Matches by alias, so it works whether targets are bare aliases
+ * ("chat") or alias:branch ("chat:main"). No-op when the primary isn't set,
+ * isn't among the targets, or is already first.
+ */
+export function reorderTargetsForPrimary(targets: string[], primaryRepo?: string): string[] {
+  if (!primaryRepo || targets.length < 2) return targets;
+  const idx = targets.findIndex((t) => parsePiece(t).alias === primaryRepo);
+  if (idx <= 0) return targets;
+  const reordered = [...targets];
+  const [primary] = reordered.splice(idx, 1);
+  reordered.unshift(primary);
+  return reordered;
 }
 
 export interface ParsedPiece {
@@ -268,7 +288,7 @@ async function launchAgent(
 }
 
 export async function startSession(req: CreateSessionRequest): Promise<string[]> {
-  let targets = [...req.targets];
+  let targets = reorderTargetsForPrimary([...req.targets], getPreferences().primaryRepo);
   let prompt = req.prompt || "";
   let isolated = req.isolated || false;
   let newBranch = req.newBranch || "";
@@ -466,6 +486,30 @@ export async function stopAllSessions(): Promise<void> {
   }
 }
 
+/**
+ * Rename a session: renames the tmux session (if live) and moves all persisted
+ * config files. Returns the new full session name (`claude-<slug>`).
+ * `newDisplayName` is the user-facing name without the `claude-` prefix.
+ */
+export async function renameSession(oldName: string, newDisplayName: string): Promise<string> {
+  const slug = newDisplayName.trim().replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) throw new Error("Session name cannot be empty");
+
+  const newName = `${PREFIX}-${slug}`;
+  if (newName === oldName) return oldName;
+
+  // Reject collisions with any existing live or orphaned session.
+  const live = await tmux.listSessions(PREFIX);
+  const taken = new Set([...live.map((s) => s.name), ...getKnownSessionNames()]);
+  if (taken.has(newName)) throw new Error(`A session named "${slug}" already exists`);
+
+  if (await tmux.hasSession(oldName)) {
+    await tmux.renameSession(oldName, newName);
+  }
+  renameSessionConfig(oldName, newName);
+  return newName;
+}
+
 function findLatestClaudeSessionUuid(wtDir: string): string | null {
   try {
     // Claude encodes the project path by replacing '/' and '.' with '-'
@@ -490,9 +534,6 @@ export async function restoreSession(sessionName: string): Promise<void> {
   }
 
   const agentType = (getSessionAgentType(sessionName) as AgentType) || "claude";
-  if (agentType !== "claude") {
-    throw new Error(`Resume is only supported for Claude sessions (agent: ${agentType})`);
-  }
 
   const metas = getSessionMeta(sessionName);
   const cwd = metas.length > 0 ? metas[0].wtDir : `${HOME_DIR}/projects`;
@@ -517,9 +558,17 @@ export async function restoreSession(sessionName: string): Promise<void> {
   await tmux.createSession(sessionName, cwd, sessionEnv);
   await tmux.setOption(sessionName, "extended-keys", "on");
 
-  const systemPromptFile = writeSystemPromptFile(sessionName, Object.keys(meta).length > 0 ? meta : undefined);
-
   await sleep(2000);
+
+  if (agentType === "cursor") {
+    // Cursor: --continue resumes the previous chat in this workspace
+    const cmd = skipPerms ? "agent --yolo --continue" : "agent --continue";
+    await tmux.sendKeys(sessionName, cmd);
+    console.log(`[restore] ${sessionName}: resumed cursor agent with --continue`);
+    return;
+  }
+
+  const systemPromptFile = writeSystemPromptFile(sessionName, Object.keys(meta).length > 0 ? meta : undefined);
 
   // Build resume command: --resume <name> resumes Claude conversation history
   let cmd: string;

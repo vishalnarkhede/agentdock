@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync, renameSync } from "fs";
 import { join, resolve } from "path";
 import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
 
@@ -692,12 +692,64 @@ export function deleteHookStatus(sessionName: string): void {
   }
 }
 
+/**
+ * Move all persisted config for a session from `oldName` to `newName`:
+ * worktree meta, per-session flag files, plan, hook status, session order,
+ * pinned preference, and any children's parent pointers. Does NOT touch tmux —
+ * the caller renames the tmux session separately.
+ */
+export function renameSessionConfig(oldName: string, newName: string): void {
+  if (oldName === newName) return;
+
+  const move = (from: string, to: string) => {
+    if (existsSync(from)) {
+      try { renameSync(from, to); } catch { /* best effort */ }
+    }
+  };
+
+  // Base worktree-meta file + every known per-session extension file.
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+  move(join(SESSIONS_DIR, oldName), join(SESSIONS_DIR, newName));
+  for (const ext of ["agent", "meta", "skip-perms", "type", "parent", "sub-agents", "claude-named"]) {
+    move(join(SESSIONS_DIR, `${oldName}.${ext}`), join(SESSIONS_DIR, `${newName}.${ext}`));
+  }
+
+  // Repoint any children whose .parent file references the old name.
+  if (existsSync(SESSIONS_DIR)) {
+    for (const file of readdirSync(SESSIONS_DIR)) {
+      if (!file.endsWith(".parent")) continue;
+      const path = join(SESSIONS_DIR, file);
+      try {
+        if (readFileSync(path, "utf-8").trim() === oldName) writeFileSync(path, newName);
+      } catch { /* best effort */ }
+    }
+  }
+
+  // Preserve position in the manual session order.
+  const order = getSessionOrder();
+  if (order.includes(oldName)) {
+    saveSessionOrder(order.map((n) => (n === oldName ? newName : n)));
+  }
+
+  // Update pinned sessions preference.
+  const prefs = getPreferences();
+  if (prefs.pinnedSessions?.includes(oldName)) {
+    prefs.pinnedSessions = prefs.pinnedSessions.map((n) => (n === oldName ? newName : n));
+    savePreferences(prefs);
+  }
+
+  // Move the plan file and hook status file.
+  move(join(PLANS_DIR, `${oldName}.md`), join(PLANS_DIR, `${newName}.md`));
+  move(join(HOOK_STATUS_DIR, oldName), join(HOOK_STATUS_DIR, newName));
+}
+
 // ─── Preferences ───
 
 const PREFERENCES_FILE = join(CONFIG_DIR, "preferences.json");
 
 export interface Preferences {
   recentRepos?: string[];
+  primaryRepo?: string;
   pinnedSessions?: string[];
   theme?: string;
   fontSize?: string;
@@ -707,6 +759,9 @@ export interface Preferences {
   notificationsEnabled?: boolean;
   groupBy?: string;
   collapsedGroups?: string[];
+  sortBy?: string;
+  mruSessions?: string[];
+  sessionStats?: Record<string, { count: number; last: number }>;
 }
 
 export function getPreferences(): Preferences {
