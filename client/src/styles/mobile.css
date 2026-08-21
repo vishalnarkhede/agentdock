@@ -1,0 +1,603 @@
+/* Mobile surfaces — the queue and the approval sheet.
+   The phone has one job the desktop cannot do: unblock an agent while you are
+   away from the machine. So blocked work is what the eye lands on, actions sit
+   where a thumb already is, and everything else is present but quieter.
+
+   Prefixes: .mq- queue, .ma- approve. Keyframes are prefixed too — this file
+   shares a cascade with every other stylesheet in the app. */
+
+/* ─── Motion ─── */
+@keyframes mq-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes mq-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── Status indicators (shared by both surfaces) ─── */
+.mq-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-stale);
+}
+.mq-dot[data-bucket="blocked"] {
+  background: var(--status-blocked);
+  animation: mq-breathe 2s ease-in-out infinite;
+}
+.mq-dot[data-bucket="review"] { background: var(--status-ready); }
+.mq-dot[data-bucket="idle"],
+.mq-dot[data-bucket="stale"] { background: var(--status-stale); }
+
+/* Working is a ring that turns, not a dot that sits: the one state where
+   something is happening without you. */
+.mq-dot[data-bucket="working"] {
+  width: 11px;
+  height: 11px;
+  background: none;
+  border: 2px solid color-mix(in srgb, var(--status-working) 25%, transparent);
+  border-top-color: var(--status-working);
+  animation: mq-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mq-dot[data-bucket="blocked"] { animation: none; }
+  .mq-dot[data-bucket="working"] {
+    animation: none;
+    border-color: var(--status-working);
+  }
+}
+
+/* ═══ Queue ═══════════════════════════════════════════════════════════════ */
+
+.mq {
+  --mq-r-card: calc(var(--radius) + 7px);
+  --mq-r-ctl: calc(var(--radius) + 6px);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-0);
+}
+
+/* The situation, stated in a sentence, before any list of things. */
+.mq-head {
+  flex-shrink: 0;
+  padding: 14px 16px 12px 16px;
+}
+
+.mq-headline {
+  margin: 0;
+  font-size: calc(var(--fs-base) + 8px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  color: var(--text-1);
+}
+
+.mq-subline {
+  margin: 4px 0 0 0;
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+/* Filters scroll sideways rather than shrinking to unreadable. */
+.mq-filters {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 12px 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.mq-filters::-webkit-scrollbar { display: none; }
+
+.mq-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: var(--mq-r-ctl);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mq-chip:hover { background: var(--hover); }
+.mq-chip[aria-pressed="true"] {
+  background: var(--surface-4);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+.mq-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mq-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mq-chip-count {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+.mq-chip[aria-pressed="true"] .mq-chip-count { color: var(--text-2); }
+
+/* ─── The queue itself ─── */
+.mq-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0;
+  padding: 0 12px 16px 12px;
+  list-style: none;
+}
+
+.mq-row {
+  position: relative;
+  margin-bottom: 8px;
+  border-radius: var(--mq-r-card);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+}
+.mq-row:hover { background: var(--surface-3); }
+
+/* Blocked rows carry their state in the frame, so the list reads at a glance
+   without counting dots. */
+.mq-row[data-bucket="blocked"] {
+  border-color: color-mix(in srgb, var(--status-blocked) 30%, transparent);
+}
+
+/* The whole card opens the session: an invisible button stretched across it,
+   with the content painted on top and click-through. The CTA is the one thing
+   that opts back into pointer events, so it stays a separate tap target
+   without nesting one button inside another. */
+.mq-row-open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: none;
+  border-radius: var(--mq-r-card);
+  background: none;
+  cursor: pointer;
+}
+.mq-row-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.mq-row-body {
+  position: relative;
+  pointer-events: none;
+  padding: 14px 15px;
+}
+
+.mq-row-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.mq-row-name {
+  min-width: 0;
+  font-size: calc(var(--fs-base) + 2px);
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mq-row-age {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+
+.mq-row-line {
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+/* The footer is the CTA's row, so the description above it keeps the full
+   width of the card. */
+.mq-row-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+  margin-top: 9px;
+}
+.mq-row[data-cta="true"] .mq-row-foot {
+  min-height: 44px;
+  margin-top: 5px;
+  margin-bottom: -6px;
+}
+
+.mq-row-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+
+.mq-row-cta {
+  pointer-events: auto;
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--mq-r-ctl);
+  font: inherit;
+  font-size: calc(var(--fs-base) + 0.5px);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--status-working);
+  color: var(--intent-primary-ink);
+}
+.mq-row-cta:hover { filter: brightness(1.08); }
+.mq-row-cta:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.mq-row[data-bucket="blocked"] .mq-row-cta { background: var(--status-blocked); }
+.mq-row[data-bucket="review"] .mq-row-cta { background: var(--status-ready); }
+.mq-row[data-bucket="idle"] .mq-row-cta,
+.mq-row[data-bucket="stale"] .mq-row-cta {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+
+.mq-empty {
+  margin: 0;
+  padding: 24px 16px;
+  font-size: var(--fs-base);
+  color: var(--text-3);
+}
+
+/* ═══ Approve sheet ═══════════════════════════════════════════════════════ */
+
+.ma {
+  --ma-r-sheet: calc(var(--radius) + 16px);
+  --ma-r-ctl: calc(var(--radius) + 6px);
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* The terminal keeps rendering underneath; this only dims it and gives the
+   dismiss gesture somewhere to land. */
+.ma-scrim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  background: color-mix(in srgb, var(--surface-0) 62%, transparent);
+  cursor: pointer;
+}
+
+.ma-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+  border-radius: var(--ma-r-sheet) var(--ma-r-sheet) 0 0;
+  background: var(--surface-float);
+  border-top: 1px solid color-mix(in srgb, var(--status-blocked) 40%, transparent);
+  box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.6);
+}
+
+.ma-grab {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.ma-grab::after {
+  content: "";
+  width: 38px;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--border-strong);
+}
+.ma-grab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -4px;
+}
+
+.ma-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 18px;
+}
+
+.ma-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.ma-label {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--status-blocked);
+}
+
+.ma-who {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-4);
+}
+
+.ma-ask {
+  margin: 0 0 7px 0;
+  font-size: calc(var(--fs-base) + 5px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  color: var(--text-1);
+}
+
+.ma-why {
+  margin: 0;
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+/* ─── Inline mini-diff: enough to decide, not enough to read a file ─── */
+.ma-diff {
+  margin-top: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: calc(var(--radius) + 4px);
+  overflow: hidden;
+}
+
+.ma-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-3);
+}
+
+.ma-diff-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+}
+
+.ma-diff-stat {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+.ma-diff-plus { color: var(--diff-add); }
+.ma-diff-minus { color: var(--diff-del); }
+
+.ma-diff-lines {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ma-diff-line {
+  display: flex;
+  padding-left: 10px;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  line-height: 1.7;
+  white-space: pre;
+  color: var(--text-2);
+}
+.ma-diff-line[data-sign="+"] {
+  background: color-mix(in srgb, var(--diff-add) 10%, transparent);
+  color: color-mix(in srgb, var(--diff-add) 62%, var(--text-1));
+}
+.ma-diff-line[data-sign="-"] {
+  background: color-mix(in srgb, var(--diff-del) 10%, transparent);
+  color: color-mix(in srgb, var(--diff-del) 62%, var(--text-1));
+}
+
+.ma-diff-sign {
+  width: 13px;
+  flex-shrink: 0;
+  color: var(--text-4);
+}
+.ma-diff-line[data-sign="+"] .ma-diff-sign { color: var(--diff-add); }
+.ma-diff-line[data-sign="-"] .ma-diff-sign { color: var(--diff-del); }
+
+/* ─── Conflict: the one thing you cannot see from the phone ─── */
+.ma-conflict {
+  display: flex;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border-radius: calc(var(--radius) + 4px);
+  background: color-mix(in srgb, var(--status-blocked) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-blocked) 24%, transparent);
+}
+.ma-conflict-icon {
+  flex-shrink: 0;
+  padding-top: 2px;
+  color: var(--status-blocked);
+}
+.ma-conflict-text {
+  font-size: max(11px, calc(var(--fs-base) - 0.5px));
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* ─── Actions: at the bottom, where the thumb already is ─── */
+.ma-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px 12px 18px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.ma-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 48px;
+  border-radius: var(--ma-r-ctl);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font: inherit;
+  font-size: calc(var(--fs-base) + 1px);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ma-btn:hover { filter: brightness(1.08); }
+.ma-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.ma-btn-primary {
+  min-height: 52px;
+  border-color: transparent;
+  border-radius: calc(var(--radius) + 7px);
+  background: var(--intent-primary);
+  color: var(--intent-primary-ink);
+  font-size: calc(var(--fs-base) + 2px);
+}
+
+.ma-btn-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--intent-danger) 40%, transparent);
+  color: var(--intent-danger);
+}
+
+.ma-btn-row {
+  display: flex;
+  gap: 8px;
+}
+.ma-btn-row .ma-btn { flex: 1; }
+
+.ma-reason-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--ma-r-ctl);
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+.ma-reason-toggle:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.ma-reason-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.ma-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ma-reason-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: var(--ma-r-ctl);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: calc(var(--fs-base) + 0.5px);
+}
+.ma-reason-input::placeholder { color: var(--text-3); }
+.ma-reason-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+.ma-reason-send {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid color-mix(in srgb, var(--intent-danger) 40%, transparent);
+  border-radius: var(--ma-r-ctl);
+  background: transparent;
+  color: var(--intent-danger);
+  cursor: pointer;
+}
+.ma-reason-send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ma-reason-send:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

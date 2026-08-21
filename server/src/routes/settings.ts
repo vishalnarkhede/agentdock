@@ -1,3 +1,4 @@
+import { syncHooksToClaudeSettings, getHookInstallState, REQUIRED_HOOK_EVENTS } from "../services/config";
 import { Hono } from "hono";
 import {
   getRepos,
@@ -204,6 +205,27 @@ app.put("/ngrok-basic-auth", async (c) => {
 app.delete("/ngrok-basic-auth", (c) => {
   deleteNgrokBasicAuth();
   return c.json({ ok: true });
+});
+
+// GET /api/settings/hooks — is status detection actually wired up?
+//
+// Without these five hooks AgentDock has to guess an agent's state by reading
+// its terminal, which is the difference between knowing an agent is blocked
+// and finding out ninety seconds later.
+app.get("/hooks", (c) => {
+  return c.json({ ...getHookInstallState(), events: REQUIRED_HOOK_EVENTS });
+});
+
+// POST /api/settings/hooks — install the missing ones. Idempotent.
+// Deliberately user-initiated: it writes to ~/.claude/settings.json, which is
+// outside AgentDock's own config directory.
+app.post("/hooks", (c) => {
+  try {
+    syncHooksToClaudeSettings();
+    return c.json({ ok: true, ...getHookInstallState() });
+  } catch (err: any) {
+    return c.json({ ok: false, error: err?.message || "install failed" }, 500);
+  }
 });
 
 export default app;

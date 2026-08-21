@@ -1,0 +1,285 @@
+/* The merge queue. Plans an order and states the reasoning; runs nothing. */
+
+.sp {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  container-type: inline-size;
+}
+
+.sp-empty {
+  padding: 24px 16px;
+  color: var(--text-3);
+  font-size: var(--fs-base);
+}
+
+.sp-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.sp-head-count {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-2);
+}
+
+.sp-head-conflicts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--intent-danger);
+  white-space: nowrap;
+}
+
+/* ─── Strategy ─── */
+
+.sp-strategies {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px 0 14px;
+}
+
+.sp-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sp-strategy:hover { background: var(--hover); }
+.sp-strategy:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.sp-strategy-on { border-color: var(--intent-primary); background: var(--surface-3); }
+
+.sp-strategy-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(var(--fs-base) - 1px);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sp-radio {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-strong);
+}
+.sp-strategy-on .sp-radio {
+  border-color: var(--intent-primary);
+  box-shadow: inset 0 0 0 3px var(--surface-3), inset 0 0 0 8px var(--intent-primary);
+}
+
+.sp-rec {
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--status-ready);
+  background: color-mix(in oklab, var(--status-ready) 16%, var(--surface-1));
+}
+
+.sp-strategy-detail {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+  line-height: 1.5;
+  padding-left: 21px;
+}
+
+/* ─── Sections ─── */
+
+.sp-section { padding: 14px 14px 0 14px; }
+
+.sp-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.sp-section-sub {
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-4);
+}
+
+.sp-mono {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+/* ─── Conflicts ─── */
+
+.sp-conflict {
+  display: flex;
+  gap: 9px;
+  padding: 10px 11px;
+  margin-bottom: 6px;
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--intent-danger) 8%, var(--surface-1));
+  border: 1px solid color-mix(in oklab, var(--intent-danger) 30%, var(--surface-1));
+}
+.sp-conflict-icon { color: var(--intent-danger); margin-top: 2px; }
+.sp-conflict-body { min-width: 0; }
+
+.sp-conflict-pair {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--text-1);
+}
+.sp-x { font-size: max(11px, calc(var(--fs-base) - 2px)); color: var(--text-3); }
+
+.sp-conflict-files {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* ─── Queue items ─── */
+
+.sp-item {
+  padding: 9px 11px;
+  margin-bottom: 5px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid transparent;
+}
+.sp-item-active { border-left-color: var(--intent-primary); }
+
+.sp-item-top { display: flex; align-items: center; gap: 8px; }
+
+.sp-item-name {
+  font-size: calc(var(--fs-base) - 1px);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-item-files {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.sp-item-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--text-3);
+  min-width: 0;
+}
+.sp-item-branch .sp-mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-arrow { color: var(--text-4); flex-shrink: 0; }
+.sp-target { color: var(--text-2); flex-shrink: 0; }
+
+.sp-repos {
+  flex-shrink: 0;
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+/* ─── Run order ─── */
+
+.sp-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sp-step {
+  display: flex;
+  gap: 10px;
+  padding-bottom: 10px;
+  position: relative;
+}
+.sp-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 12px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-subtle);
+}
+
+.sp-node {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.sp-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.sp-step-text {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-1);
+  line-height: 1.45;
+}
+
+.sp-step-note {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  line-height: 1.45;
+}
+
+/* ─── Footer ─── */
+
+.sp-foot {
+  display: flex;
+  gap: 9px;
+  margin: 6px 14px 16px 14px;
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.sp-foot-icon { color: var(--text-3); margin-top: 1px; flex-shrink: 0; }
+
+@media (max-width: 768px) {
+  .sp-strategy { padding: 14px 12px; }
+}

@@ -1,0 +1,328 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Terminal interaction states — selection menu, large paste, agent switch.
+
+   Every rule pairs the legacy class with a `tv-` class so it beats the
+   single-class rules still living in styles.css regardless of which file
+   the bundler emits first.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Selection context menu ─── */
+.terminal-context-menu.tv-ctxmenu {
+  position: fixed;
+  z-index: 1000;
+  transform: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 232px;
+  padding: 6px;
+  background: var(--surface-float);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.28);
+}
+
+.terminal-context-menu.tv-ctxmenu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius) - 1px);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.terminal-context-menu.tv-ctxmenu button:hover,
+.terminal-context-menu.tv-ctxmenu button:active {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.terminal-context-menu.tv-ctxmenu button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.terminal-context-menu.tv-ctxmenu button.tv-ctxmenu-danger {
+  color: var(--intent-danger);
+}
+
+.tv-ctxmenu-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.tv-ctxmenu-key {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-4);
+}
+
+/* ─── Large paste bar ─── */
+.terminal-paste-bar.tv-paste {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border-strong);
+  flex-shrink: 0;
+}
+
+.tv-paste-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+}
+
+.tv-paste-title {
+  color: var(--text-1);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.tv-paste-note {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.terminal-paste-bar-input.tv-paste-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 62px;
+  max-height: 62px;
+  overflow: hidden;
+  padding: 8px 10px;
+  background: var(--surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 1px);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  caret-color: var(--intent-primary);
+}
+
+.terminal-paste-bar-input.tv-paste-input:focus {
+  border-color: var(--focus-ring);
+}
+
+.terminal-paste-bar-input.tv-paste-input::placeholder {
+  color: var(--text-4);
+}
+
+.tv-paste-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-paste-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.tv-paste-btn:hover {
+  background: var(--surface-3);
+}
+
+.tv-paste-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.tv-paste-btn-primary {
+  background: var(--intent-primary);
+  border-color: var(--intent-primary);
+  color: var(--intent-primary-ink);
+}
+
+.tv-paste-btn-primary:hover {
+  background: var(--intent-primary);
+}
+
+.tv-paste-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tv-paste-foot {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-4);
+  text-align: right;
+}
+
+/* ─── Agent switch overlay ─── */
+.terminal-switch-overlay.tv-switch {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: transparent;
+}
+
+.terminal-switch-overlay.tv-switch::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface-0);
+  opacity: 0.84;
+}
+
+.tv-switch-card {
+  position: relative;
+  width: min(430px, 100%);
+  padding: 16px 18px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.tv-switch-title {
+  color: var(--text-1);
+  font-size: calc(var(--fs-base) + 2px);
+  font-weight: 600;
+}
+
+.tv-switch-lede {
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+
+.tv-switch-steps {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.tv-switch-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: var(--fs-base);
+  color: var(--text-4);
+}
+
+.tv-switch-step.is-done {
+  color: var(--text-3);
+}
+
+.tv-switch-step.is-active {
+  color: var(--text-1);
+}
+
+.tv-switch-dot {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--surface-4);
+}
+
+.is-done > .tv-switch-dot {
+  background: var(--status-ready);
+}
+
+.is-active > .tv-switch-dot {
+  background: transparent;
+  border: 2px solid var(--intent-primary);
+  border-top-color: transparent;
+  animation: tv-switch-spin 0.7s linear infinite;
+}
+
+@keyframes tv-switch-spin {
+  to { transform: rotate(360deg); }
+}
+
+.tv-switch-step-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.tv-switch-step-note {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.tv-switch-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--intent-danger);
+  border-radius: var(--radius);
+  color: var(--intent-danger);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+}
+
+/* ─── Toolbar ─── */
+.terminal-copy-btn.tv-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+@media (max-width: 768px) {
+  .terminal-context-menu.tv-ctxmenu button {
+    min-height: 44px;
+  }
+
+  .tv-paste-btn {
+    min-height: 44px;
+  }
+
+  .tv-paste-foot {
+    flex: 1;
+  }
+
+  .mobile-term-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+  }
+}

@@ -1,0 +1,167 @@
+/* File explorer additions: changed-line annotations, the search-scope segmented
+   control, icon boxes and keyboard focus. Layered over the .fe-* block in
+   styles.css — selectors are scoped to a panel so load order can't flip them. */
+
+.fe-tree-panel .fe-search-bar {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 60px basis keeps the control beside the field at the default 220px panel and
+   lets it wrap below only near the 140px resize floor. */
+.fe-tree-panel .fe-search-input {
+  flex: 1 1 60px;
+  min-width: 0;
+}
+
+/* ─── Search scope: Names | Contents ─── */
+.fe-seg {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 1px;
+  padding: 1px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.fe-seg-option {
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  line-height: 1;
+  padding: 5px 6px;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.fe-seg-option:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.fe-seg-option-active,
+.fe-seg-option-active:hover {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+/* ─── Changed-line counts ─── */
+.fe-change-counts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 6px;
+  font-family: var(--font-mono, monospace);
+  /* --fs-base is user-controlled (12/13/14px); the floor keeps this legible on small */
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.fe-change-add { color: var(--diff-add); }
+.fe-change-del { color: var(--diff-del); }
+
+.fe-change-dot {
+  color: var(--diff-add);
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 3px;
+}
+
+/* ─── Icon boxes (were letter badges and Unicode arrows) ─── */
+.fe-tree-panel .fe-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--text-3);
+}
+
+.fe-tree-panel .fe-icon-dir {
+  color: var(--intent-primary);
+}
+
+.fe-tree-panel .fe-dir-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+}
+
+.fe-tree-panel .fe-spinner {
+  display: flex;
+  align-items: center;
+  color: var(--text-3);
+  margin-left: 4px;
+}
+
+.fe-spin {
+  animation: fe-spin 0.9s linear infinite;
+}
+
+@keyframes fe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fe-tree-panel .fe-search-clear,
+.fe-file-panel .fe-file-search-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: var(--radius);
+  color: var(--text-3);
+}
+
+.fe-tree-panel .fe-search-clear:hover,
+.fe-file-panel .fe-file-search-close:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+/* ─── Keyboard focus ─── */
+.fe-tree-panel [data-fe-row]:focus-visible,
+.fe-tree-panel .fe-seg-option:focus-visible,
+.fe-tree-panel .fe-search-clear:focus-visible,
+.fe-file-panel .fe-file-search-close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fe-resize-handle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+  background: var(--focus-ring);
+}
+
+@media (max-width: 768px) {
+  .fe-tree-panel .fe-seg-option {
+    min-height: 44px;
+    padding: 0 12px;
+  }
+
+  .fe-tree-panel .fe-search-input {
+    min-height: 44px;
+  }
+
+  .fe-tree-panel .fe-search-clear,
+  .fe-file-panel .fe-file-search-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .fe-tree-panel .fe-tree-item,
+  .fe-tree-panel .fe-root-header,
+  .fe-tree-panel .fe-search-result {
+    min-height: 44px;
+  }
+}

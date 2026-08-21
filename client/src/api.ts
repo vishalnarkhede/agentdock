@@ -699,3 +699,126 @@ export async function deleteNgrokBasicAuth(): Promise<void> {
   await fetch(`${BASE}/api/settings/ngrok-basic-auth`, { method: "DELETE" });
 }
 
+
+// ─── Review coverage ───
+
+export type CoverageStepState = "covered" | "gap" | "investigated";
+
+export interface CoverageStep {
+  index: number;
+  text: string;
+  done: boolean;
+  files: string[];
+  state: CoverageStepState;
+}
+
+export interface CoverageFile {
+  path: string;
+  plus: number;
+  minus: number;
+  /** Index of the plan step this file is attributable to, or null. */
+  step: number | null;
+}
+
+export interface CoverageResult {
+  steps: CoverageStep[];
+  files: CoverageFile[];
+  stats: {
+    filesTotal: number;
+    filesMapped: number;
+    filesUnplanned: number;
+    stepsTotal: number;
+    stepsCovered: number;
+    stepsGap: number;
+    linesChanged: number;
+  };
+  oversized: boolean;
+  hasPlan: boolean;
+}
+
+export async function fetchCoverage(
+  session: string,
+  paths: string[],
+): Promise<CoverageResult> {
+  const qs = new URLSearchParams();
+  qs.set("session", session);
+  for (const p of paths) qs.append("path", p);
+  const res = await fetch(`${BASE}/api/review/coverage?${qs.toString()}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as any).error || "Failed to load coverage");
+  }
+  return res.json();
+}
+
+// ─── Status hooks ───
+
+export interface HookState {
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+  settingsPath: string;
+  scriptPath: string;
+  events: { event: string; status: string; means: string }[];
+}
+
+export async function fetchHookState(): Promise<HookState> {
+  const res = await fetch(`${BASE}/api/settings/hooks`);
+  if (!res.ok) throw new Error("Failed to read hook state");
+  return res.json();
+}
+
+export async function installHooks(): Promise<HookState & { ok: boolean; error?: string }> {
+  const res = await fetch(`${BASE}/api/settings/hooks`, { method: "POST" });
+  return res.json();
+}
+
+export interface ConflictPair {
+  sessions: [string, string];
+  files: string[];
+}
+
+export interface ConflictResult {
+  conflicts: ConflictPair[];
+  worktrees: { session: string; fileCount: number }[];
+}
+
+export async function fetchConflicts(): Promise<ConflictResult> {
+  const res = await fetch(`${BASE}/api/review/conflicts`);
+  if (!res.ok) throw new Error("Failed to scan for conflicts");
+  return res.json();
+}
+
+// ─── Ship: the merge queue ───
+
+export interface ShipItem {
+  session: string;
+  branch: string;
+  target: string;
+  repos: number;
+  fileCount: number;
+}
+
+export interface MergeStep {
+  kind: "merge" | "test" | "resolve" | "branch" | "cleanup";
+  text: string;
+  note?: string;
+}
+
+export interface ShipPlan {
+  strategy: "serial" | "integration";
+  items: ShipItem[];
+  conflicts: ConflictPair[];
+  steps: MergeStep[];
+  /** False: this endpoint plans a merge, it never performs one. */
+  executable: boolean;
+}
+
+export async function fetchShipPlan(strategy: "serial" | "integration"): Promise<ShipPlan> {
+  const res = await fetch(`${BASE}/api/review/ship?strategy=${strategy}`);
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error((d as any).error || "Failed to plan the merge");
+  }
+  return res.json();
+}

@@ -1,0 +1,399 @@
+/* The blocked card — a session that cannot continue without you.
+
+   Container queries, not viewport: this sits between a session rail and a
+   context column, so its own width is what decides whether the evidence
+   column stacks and whether the reply field takes its own row.
+
+   Keyframes are namespaced (blk-) because @keyframes names are global. */
+
+.blk {
+  container-type: inline-size;
+  display: flex;
+  min-width: 0;
+}
+
+.blk-layout {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+/* ─── The card ─── */
+
+.blk-card {
+  flex: 1;
+  min-width: 0;
+  border-radius: calc(var(--radius) * 2);
+  background: var(--surface-2);
+  border: 1px solid color-mix(in oklab, var(--status-blocked) 34%, var(--surface-2));
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.blk-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 15px 0 15px;
+}
+
+.blk-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-blocked);
+  animation: blk-breathe 2s ease-in-out infinite;
+}
+
+.blk-kind {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  font-weight: 600;
+  color: var(--status-blocked);
+  letter-spacing: 0.04em;
+}
+
+.blk-card-meta {
+  margin-left: auto;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-4);
+}
+
+.blk-ask { padding: 9px 15px 0 15px; }
+
+.blk-question {
+  font-size: calc(var(--fs-base) + 2px);
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+
+.blk-detail {
+  margin: 6px 0 0 0;
+  font-size: var(--fs-base);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+/* ─── Inline mini-diff ─── */
+
+.blk-diff {
+  margin: 12px 15px 0 15px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.blk-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  background: var(--surface-3);
+}
+
+.blk-diff-path {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blk-diff-stat {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.blk-dl {
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  line-height: 1.65;
+  white-space: pre;
+  padding-left: 11px;
+  color: var(--text-2);
+}
+
+.blk-dl-add { background: color-mix(in oklab, var(--diff-add) 12%, var(--surface-2)); }
+.blk-dl-del { background: color-mix(in oklab, var(--diff-del) 12%, var(--surface-2)); }
+.blk-dl-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.blk-dl-add .blk-dl-text,
+.blk-dl-del .blk-dl-text { color: var(--text-1); }
+
+.blk-dl-sign {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-4);
+}
+.blk-dl-add .blk-dl-sign { color: var(--diff-add); }
+.blk-dl-del .blk-dl-sign { color: var(--diff-del); }
+
+/* ─── Actions ─── */
+
+.blk-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 13px 15px;
+}
+
+.blk-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+.blk-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.blk-btn-primary {
+  background: var(--intent-primary);
+  color: var(--intent-primary-ink);
+}
+
+.blk-btn-plain {
+  background: var(--surface-4);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+.blk-btn-plain:hover { background: var(--hover); }
+
+.blk-btn-danger {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--intent-danger) 40%, var(--surface-2));
+  color: var(--intent-danger);
+}
+.blk-btn-danger:hover { background: color-mix(in oklab, var(--intent-danger) 10%, var(--surface-2)); }
+
+.blk-reply {
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 12px;
+  background: var(--surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+.blk-reply:focus-within { border-color: var(--focus-ring); }
+
+.blk-reply-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-1);
+}
+.blk-reply-input::placeholder { color: var(--text-4); }
+
+.blk-key {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  color: var(--text-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* ─── Remember this answer ─── */
+
+.blk-remember {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  border-top: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.blk-remember:hover { background: var(--hover); }
+
+.blk-box {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: calc(var(--radius) - 1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--intent-primary-ink);
+  border: 1.5px solid var(--border-strong);
+}
+.blk-remember input:checked ~ .blk-box {
+  background: var(--intent-primary);
+  border-color: var(--intent-primary);
+}
+.blk-remember input:focus-visible ~ .blk-box {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.blk-remember-label {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.blk-remember-note {
+  margin-left: auto;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-4);
+  flex-shrink: 0;
+}
+
+/* ─── Context column ─── */
+
+.blk-context {
+  width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: calc(var(--radius) * 2);
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.blk-context-head {
+  padding: 15px 16px 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.blk-context-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 15px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.blk-ctx-label {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.blk-ctx-box {
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+}
+
+.blk-ctx-warn {
+  background: color-mix(in oklab, var(--status-blocked) 8%, var(--surface-1));
+  border-color: color-mix(in oklab, var(--status-blocked) 26%, var(--surface-1));
+}
+
+.blk-ctx-text {
+  font-size: var(--fs-base);
+  color: var(--text-1);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.blk-ctx-mono { font-family: var(--font-mono); }
+
+.blk-ctx-sub {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-3);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.blk-notified {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 16px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.blk-notified-icon { color: var(--text-3); flex-shrink: 0; }
+
+.blk-notified-text {
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--text-2);
+}
+
+.blk-link {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: calc(var(--fs-base) - 1px);
+  color: var(--intent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.blk-link:hover { color: var(--text-1); }
+.blk-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Visually hidden, still reachable by keyboard and screen reader. */
+.blk-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes blk-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blk-pulse { animation: none; }
+}
+
+/* The reply field cannot share a row with three buttons in a side panel. */
+@container (max-width: 520px) {
+  .blk-reply { flex-basis: 100%; }
+}
+
+@container (max-width: 900px) {
+  .blk-layout { flex-direction: column; }
+  .blk-context { width: 100%; }
+}
+
+@media (max-width: 768px) {
+  .blk-btn { height: 44px; }
+  .blk-reply { height: 44px; }
+  .blk-remember { padding: 14px 15px; min-height: 44px; }
+  .blk-link { min-height: 44px; display: inline-flex; align-items: center; }
+}

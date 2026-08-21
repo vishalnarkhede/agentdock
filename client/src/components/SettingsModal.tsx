@@ -4,6 +4,9 @@ import { useSettings, type Settings } from "../hooks/useSettings";
 import { useAuth } from "../hooks/useAuth";
 import {
   fetchSettingsHealth,
+  fetchHookState,
+  installHooks,
+  type HookState,
   fetchSettingsRepos,
   fetchBasePath,
   updateBasePath,
@@ -18,35 +21,98 @@ import {
   fetchNgrokBasicAuthStatus,
   setNgrokBasicAuth as apiSetNgrokBasicAuth,
   deleteNgrokBasicAuth as apiDeleteNgrokBasicAuth,
+  fetchDbShards,
   type SettingsHealth,
   type McpServerInfo,
+  type DbShardInfo,
 } from "../api";
-import type { RepoConfig, MetaPropertyPreset } from "../types";
+import type { RepoConfig, MetaPropertyPreset, AgentType } from "../types";
+import { Icon, type IconName } from "./Icon";
+import "../styles/settings-panes.css";
 
 type Category =
   | "appearance"
   | "terminal"
   | "notifications"
   | "repos"
+  | "agents"
+  | "worktrees"
   | "meta"
   | "mcp"
+  | "integrations"
   | "security"
   | "health"
   | "shortcuts";
 
-const CATEGORIES: { id: Category; label: string }[] = [
-  { id: "appearance", label: "Appearance" },
-  { id: "terminal", label: "Terminal" },
-  { id: "notifications", label: "Notifications" },
-  { id: "repos", label: "Repositories" },
-  { id: "meta", label: "Meta Properties" },
-  { id: "mcp", label: "MCP Servers" },
-  { id: "security", label: "Security" },
-  { id: "health", label: "Health" },
-  { id: "shortcuts", label: "Shortcuts" },
+const CATEGORIES: { id: Category; label: string; icon: IconName }[] = [
+  { id: "repos", label: "Repositories", icon: "repo" },
+  { id: "agents", label: "Agents", icon: "sparkle" },
+  { id: "notifications", label: "Notifications", icon: "bell" },
+  { id: "worktrees", label: "Worktrees", icon: "branch" },
+  { id: "meta", label: "Session properties", icon: "filter" },
+  { id: "security", label: "Access", icon: "lock" },
+  { id: "appearance", label: "Appearance", icon: "eye" },
+  { id: "terminal", label: "Terminal", icon: "term" },
+  { id: "integrations", label: "Integrations", icon: "layers" },
+  { id: "mcp", label: "MCP Servers", icon: "globe" },
+  { id: "health", label: "Health", icon: "alert" },
+  { id: "shortcuts", label: "Shortcuts", icon: "keyboard" },
 ];
 
+const PANE_META: Record<Category, { title: string; blurb: string }> = {
+  repos: {
+    title: "Repositories",
+    blurb: "The repos AgentDock offers when you start a session.",
+  },
+  agents: {
+    title: "Agents",
+    blurb: "Which CLI runs, and with what flags.",
+  },
+  notifications: {
+    title: "Notifications",
+    blurb:
+      "An agent that is blocked costs you nothing until you notice it, and then it costs you everything you had loaded in your head. Three transitions are worth interrupting for.",
+  },
+  worktrees: {
+    title: "Worktrees",
+    blurb: "Where they go, what runs after creation, and when they get cleaned up.",
+  },
+  meta: {
+    title: "Session properties",
+    blurb: "Your own labels for grouping the queue \u2014 priority, customer, team.",
+  },
+  security: {
+    title: "Access",
+    blurb: "Password, network binding, and the ngrok tunnel.",
+  },
+  appearance: {
+    title: "Appearance",
+    blurb: "Theme and type size.",
+  },
+  terminal: {
+    title: "Terminal",
+    blurb: "Terminal font, scrollback and the on-screen keyboard.",
+  },
+  integrations: {
+    title: "Integrations",
+    blurb: "Linear, Slack, GitHub and the databases you query read-only.",
+  },
+  mcp: {
+    title: "MCP Servers",
+    blurb: "Tool servers every agent session is given access to.",
+  },
+  health: {
+    title: "Health",
+    blurb: "What AgentDock shells out to. A missing tool is a broken feature, not a warning.",
+  },
+  shortcuts: {
+    title: "Shortcuts",
+    blurb: "Every key AgentDock binds.",
+  },
+};
+
 const THEMES: { id: Settings["theme"]; label: string }[] = [
+  { id: "cockpit", label: "Cockpit" },
   { id: "terminal", label: "Terminal" },
   { id: "dark", label: "Dark" },
   { id: "midnight", label: "Midnight" },
@@ -58,6 +124,8 @@ const THEMES: { id: Settings["theme"]; label: string }[] = [
   { id: "win98", label: "Windows 98" },
 ];
 
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
 const FONT_SIZES: { id: Settings["fontSize"]; label: string }[] = [
   { id: "small", label: "S" },
   { id: "medium", label: "M" },
@@ -67,15 +135,31 @@ const FONT_SIZES: { id: Settings["fontSize"]; label: string }[] = [
 const SCROLLBACK_OPTIONS = [1000, 5000, 10000, 50000];
 const TERM_FONT_SIZES = [12, 13, 14, 15, 16];
 
+/** Tools AgentDock cannot work without. gh, psql and the Cursor CLI are optional. */
+const REQUIRED_TOOLS: (keyof SettingsHealth)[] = ["tmux", "claude", "git", "bun"];
+
+/** One badge, and only for a tool whose absence actually breaks something. */
+function navBadge(id: Category, health: SettingsHealth | null): { text: string } | null {
+  if (id !== "health" || !health) return null;
+  const missing = REQUIRED_TOOLS.filter((k) => !health[k]?.installed).length;
+  return missing > 0 ? { text: String(missing) } : null;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
 export function SettingsModal({ open, onClose }: Props) {
-  const [category, setCategory] = useState<Category>("appearance");
+  const [category, setCategory] = useState<Category>("repos");
   const { settings, updateSetting } = useSettings();
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
+  const [health, setHealth] = useState<SettingsHealth | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    fetchSettingsHealth().then(setHealth).catch(() => setHealth(null));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -130,18 +214,32 @@ export function SettingsModal({ open, onClose }: Props) {
         </div>
         <div className="settings-body">
           <div className="settings-sidebar">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                data-tutorial={`settings-tab-${cat.id}`}
-                className={`settings-sidebar-btn ${category === cat.id ? "settings-sidebar-btn-active" : ""}`}
-                onClick={() => setCategory(cat.id)}
-              >
-                {cat.label}
-              </button>
-            ))}
+            {CATEGORIES.map((cat) => {
+              const badge = navBadge(cat.id, health);
+              return (
+                <button
+                  key={cat.id}
+                  data-tutorial={`settings-tab-${cat.id}`}
+                  className={`settings-sidebar-btn set-nav-item ${category === cat.id ? "settings-sidebar-btn-active" : ""}`}
+                  onClick={() => setCategory(cat.id)}
+                  aria-current={category === cat.id ? "page" : undefined}
+                >
+                  <Icon name={cat.icon} size={14} />
+                  <span className="set-nav-label">{cat.label}</span>
+                  {badge && (
+                    <span className="set-nav-badge set-nav-badge-warn" title="tools not installed">
+                      {badge.text}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <div className="settings-panel" data-tutorial="settings-panel">
+            <div className="set-head">
+              <span className="set-head-title">{PANE_META[category].title}</span>
+              <span className="set-head-blurb">{PANE_META[category].blurb}</span>
+            </div>
             {category === "appearance" && (
               <>
                 <div className="settings-row">
@@ -230,7 +328,7 @@ export function SettingsModal({ open, onClose }: Props) {
               </>
             )}
             {category === "notifications" && (
-              <>
+              <div className="set-pane">
                 <div className="settings-row">
                   <label className="settings-label">Enable Notifications</label>
                   <button
@@ -242,6 +340,123 @@ export function SettingsModal({ open, onClose }: Props) {
                     <span className="settings-toggle-knob" />
                   </button>
                 </div>
+                <div className="settings-row settings-notif-row">
+                  <div className="settings-notif-copy">
+                    <label className="settings-label">An agent starts waiting on you</label>
+                    <span className="settings-notif-hint">
+                      It asked a question or wants permission, and cannot continue.
+                    </span>
+                  </div>
+                  <button
+                    className={`settings-toggle ${settings.notifyBlocked ? "settings-toggle-on" : ""}`}
+                    onClick={() => updateSetting("notifyBlocked", !settings.notifyBlocked)}
+                    disabled={!settings.notificationsEnabled}
+                    role="switch"
+                    aria-checked={settings.notifyBlocked}
+                    aria-label="Notify when an agent is waiting on you"
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+
+                <div className="settings-row settings-notif-row">
+                  <div className="settings-notif-copy">
+                    <label className="settings-label">An agent becomes reviewable</label>
+                    <span className="settings-notif-hint">
+                      It finished its turn. Nothing is blocked, but the change cannot ship yet.
+                    </span>
+                  </div>
+                  <button
+                    className={`settings-toggle ${settings.notifyReview ? "settings-toggle-on" : ""}`}
+                    onClick={() => updateSetting("notifyReview", !settings.notifyReview)}
+                    disabled={!settings.notificationsEnabled}
+                    role="switch"
+                    aria-checked={settings.notifyReview}
+                    aria-label="Notify when an agent becomes reviewable"
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+
+                <div className="settings-row settings-notif-row">
+                  <div className="settings-notif-copy">
+                    <label className="settings-label">Stay quiet overnight</label>
+                    <span className="settings-notif-hint">
+                      Blocked agents still stack up in the queue. Nothing buzzes.
+                    </span>
+                  </div>
+                  <div className="settings-quiet-controls">
+                    <select
+                      className="settings-quiet-hour"
+                      value={settings.notifyQuietStart}
+                      onChange={(e) => updateSetting("notifyQuietStart", Number(e.target.value))}
+                      disabled={!settings.notificationsEnabled || !settings.notifyQuietEnabled}
+                      aria-label="Quiet hours start"
+                    >
+                      {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+                    </select>
+                    <span className="settings-quiet-sep">to</span>
+                    <select
+                      className="settings-quiet-hour"
+                      value={settings.notifyQuietEnd}
+                      onChange={(e) => updateSetting("notifyQuietEnd", Number(e.target.value))}
+                      disabled={!settings.notificationsEnabled || !settings.notifyQuietEnabled}
+                      aria-label="Quiet hours end"
+                    >
+                      {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+                    </select>
+                    <button
+                      className={`settings-toggle ${settings.notifyQuietEnabled ? "settings-toggle-on" : ""}`}
+                      onClick={() => updateSetting("notifyQuietEnabled", !settings.notifyQuietEnabled)}
+                      disabled={!settings.notificationsEnabled}
+                      role="switch"
+                      aria-checked={settings.notifyQuietEnabled}
+                      aria-label="Enable quiet hours"
+                    >
+                      <span className="settings-toggle-knob" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-row settings-notif-row">
+                  <div className="settings-notif-copy">
+                    <label className="settings-label">Hold notifications for 30 seconds</label>
+                    <span className="settings-notif-hint">
+                      Two agents finishing together arrive as one notification instead of two.
+                    </span>
+                  </div>
+                  <button
+                    className={`settings-toggle ${settings.notifyBatchEnabled ? "settings-toggle-on" : ""}`}
+                    onClick={() => updateSetting("notifyBatchEnabled", !settings.notifyBatchEnabled)}
+                    disabled={!settings.notificationsEnabled}
+                    role="switch"
+                    aria-checked={settings.notifyBatchEnabled}
+                    aria-label="Hold notifications for 30 seconds"
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+
+                <div className="settings-row settings-notif-row">
+                  <div className="settings-notif-copy">
+                    <label className="settings-label">Keep reminding me about blocked agents</label>
+                    <span className="settings-notif-hint">
+                      Re-notify every 15 minutes until answered. Off by default because it becomes
+                      noise.
+                    </span>
+                  </div>
+                  <button
+                    className={`settings-toggle ${settings.notifyRemindEnabled ? "settings-toggle-on" : ""}`}
+                    onClick={() => updateSetting("notifyRemindEnabled", !settings.notifyRemindEnabled)}
+                    disabled={!settings.notificationsEnabled}
+                    role="switch"
+                    aria-checked={settings.notifyRemindEnabled}
+                    aria-label="Keep reminding me about blocked agents"
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+
                 <div className="settings-row">
                   <label className="settings-label">Test</label>
                   <button
@@ -257,13 +472,25 @@ export function SettingsModal({ open, onClose }: Props) {
                     <span className="settings-notif-status">{notifStatus}</span>
                   </div>
                 )}
-              </>
+
+                <div className="set-note">
+                  <Icon name="alert" size={14} />
+                  <span>
+                    A notification you learn to dismiss is worse than none. These three transitions
+                    are the only ones that ever mean &ldquo;stop what you are doing&rdquo; &mdash;
+                    everything else belongs in the queue, not on your screen.
+                  </span>
+                </div>
+              </div>
             )}
             {category === "repos" && <ReposPanel />}
+            {category === "agents" && <AgentsPanel health={health} />}
+            {category === "worktrees" && <WorktreesPanel />}
             {category === "meta" && <MetaPropertiesPanel />}
             {category === "mcp" && <McpServersPanel />}
+            {category === "integrations" && <IntegrationsPanel health={health} />}
             {category === "security" && <SecurityPanel />}
-            {category === "health" && <HealthPanel />}
+            {category === "health" && <><HookPanel /><HealthPanel health={health} /></>}
             {category === "shortcuts" && <ShortcutsPanel />}
           </div>
         </div>
@@ -275,18 +502,73 @@ export function SettingsModal({ open, onClose }: Props) {
 
 // ─── Health Panel ───
 
-function HealthPanel() {
-  const [health, setHealth] = useState<SettingsHealth | null>(null);
-  const [loading, setLoading] = useState(true);
+function HookPanel() {
+  const [state, setState] = useState<HookState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchSettingsHealth()
-      .then(setHealth)
-      .finally(() => setLoading(false));
-  }, []);
+  const load = () => fetchHookState().then(setState).catch(() => setState(null));
+  useEffect(() => { load(); }, []);
 
-  if (loading) return <div className="settings-loading">Checking tools...</div>;
-  if (!health) return <div className="settings-error">Failed to check health</div>;
+  const handleInstall = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await installHooks();
+      if (r.ok) setState(r);
+      else setErr(r.error || "Install failed");
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!state) return null;
+
+  return (
+    <div className="settings-hooks">
+      <div className="settings-row">
+        <label className="settings-label">Status hooks</label>
+        <div className="settings-hooks-actions">
+          <span className={`settings-hook-badge ${state.ok ? "settings-hook-ok" : "settings-hook-bad"}`}>
+            {state.ok ? `all ${state.installed.length} installed` : `${state.missing.length} missing`}
+          </span>
+          {!state.ok && (
+            <button className="settings-test-btn" onClick={handleInstall} disabled={busy}>
+              {busy ? "Installing…" : "Install"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <p className="settings-security-desc">
+        Without these, AgentDock has to guess an agent&rsquo;s state by reading its terminal — the
+        difference between knowing an agent is blocked and finding out ninety seconds later.
+        Installing writes to <code>{state.settingsPath}</code>, outside AgentDock&rsquo;s own config.
+      </p>
+
+      {err && <div className="settings-error">{err}</div>}
+
+      <div className="settings-hook-list">
+        {state.events.map((e) => {
+          const on = state.installed.includes(e.event);
+          return (
+            <div key={e.event} className="settings-hook-row">
+              <span className={`settings-hook-dot ${on ? "settings-hook-dot-on" : ""}`} />
+              <span className="settings-hook-event">{e.event}</span>
+              <span className="settings-hook-status">{e.status}</span>
+              <span className="settings-hook-means">{e.means}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HealthPanel({ health }: { health: SettingsHealth | null }) {
+  if (!health) return <div className="settings-loading">Checking tools...</div>;
 
   const tools = [
     { name: "tmux", ...health.tmux, required: true, install: "brew install tmux  •  apt install tmux" },
@@ -317,6 +599,324 @@ function HealthPanel() {
         ))}
       </div>
     </>
+  );
+}
+
+// ─── Agents Panel ───
+
+const AGENTS: {
+  id: AgentType;
+  label: string;
+  cli: string;
+  skipFlag: string;
+  healthKey: "claude" | "cursor";
+}[] = [
+  { id: "claude", label: "Claude Code", cli: "claude", skipFlag: "--dangerously-skip-permissions", healthKey: "claude" },
+  { id: "cursor", label: "Cursor Agent", cli: "agent", skipFlag: "--yolo", healthKey: "cursor" },
+];
+
+/** `gh --version` answers "gh version 2.86.0 (2026-01-21)". Only the number fits a tag. */
+function shortVersion(v: string): string {
+  return v.match(/\d+[\w.-]*/)?.[0] || v;
+}
+
+// Abbreviated form of the allow-list in server/src/services/session-manager.ts.
+const CLAUDE_ALLOWED = "Read Edit Write Glob Grep 'Bash(git:*)' 'Bash(gh:*)' \u2026";
+
+function AgentsPanel({ health }: { health: SettingsHealth | null }) {
+  const { settings, updateSetting } = useSettings();
+  const skip = settings.defaultSkipPermissions;
+  const chosen = AGENTS.find((a) => a.id === settings.defaultAgent) || AGENTS[0];
+  const cmd =
+    chosen.id === "claude"
+      ? skip
+        ? "claude --dangerously-skip-permissions"
+        : `claude --allowedTools ${CLAUDE_ALLOWED}`
+      : skip
+        ? "agent --yolo"
+        : "agent";
+
+  return (
+    <div className="set-pane">
+      <div className="set-section">
+        <span className="set-section-title">Default for new sessions</span>
+        <div className="settings-row">
+          <label className="settings-label" id="default-agent-label">Agent</label>
+          <div className="settings-segmented" role="group" aria-labelledby="default-agent-label">
+            {AGENTS.map((a) => (
+              <button
+                key={a.id}
+                className={`settings-segmented-btn ${settings.defaultAgent === a.id ? "settings-segmented-btn-active" : ""}`}
+                onClick={() => updateSetting("defaultAgent", a.id)}
+                aria-pressed={settings.defaultAgent === a.id}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="settings-row settings-notif-row">
+          <div className="settings-notif-copy">
+            <label className="settings-label">Start without permission prompts</label>
+            <span className="settings-notif-hint">
+              Passes <code>{chosen.skipFlag}</code>. Without it, Claude runs against a fixed
+              allow-list and stops to ask for anything outside it.
+            </span>
+          </div>
+          <button
+            className={`settings-toggle ${skip ? "settings-toggle-on" : ""}`}
+            onClick={() => updateSetting("defaultSkipPermissions", !skip)}
+            role="switch"
+            aria-checked={skip}
+            aria-label="Start new sessions without permission prompts"
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
+      </div>
+
+      <div className="set-section">
+        <span className="set-section-title">What actually runs</span>
+        <div className="set-group">
+          {AGENTS.map((a) => {
+            const tool = health ? health[a.healthKey] : null;
+            return (
+              <div key={a.id} className="set-group-row">
+                <span className={`set-dot ${tool ? (tool.installed ? "set-dot-on" : "set-dot-off") : ""}`} />
+                <div className="set-copy">
+                  <span className="set-copy-title">{a.label}</span>
+                  <span className="set-copy-hint">
+                    <code>{a.cli}</code>
+                    {tool ? (tool.installed ? ` \u00b7 ${shortVersion(tool.version)}` : " \u00b7 not installed") : ""}
+                  </span>
+                </div>
+                {settings.defaultAgent === a.id && <span className="set-tag">default</span>}
+              </div>
+            );
+          })}
+        </div>
+        <code className="set-cmd">{cmd}</code>
+        <div className="set-note">
+          <Icon name="alert" size={14} />
+          <span>
+            Claude sessions also get <code>--append-system-prompt-file</code>, one
+            {" "}<code>--add-dir</code> per worktree, and <code>-n</code> with the session name. Cursor
+            takes neither, so multi-repo Cursor sessions see only the first worktree.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Worktrees Panel ───
+
+function WorktreesPanel() {
+  const { settings, updateSetting } = useSettings();
+  const [basePath, setBasePath] = useState("");
+  const [postCreate, setPostCreate] = useState(settings.worktreePostCreate);
+  const [prefix, setPrefix] = useState(settings.worktreeBranchPrefix);
+
+  useEffect(() => { fetchBasePath().then(setBasePath).catch(() => setBasePath("")); }, []);
+
+  const commit = <K extends "worktreePostCreate" | "worktreeBranchPrefix">(key: K, value: string) => {
+    if (value !== settings[key]) updateSetting(key, value);
+  };
+
+  return (
+    <div className="set-pane">
+      <div className="set-section">
+        <span className="set-section-title">Where they go</span>
+        <div className="set-path">
+          <Icon name="folder" size={15} />
+          <span className="set-mono">
+            {basePath || "\u2026"}/.worktrees/&lt;session&gt;/&lt;repo&gt;
+          </span>
+        </div>
+        <div className="set-note">
+          <Icon name="alert" size={14} />
+          <span>
+            One directory per session, one subdirectory per repo in it. The base path is the same one
+            repos are scanned from &mdash; change it under Repositories.
+          </span>
+        </div>
+      </div>
+
+      <div className="set-section">
+        <span className="set-section-title">After creation</span>
+        <div className="set-field">
+          <label className="set-field-label" htmlFor="wt-post-create">Post-create command</label>
+          <input
+            id="wt-post-create"
+            className="set-input"
+            value={postCreate}
+            placeholder="bun install"
+            onChange={(e) => setPostCreate(e.target.value)}
+            onBlur={() => commit("worktreePostCreate", postCreate)}
+            onKeyDown={(e) => { if (e.key === "Enter") commit("worktreePostCreate", postCreate); }}
+            spellCheck={false}
+          />
+          <span className="set-copy-hint">
+            Runs once in each new worktree, before the agent starts &mdash; the thing that saves an
+            agent its first two minutes on <code>npm install</code>.
+          </span>
+        </div>
+      </div>
+
+      <div className="set-section">
+        <span className="set-section-title">Naming</span>
+        <div className="set-field">
+          <label className="set-field-label" htmlFor="wt-prefix">Branch prefix</label>
+          <input
+            id="wt-prefix"
+            className="set-input set-input-narrow"
+            value={prefix}
+            placeholder="wt-"
+            onChange={(e) => setPrefix(e.target.value)}
+            onBlur={() => commit("worktreeBranchPrefix", prefix)}
+            onKeyDown={(e) => { if (e.key === "Enter") commit("worktreeBranchPrefix", prefix); }}
+            spellCheck={false}
+          />
+          <span className="set-copy-hint">
+            A session started from a ticket uses the ticket ID as its branch. Everything else gets
+            <code>{(prefix || "wt-") + "<short id>"}</code>, which is what keeps two sessions on the
+            same repo from colliding.
+          </span>
+        </div>
+      </div>
+
+      <div className="set-section">
+        <span className="set-section-title">Cleanup</span>
+        <div className="set-group">
+          <div className="set-group-row set-group-row-top">
+            <div className="set-copy">
+              <span className="set-copy-title">Remove the worktree after a clean merge</span>
+              <span className="set-copy-hint">
+                Deleting a session already removes its worktree. This also clears the ones whose
+                branch has landed, so a merged session does not keep a checkout alive.
+              </span>
+            </div>
+            <button
+              className={`settings-toggle ${settings.worktreeAutoRemove ? "settings-toggle-on" : ""}`}
+              onClick={() => updateSetting("worktreeAutoRemove", !settings.worktreeAutoRemove)}
+              role="switch"
+              aria-checked={settings.worktreeAutoRemove}
+              aria-label="Remove the worktree after a clean merge"
+            >
+              <span className="settings-toggle-knob" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Integrations Panel ───
+
+function IntegrationsPanel({ health }: { health: SettingsHealth | null }) {
+  const [servers, setServers] = useState<McpServerInfo[] | null>(null);
+  const [shards, setShards] = useState<DbShardInfo[] | null>(null);
+
+  useEffect(() => {
+    fetchMcpServers().then(setServers).catch(() => setServers([]));
+    fetchDbShards().then(setShards).catch(() => setShards([]));
+  }, []);
+
+  const mcpMatch = (re: RegExp) => (servers || []).find((sv) => re.test(sv.name));
+  const linear = mcpMatch(/linear/i);
+  const slack = mcpMatch(/slack/i);
+  const gh = health?.gh;
+  const psql = health?.psql;
+
+  const rows: { icon: IconName; name: string; state: string; ok: boolean; detail: string }[] = [
+    {
+      icon: "plan",
+      name: "Linear",
+      ok: !!linear,
+      state: linear ? `MCP: ${linear.name}` : "not configured",
+      detail: linear
+        ? "Agents reach Linear through this MCP server. AgentDock itself holds no Linear credential."
+        : "AgentDock has no Linear client of its own. Add an MCP server under MCP Servers and every session gets it.",
+    },
+    {
+      icon: "send",
+      name: "Slack",
+      ok: !!slack,
+      state: slack ? `MCP: ${slack.name}` : "not configured",
+      detail: slack
+        ? "Agents reach Slack through this MCP server. AgentDock itself holds no Slack token."
+        : "AgentDock has no Slack client of its own. Add an MCP server under MCP Servers and every session gets it.",
+    },
+    {
+      icon: "pr",
+      name: "GitHub",
+      ok: !!gh?.installed,
+      state: gh?.installed ? `gh ${shortVersion(gh.version)}` : "gh not installed",
+      detail: gh?.installed
+        ? "Pushing and opening a PR shells out to gh, which carries its own auth. AgentDock stores no GitHub token."
+        : "Without the gh CLI, pushing a branch works but opening a PR from AgentDock does not.",
+    },
+    {
+      icon: "db",
+      name: "Databases",
+      ok: (shards?.length || 0) > 0 && !!psql?.installed,
+      state:
+        shards === null
+          ? "checking\u2026"
+          : shards.length === 0
+            ? "no shards configured"
+            : `${shards.length} shard${shards.length === 1 ? "" : "s"}`,
+      detail:
+        shards && shards.length > 0
+          ? `Read-only: SELECT, WITH, EXPLAIN and SHOW only, everything else is rejected before psql runs.${psql?.installed ? "" : " psql is not installed, so queries will fail."}`
+          : "Read-only Postgres connections agents can query. Nothing is configured, so no query can run.",
+    },
+  ];
+
+  return (
+    <div className="set-pane">
+      <div className="set-group">
+        {rows.map((r) => (
+          <div key={r.name} className="set-group-row set-group-row-top">
+            <Icon name={r.icon} size={15} style={{ marginTop: 2, color: "var(--text-3)" }} />
+            <div className="set-copy">
+              <span className="set-copy-title">{r.name}</span>
+              <span className="set-copy-hint">{r.detail}</span>
+            </div>
+            <span className={`set-tag ${r.ok ? "" : "set-tag-off"}`}>{r.state}</span>
+          </div>
+        ))}
+      </div>
+
+      {shards && shards.length > 0 && (
+        <div className="set-section">
+          <span className="set-section-title">Shards</span>
+          <div className="set-group">
+            {shards.map((sh) => (
+              <div key={sh.name} className="set-group-row">
+                <span className="set-dot set-dot-on" />
+                <div className="set-copy">
+                  <span className="set-copy-title">{sh.name}</span>
+                  <span className="set-copy-hint set-mono">
+                    {sh.user}@{sh.host}:{sh.port}/{sh.database}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="set-note">
+        <Icon name="alert" size={14} />
+        <span>
+          Only two of these are AgentDock&rsquo;s own: the <code>gh</code> CLI it shells out to, and
+          the database shards it queries. Linear and Slack reach agents through MCP, so what is
+          listed here is what is actually configured &mdash; not what could be.
+        </span>
+      </div>
+    </div>
   );
 }
 

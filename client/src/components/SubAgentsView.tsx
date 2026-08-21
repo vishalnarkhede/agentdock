@@ -1,26 +1,34 @@
 import { useState } from "react";
 import { deleteSession } from "../api";
+import { queueBucket, type QueueBucket } from "../queue";
+import { Icon } from "./Icon";
 import type { SessionInfo } from "../types";
+import "../styles/subagents.css";
 
 function timeAgo(unixSeconds: number): string {
   const diff = Math.floor(Date.now() / 1000) - unixSeconds;
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return `${diff}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
 }
 
-function getDisplayStatus(session: SessionInfo): string {
-  if (session.statusLine?.type) return session.statusLine.type;
-  if (session.status === "shell") return "done";
-  return session.status;
+function shortPath(path: string): string {
+  return path.replace(/^\/Users\/[^/]+\//, "~/");
 }
 
-function statusLabel(session: SessionInfo): string {
-  const s = getDisplayStatus(session);
-  if (s === "working") return "working...";
-  if (s === "waiting") return "idle";
-  return s;
+const BUCKET_LABEL: Record<QueueBucket, string> = {
+  blocked: "Needs you",
+  review: "Ready",
+  working: "Working",
+  idle: "Idle",
+  stale: "Stale",
+};
+
+function agentLabel(agentType: SessionInfo["agentType"]): string | null {
+  if (agentType === "claude") return "Claude";
+  if (agentType === "cursor") return "Cursor";
+  return null;
 }
 
 interface Props {
@@ -57,109 +65,108 @@ export function SubAgentsView({ parentSession, sessions, onSelectChild, onRefres
 
   if (children.length === 0) {
     return (
-      <div className="sub-agents-view">
-        <div className="sub-agents-empty">
-          <div className="sub-agents-empty-icon">&#x2693;</div>
-          <div>no sub-agents running</div>
-          <div className="sub-agents-empty-hint">
-            the agent can spawn sub-agents using the ad-agent CLI
+      <div className="sa">
+        <div className="sa-empty">
+          <div className="sa-empty-tile">
+            <Icon name="users" size={20} />
           </div>
+          <div className="sa-empty-title">No sub-agents yet</div>
+          <p className="sa-empty-hint">
+            This session will have them as soon as you ask it to fan the work out — each
+            sub-agent runs as its own agent alongside this one.
+          </p>
         </div>
       </div>
     );
   }
 
-  const workingCount = children.filter((c) => c.status === "working").length;
-  const doneCount = children.filter((c) => getDisplayStatus(c) === "done" || c.status === "waiting").length;
-  const errorCount = children.filter((c) => getDisplayStatus(c) === "error").length;
+  const buckets = children.map(queueBucket);
+  const workingCount = buckets.filter((b) => b === "working").length;
+  const blockedCount = buckets.filter((b) => b === "blocked").length;
 
   return (
-    <div className="sub-agents-view">
-      <div className="sub-agents-header">
-        <div className="sub-agents-summary">
-          <span className="sub-agents-count">
-            {children.length} sub-agent{children.length !== 1 ? "s" : ""}
-          </span>
-          <div className="sub-agents-progress">
-            {children.map((child) => {
-              const s = getDisplayStatus(child);
-              return (
-                <span
-                  key={child.name}
-                  className={`sub-agents-progress-pip status-${s}`}
-                  title={`${child.displayName}: ${s}`}
-                />
-              );
-            })}
-          </div>
-          <div className="sub-agents-stats">
-            {workingCount > 0 && <span className="sub-agents-stat status-working">{workingCount} working</span>}
-            {doneCount > 0 && <span className="sub-agents-stat status-done">{doneCount} done</span>}
-            {errorCount > 0 && <span className="sub-agents-stat status-error">{errorCount} error</span>}
-          </div>
-        </div>
-        <button className="btn btn-stop btn-sm" onClick={handleKillAll}>
-          kill all
+    <div className="sa">
+      <div className="sa-stats">
+        <Stat value={workingCount} label="working" tone="working" />
+        <Stat value={blockedCount} label="waiting on you" tone="blocked" />
+        <Stat value={children.length} label={children.length === 1 ? "sub-agent" : "sub-agents"} />
+        <button className="sa-killall" onClick={handleKillAll}>
+          <Icon name="stop" size={13} />
+          Kill all
         </button>
       </div>
 
-      <div className="sub-agents-grid">
-        {children.map((child) => {
-          const ds = getDisplayStatus(child);
+      <div className="sa-list">
+        {children.map((child, i) => {
+          const bucket = buckets[i];
           return (
             <div
               key={child.name}
-              className={`sub-agent-card sub-agent-card--${ds}`}
+              className={`sa-card sa-card--${bucket}`}
               onClick={() => onSelectChild(child.name)}
             >
-              <div className="sub-agent-card-header">
-                <span className={`sub-agent-dot status-${ds}`} />
-                <span className="sub-agent-name">{child.displayName}</span>
-                <span className={`sub-agent-status-badge status-${ds}`}>
-                  {statusLabel(child)}
-                </span>
+              <div className="sa-card-top">
+                <span className={`sa-dot sa-dot--${bucket}`} />
+                <span className="sa-name">{child.displayName}</span>
+                <span className={`sa-pill sa-pill--${bucket}`}>{BUCKET_LABEL[bucket]}</span>
+                <span className="sa-age">{timeAgo(child.created)}</span>
               </div>
 
               {child.statusLine?.message && (
-                <div className={`sub-agent-message status-${child.statusLine.type}`}>
-                  {child.statusLine.message}
-                </div>
+                <div className="sa-doing">{child.statusLine.message}</div>
               )}
 
-              <div className="sub-agent-card-footer">
-                <span className="sub-agent-path">
-                  {child.path.replace(/^\/Users\/[^/]+\//, "~/")}
+              <div className="sa-card-foot">
+                <span className="sa-facts">
+                  {agentLabel(child.agentType) && <span>{agentLabel(child.agentType)}</span>}
+                  <span className="sa-path">{shortPath(child.path)}</span>
                 </span>
-                <span className="sub-agent-age">{timeAgo(child.created)}</span>
-                {child.agentType && (
-                  <span className="sub-agent-agent">
-                    {child.agentType === "claude" ? "Claude" : "Cursor"}
-                  </span>
-                )}
                 <button
-                  className="sub-agent-view-btn"
+                  className="sa-kill"
+                  title="Kill this sub-agent"
+                  disabled={killing === child.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleKill(child.name);
+                  }}
+                >
+                  <Icon name="trash" size={13} />
+                </button>
+                <button
+                  className={bucket === "blocked" ? "sa-open sa-open--answer" : "sa-open"}
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectChild(child.name);
                   }}
                 >
-                  view &rarr;
-                </button>
-                <button
-                  className="sub-agent-kill"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleKill(child.name);
-                  }}
-                  disabled={killing === child.name}
-                >
-                  {killing === child.name ? "..." : "kill"}
+                  {bucket === "blocked" ? "Answer" : "Open"}
                 </button>
               </div>
             </div>
           );
         })}
       </div>
+
+      <p className="sa-note">
+        A sub-agent's work lands in the parent's worktree, so it shows up in the parent's diff.
+      </p>
+    </div>
+  );
+}
+
+function Stat({
+  value,
+  label,
+  tone,
+}: {
+  value: number;
+  label: string;
+  tone?: Extract<QueueBucket, "working" | "blocked">;
+}) {
+  return (
+    <div className="sa-stat">
+      <div className={tone ? `sa-stat-value sa-stat-value--${tone}` : "sa-stat-value"}>{value}</div>
+      <div className="sa-stat-label">{label}</div>
     </div>
   );
 }

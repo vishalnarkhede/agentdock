@@ -7,6 +7,8 @@ import templateRoutes from "./routes/templates";
 import uploadRoutes from "./routes/upload";
 import settingsRoutes from "./routes/settings";
 import dbRoutes from "./routes/db";
+import reviewRoutes from "./routes/review";
+import housekeepingRoutes from "./routes/housekeeping";
 import ngrokRoutes from "./routes/ngrok";
 import fsRoutes from "./routes/fs";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
@@ -29,6 +31,8 @@ app.route("/api/templates", templateRoutes);
 app.route("/api/upload", uploadRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/db", dbRoutes);
+app.route("/api/review", reviewRoutes);
+app.route("/api/housekeeping", housekeepingRoutes);
 app.route("/api/ngrok", ngrokRoutes);
 app.route("/api/fs", fsRoutes);
 

@@ -1,10 +1,12 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { CustomKeyboard } from "./CustomKeyboard";
+import { Icon } from "./Icon";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
@@ -74,6 +76,29 @@ function getTermTheme() {
   return { background: bg, ...colors };
 }
 
+// Mirrors the send-keys / load-buffer split in server/src/services/tmux.ts.
+const PASTE_BUFFER_THRESHOLD = 400;
+
+function switchSteps(from: AgentType, to: AgentType) {
+  return [
+    { label: `Compact the ${from} conversation`, note: from === "claude" ? "/compact" : "/summarize" },
+    { label: "Capture the compacted context" },
+    { label: `Exit ${from}`, note: "/exit" },
+    { label: "Wait for the shell prompt" },
+    { label: `Start ${to} on the context file`, note: to },
+  ];
+}
+
+function activeSwitchStep(step: string): number {
+  if (step.startsWith("Compressing")) return 0;
+  if (step.startsWith("Capturing")) return 1;
+  if (step.startsWith("Exiting")) return 2;
+  if (step.startsWith("Waiting for shell")) return 3;
+  if (step.startsWith("Switched to")) return 5;
+  if (step.startsWith("Starting") && step !== "Starting switch...") return 4;
+  return 0;
+}
+
 interface Props {
   sessionName: string;
   agentType?: AgentType;
@@ -96,8 +121,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [focused, setFocused] = useState(true);
   const [switchingAgent, setSwitchingAgent] = useState(false);
   const [switchStep, setSwitchStep] = useState("");
+  const [switchTarget, setSwitchTarget] = useState<AgentType | null>(null);
+  const [switchError, setSwitchError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showPasteInput, setShowPasteInput] = useState(false);
+  const [pasteValue, setPasteValue] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
@@ -110,6 +138,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       setTimeout(() => setPasteError(""), 2000);
     } catch {
       // Permission denied — show paste bar as last resort
+      setPasteValue("");
       setShowPasteInput(true);
       requestAnimationFrame(() => pasteInputRef.current?.focus());
     }
@@ -428,7 +457,14 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [fullscreen]);
 
-  useNotifications(sessionName, lastContent, settings.notificationsEnabled);
+  // Terminal scanning is the Cursor fallback only — Cursor has no lifecycle
+  // hooks. Claude sessions are notified from hook-derived status in
+  // useQueueNotifications, which also covers sessions you are not viewing.
+  useNotifications(
+    sessionName,
+    agentType === "cursor" ? lastContent : null,
+    settings.notificationsEnabled,
+  );
 
 
   const handleSwitchAgent = useCallback(async () => {
@@ -438,13 +474,18 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     if (!confirm(`Switch from ${agentType} to ${newAgentType}?`)) return;
     
     setSwitchingAgent(true);
+    setSwitchTarget(newAgentType);
+    setSwitchError("");
     setSwitchStep("Starting switch...");
     try {
       await switchAgent(
         sessionName,
         newAgentType,
         "Continue where the previous agent left off.",
-        (step) => setSwitchStep(step),
+        (step) => {
+          if (step.startsWith("Error:")) setSwitchError(step.replace(/^Error:\s*/, ""));
+          else setSwitchStep(step);
+        },
       );
       onAgentSwitched?.();
     } catch (err: any) {
@@ -452,6 +493,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     } finally {
       setSwitchingAgent(false);
       setSwitchStep("");
+      setSwitchError("");
+      setSwitchTarget(null);
     }
   }, [sessionName, agentType, onAgentSwitched]);
 
@@ -543,12 +586,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         {agentType && connected && (
           <button
-            className="terminal-copy-btn"
+            className="terminal-copy-btn tv-toolbar-btn"
             onClick={handleSwitchAgent}
             disabled={switchingAgent}
             title={`Switch to ${agentType === "claude" ? "Cursor" : "Claude"}`}
           >
-            {switchingAgent ? "..." : agentType === "claude" ? "→ Cursor" : "→ Claude"}
+            <Icon name="refresh" size={13} />
+            {switchingAgent ? "..." : agentType === "claude" ? "Cursor" : "Claude"}
           </button>
         )}
         <button
@@ -571,10 +615,32 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       onDrop={onDrop}
     >
       {switchingAgent && (
-        <div className="terminal-switch-overlay">
-          <div className="terminal-switch-content">
-            <div className="terminal-switch-spinner" />
-            <div className="terminal-switch-step">{switchStep}</div>
+        <div className="terminal-switch-overlay tv-switch">
+          <div className="tv-switch-card">
+            <div className="tv-switch-title">Switching to {switchTarget ?? "the other agent"}</div>
+            <p className="tv-switch-lede">
+              The conversation is compacted first, so the new agent starts from a summary of the
+              work so far instead of an empty context.
+            </p>
+            <ul className="tv-switch-steps">
+              {switchSteps(agentType ?? "claude", switchTarget ?? "claude").map((step, i) => {
+                const active = activeSwitchStep(switchStep);
+                const state = i < active ? "is-done" : i === active ? "is-active" : "is-pending";
+                return (
+                  <li key={step.label} className={`tv-switch-step ${state}`}>
+                    <span className="tv-switch-dot" />
+                    <span className="tv-switch-step-label">{step.label}</span>
+                    {step.note && <span className="tv-switch-step-note">{step.note}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+            {switchError && (
+              <div className="tv-switch-error">
+                <Icon name="alert" size={14} />
+                <span>{switchError}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -704,74 +770,130 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           click to type
         </div>
       )}
-      {contextMenu && (
-        <>
-          <div
-            className="terminal-context-backdrop"
-            onClick={() => setContextMenu(null)}
-          />
-          <div
-            className="terminal-context-menu"
-            style={{
-              top: Math.min(contextMenu.y, window.innerHeight - 120),
-              left: Math.min(contextMenu.x, window.innerWidth - 160),
-            }}
-          >
-            <button
-              onClick={() => {
-                setContextMenu(null);
-                // Show paste bar immediately (synchronous) so iOS can focus it
-                // within the user gesture context, then try clipboard API in background
-                setShowPasteInput(true);
-                requestAnimationFrame(() => pasteInputRef.current?.focus());
-                navigator.clipboard.readText().then((text) => {
-                  if (text) { sendInputRef.current(text); setShowPasteInput(false); }
-                }).catch(() => {});
+      {contextMenu && (() => {
+        const hasSelection = !!termRef.current?.getSelection();
+        const itemHeight = window.innerWidth <= 768 ? 44 : 38;
+        const menuHeight = (hasSelection ? 4 : 3) * itemHeight + 12;
+        return (
+          <>
+            <div
+              className="terminal-context-backdrop"
+              onClick={() => setContextMenu(null)}
+            />
+            <div
+              className="terminal-context-menu tv-ctxmenu"
+              style={{
+                top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - menuHeight - 12)),
+                left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 244)),
               }}
             >
-              Paste
-            </button>
-            <button
-              onClick={() => {
-                setContextMenu(null);
-                const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-                navigator.clipboard.writeText(clean.trim());
-              }}
-            >
-              Copy All
-            </button>
-            {termRef.current?.getSelection() && (
+              {hasSelection && (
+                <button
+                  onClick={() => {
+                    setContextMenu(null);
+                    const sel = termRef.current?.getSelection() || "";
+                    navigator.clipboard.writeText(sel);
+                  }}
+                >
+                  <Icon name="copy" size={14} />
+                  <span className="tv-ctxmenu-label">Copy selection</span>
+                  <span className="tv-ctxmenu-key">⌘C</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setContextMenu(null);
-                  const sel = termRef.current?.getSelection() || "";
-                  navigator.clipboard.writeText(sel);
+                  const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+                  navigator.clipboard.writeText(clean.trim());
                 }}
               >
-                Copy Selection
+                <Icon name="file" size={14} />
+                <span className="tv-ctxmenu-label">Copy everything on screen</span>
               </button>
-            )}
-          </div>
-        </>
-      )}
+              <button
+                onClick={() => {
+                  setContextMenu(null);
+                  // Show paste bar immediately (synchronous) so iOS can focus it
+                  // within the user gesture context, then try clipboard API in background
+                  setPasteValue("");
+                  setShowPasteInput(true);
+                  requestAnimationFrame(() => pasteInputRef.current?.focus());
+                  navigator.clipboard.readText().then((text) => {
+                    if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+                  }).catch(() => {});
+                }}
+              >
+                <Icon name="plus" size={14} />
+                <span className="tv-ctxmenu-label">Paste</span>
+                <span className="tv-ctxmenu-key">⌘V</span>
+              </button>
+              <button
+                className="tv-ctxmenu-danger"
+                onClick={() => {
+                  setContextMenu(null);
+                  sendInput("\x1b");
+                }}
+              >
+                <Icon name="stop" size={14} />
+                <span className="tv-ctxmenu-label">Interrupt</span>
+                <span className="tv-ctxmenu-key">esc</span>
+              </button>
+            </div>
+          </>
+        );
+      })()}
       {pasteError && (
         <div className="terminal-paste-error">{pasteError}</div>
       )}
       {showPasteInput && (
-        <div className="terminal-paste-bar">
+        <div className="terminal-paste-bar tv-paste">
+          <div className="tv-paste-head">
+            <Icon name="copy" size={14} />
+            <span className="tv-paste-title">
+              {pasteValue.length
+                ? `Paste ${pasteValue.length} characters`
+                : "Paste from the clipboard"}
+            </span>
+            <span className="tv-paste-note">sent as one buffer, not keystrokes</span>
+          </div>
           <textarea
             ref={pasteInputRef}
-            className="terminal-paste-bar-input"
+            className="terminal-paste-bar-input tv-paste-input"
             placeholder="Clipboard access denied — long-press here to paste manually"
-            rows={1}
+            rows={2}
             autoFocus
+            value={pasteValue}
+            onChange={(e) => setPasteValue(e.target.value)}
             onPaste={(e) => {
               e.preventDefault();
               const text = e.clipboardData.getData("text");
-              if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+              if (text) { sendInputRef.current(text); setShowPasteInput(false); setPasteValue(""); }
             }}
           />
-          <button className="terminal-paste-bar-cancel" onClick={() => setShowPasteInput(false)}>✕</button>
+          <div className="tv-paste-actions">
+            <button
+              className="tv-paste-btn tv-paste-btn-primary"
+              disabled={!pasteValue.length}
+              onClick={() => {
+                sendInputRef.current(pasteValue);
+                setShowPasteInput(false);
+                setPasteValue("");
+              }}
+            >
+              <Icon name="send" size={14} />
+              Paste
+            </button>
+            <button
+              className="tv-paste-btn"
+              onClick={() => { setShowPasteInput(false); setPasteValue(""); }}
+            >
+              <Icon name="close" size={14} />
+              Cancel
+            </button>
+            <span className="tv-paste-foot">
+              Anything over {PASTE_BUFFER_THRESHOLD} characters takes this path automatically.
+            </span>
+          </div>
         </div>
       )}
       {/* Mobile bottom toolbar — Stop / Copy / Keyboard toggle */}
@@ -790,11 +912,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}>
-            {copied ? "✓ Copied" : "⎘ Copy"}
+            <Icon name={copied ? "check" : "copy"} size={14} />
+            {copied ? "Copied" : "Copy"}
           </button>
         )}
         <button className={`mobile-term-btn${showPasteInput ? " mobile-term-btn-active" : ""}`} onClick={handlePaste}>
-          ⊕ Paste
+          <Icon name="plus" size={14} />
+          Paste
         </button>
         <button className="mobile-term-btn" onClick={() => {
           if (!customKb) {
@@ -804,7 +928,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             setKbVisible((v) => !v);
           }
         }}>
-          {customKb && kbVisible ? "⌨ hide" : "⌨ write"}
+          <Icon name="keyboard" size={14} />
+          {customKb && kbVisible ? "Hide" : "Write"}
         </button>
       </div>
       {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={handlePaste} />}

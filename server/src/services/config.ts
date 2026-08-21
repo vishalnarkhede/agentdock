@@ -611,6 +611,62 @@ const HOOK_SCRIPT_DEST = join(CONFIG_DIR, "hooks", "status-hook.sh");
  * PreToolUse is the key addition — it fires frequently during active work (even by sub-agents),
  * so the "working" status stays fresh. The Stop hook resets to "waiting" when done.
  */
+/** The five lifecycle events status detection depends on, and what each means. */
+export const REQUIRED_HOOK_EVENTS: { event: string; status: string; means: string }[] = [
+  { event: "PreToolUse", status: "working", means: "fires on every tool call, so status stays fresh through a long run" },
+  { event: "UserPromptSubmit", status: "working", means: "you just sent something" },
+  { event: "SubagentStop", status: "working", means: "a sub-agent finished, the parent has not" },
+  { event: "Stop", status: "waiting", means: "it finished its turn" },
+  { event: "Notification", status: "waiting", means: "idle at the prompt, or asking permission" },
+];
+
+/**
+ * Which of our status hooks are present in a parsed Claude settings object.
+ *
+ * Pure so it can be tested without touching ~/.claude. Without these hooks,
+ * status detection falls back to reading the terminal, which is wrong often
+ * enough to matter — a blocked agent can look like a working one.
+ */
+export function readInstalledHooks(settings: Record<string, any>): {
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+} {
+  const hooks = (settings && settings.hooks) || {};
+  const installed: string[] = [];
+  for (const { event } of REQUIRED_HOOK_EVENTS) {
+    const arr = hooks[event];
+    const present =
+      Array.isArray(arr) &&
+      arr.some((entry: any) =>
+        Array.isArray(entry?.hooks) &&
+        entry.hooks.some((h: any) => typeof h?.command === "string" && h.command.includes("status-hook.sh")),
+      );
+    if (present) installed.push(event);
+  }
+  const missing = REQUIRED_HOOK_EVENTS.map((h) => h.event).filter((e) => !installed.includes(e));
+  return { installed, missing, ok: missing.length === 0 };
+}
+
+/** Current on-disk hook state, for the Health panel. */
+export function getHookInstallState(): {
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+  settingsPath: string;
+  scriptPath: string;
+} {
+  let settings: Record<string, any> = {};
+  if (existsSync(CLAUDE_SETTINGS_FILE)) {
+    try { settings = JSON.parse(readFileSync(CLAUDE_SETTINGS_FILE, "utf-8")); } catch { /* corrupt */ }
+  }
+  return {
+    ...readInstalledHooks(settings),
+    settingsPath: CLAUDE_SETTINGS_FILE,
+    scriptPath: HOOK_SCRIPT_DEST,
+  };
+}
+
 export function syncHooksToClaudeSettings(): void {
   // 1. Copy hook script to a stable location
   const hooksDir = join(CONFIG_DIR, "hooks");
@@ -757,6 +813,19 @@ export interface Preferences {
   scrollback?: number;
   terminalFontSize?: number;
   notificationsEnabled?: boolean;
+  notifyBlocked?: boolean;
+  notifyReview?: boolean;
+  notifyQuietEnabled?: boolean;
+  notifyQuietStart?: number;
+  notifyQuietEnd?: number;
+  notifyBatchEnabled?: boolean;
+  notifyRemindEnabled?: boolean;
+  defaultAgent?: string;
+  defaultSkipPermissions?: boolean;
+  worktreePostCreate?: string;
+  worktreeBranchPrefix?: string;
+  worktreeAutoRemove?: boolean;
+  customKeyboard?: boolean;
   groupBy?: string;
   collapsedGroups?: string[];
   sortBy?: string;

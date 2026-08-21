@@ -8,6 +8,18 @@ import { useSessions } from "../hooks/useSessions";
 import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, renameSession, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
+import { Icon, type IconName } from "../components/Icon";
+import { fetchHookState, installHooks, type HookState } from "../api";
+import { CoverageView } from "../components/CoverageView";
+import { ShipView } from "../components/ShipView";
+import { QUEUE_BUCKETS, queueBucket } from "../queue";
+import { fetchConflicts, fetchCoverage } from "../api";
+import { BlockedCard } from "../components/BlockedCard";
+import { QuietView } from "../components/QuietView";
+import { MobileQueue } from "../components/MobileQueue";
+import { MobileApprove } from "../components/MobileApprove";
+import { useQueueNotifications } from "../hooks/useQueueNotifications";
+import { useSettings } from "../hooks/useSettings";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
@@ -49,6 +61,35 @@ function getDisplayStatus(session: SessionInfo): string {
   return session.statusLine?.type
     ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
 }
+
+type FullSurface = "plan" | "coverage" | "changes" | "files" | "sub-agents" | "ship";
+
+/** Surfaces reachable from the full-window host's own tab bar. */
+const FULL_TABS: { id: FullSurface; label: string }[] = [
+  { id: "plan", label: "plan" },
+  { id: "changes", label: "changes" },
+  { id: "coverage", label: "coverage" },
+  { id: "files", label: "files" },
+];
+
+/** Blocked means the agent cannot continue without a human. */
+function isBlocked(session: SessionInfo): boolean {
+  return queueBucket(session) === "blocked";
+}
+
+/**
+ * The right rail: icons only, always present, never moving. Pressing one opens
+ * that surface fully expanded over the window — the surfaces are drawn
+ * standalone in the design, so a docked panel was always the wrong container.
+ */
+const RAIL: { id: FullSurface; label: string; icon: IconName }[] = [
+  { id: "plan", label: "Plan", icon: "plan" },
+  { id: "changes", label: "Changes", icon: "diff" },
+  { id: "coverage", label: "Coverage", icon: "eye" },
+  { id: "ship", label: "Ship", icon: "merge" },
+  { id: "files", label: "Files", icon: "folder" },
+  { id: "sub-agents", label: "Sub-agents", icon: "users" },
+];
 
 function SessionRow({
   session,
@@ -213,7 +254,7 @@ function SessionRow({
             onClick={(e) => { e.stopPropagation(); onToggleChildren?.(); }}
             title={`${childrenSummary.total} sub-agent${childrenSummary.total !== 1 ? "s" : ""}`}
           >
-            <span className="children-badge-icon">{childrenExpanded ? "\u25BE" : "\u25B8"}</span>
+            <span className="children-badge-icon"><Icon name={childrenExpanded ? "chev" : "chevr"} size={11} /></span>
             <span className="children-badge-count">{childrenSummary.total}</span>
             {childrenSummary.working > 0 && (
               <span className="children-badge-dot children-badge-working" title={`${childrenSummary.working} working`} />
@@ -238,7 +279,7 @@ function SessionRow({
             disabled={restoring}
             title="Restore session"
           >
-            {restoring ? "restoring…" : "↺ restore"}
+            {restoring ? "restoring…" : <><Icon name="refresh" size={11} /> restore</>}
           </button>
         )}
         {session.status !== "stopped" && (
@@ -272,7 +313,7 @@ function SessionRow({
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
             aria-label="Session actions"
           >
-            ⋯
+            <Icon name="more" size={16} />
           </button>
           {menuOpen && (
             <div className="session-row-menu">
@@ -299,7 +340,7 @@ function SessionRow({
               )}
               {session.status === "stopped" && onRestore && (
                 <button className="session-row-menu-item" onClick={handleRestore} disabled={restoring}>
-                  {restoring ? "Restoring…" : "↺ Restore session"}
+                  {restoring ? "Restoring…" : <><Icon name="refresh" size={13} /> Restore session</>}
                 </button>
               )}
               <button className="session-row-menu-item danger" onClick={handleKill}>
@@ -358,7 +399,7 @@ function SessionEditModal({
       <div className="session-edit-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">{session.displayName}</span>
-          <button className="settings-close-btn" onClick={onClose}>&times;</button>
+          <button className="settings-close-btn" onClick={onClose}><Icon name="close" size={16} /></button>
         </div>
         <div className="session-edit-body">
           <div className="session-edit-field">
@@ -883,7 +924,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
               {pendingComments.length} comment{pendingComments.length !== 1 ? "s" : ""}
             </span>
             <div className="comment-batch-actions">
-              <span className="comment-batch-expand">{batchExpanded ? "\u25BE" : "\u25B8"}</span>
+              <span className="comment-batch-expand"><Icon name={batchExpanded ? "chev" : "chevr"} size={12} /></span>
               <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setPendingComments([]); }}>
                 clear
               </button>
@@ -906,7 +947,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
                       className="comment-batch-item-remove"
                       onClick={() => setPendingComments(prev => prev.filter(p => p.id !== c.id))}
                     >
-                      &times;
+                      <Icon name="close" size={13} />
                     </button>
                   </div>
                   <pre className="comment-batch-item-code">{c.selectedText}</pre>
@@ -941,6 +982,7 @@ function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "r
 
 export function Dashboard() {
   const { sessions, loading, refresh } = useSessions();
+  const { settings: appSettings } = useSettings();
   const { login: authLogin } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -957,7 +999,23 @@ export function Dashboard() {
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
   // Bottom pane (plan/changes/sub-agents) split with terminal
-  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | "files" | null>(null);
+  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "coverage" | "ship" | "sub-agents" | "files" | null>(null);
+  // Desktop uses the accordion; the design opens Plan and Coverage by default.
+  const [openPanels, setOpenPanels] = useState<Set<string>>(() => new Set(["plan", "coverage"]));
+  // Review is a full-window mode in the design, not a panel — review quality
+  // falls off when it is cramped, which is the whole reason it takes over.
+  /**
+   * The design draws every context surface standalone — filling the frame with
+   * no cockpit around it. The accordion carries a summary and an "open"
+   * affordance; the surface itself takes the window.
+   */
+  const [fullSurface, setFullSurface] = useState<FullSurface | null>(null);
+  const [sharedWith, setSharedWith] = useState<{ session: string; files: number } | null>(null);
+  const [mobileApproveDismissed, setMobileApproveDismissed] = useState(false);
+  const [panelSummary, setPanelSummary] = useState<{
+    planDone: number; planTotal: number; unplanned: number; plus: number; minus: number; fileCount: number;
+  } | null>(null);
+  const [orphanPaths, setOrphanPaths] = useState<string[]>([]);
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
   const [bottomMaximized, setBottomMaximized] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
@@ -1014,12 +1072,15 @@ export function Dashboard() {
 
   // First-run setup
   const [showSetup, setShowSetup] = useState(false);
-  const [setupStep, setSetupStep] = useState<"path" | "repos" | "password">("path");
+  const [setupStep, setSetupStep] = useState<"path" | "repos" | "hooks" | "password">("path");
+  const [setupHooks, setSetupHooks] = useState<HookState | null>(null);
+  const [setupHooksBusy, setSetupHooksBusy] = useState(false);
   const [setupPath, setSetupPath] = useState("~/projects");
   const [setupSaving, setSetupSaving] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<{ alias: string; path: string; remote?: string; selected: boolean }[]>([]);
   const [setupPassword, setSetupPassword] = useState("");
+  const [setupAccess, setSetupAccess] = useState<"local" | "network">("network");
   const [setupPasswordConfirm, setSetupPasswordConfirm] = useState("");
 
   const [missingTools, setMissingTools] = useState<string[]>([]);
@@ -1054,7 +1115,7 @@ export function Dashboard() {
         setDiscoveredRepos(repos.map((r) => ({ ...r, selected: true })));
         setSetupStep("repos");
       } else {
-        setSetupStep("password");
+        setSetupStep("hooks");
       }
     } catch (err: any) {
       setSetupError(err?.message || "Failed to scan repos");
@@ -1069,7 +1130,7 @@ export function Dashboard() {
     try {
       const selected = discoveredRepos.filter((r) => r.selected);
       await Promise.all(selected.map((r) => addSettingsRepo({ alias: r.alias, path: r.path, remote: r.remote })));
-      setSetupStep("password");
+      setSetupStep("hooks");
     } catch (err: any) {
       setSetupError(err?.message || "Failed to save repos");
     } finally {
@@ -1122,7 +1183,7 @@ export function Dashboard() {
   // Drag-and-drop state for reordering parent sessions
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(new Set());
-  const [groupBy, setGroupBy] = useState<string>("");
+  const [groupBy, setGroupBy] = useState<string>("__queue__");
   const [sortBy, setSortBy] = useState<string>("");
   const [sessionStats, setSessionStats] = useState<Record<string, { count: number; last: number }>>({});
   const sessionStatsRef = useRef<Record<string, { count: number; last: number }>>({});
@@ -1172,6 +1233,7 @@ export function Dashboard() {
       // Sort and grouping are mutually exclusive; a saved sort takes precedence.
       if (p.sortBy) setSortBy(p.sortBy);
       else if (p.groupBy) setGroupBy(p.groupBy);
+      else if (!p.sortBy) setGroupBy("__queue__");
       if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
       if (p.mruSessions) mruList.current = p.mruSessions;
       if (p.sessionStats) {
@@ -1459,12 +1521,15 @@ export function Dashboard() {
   const groupedSessions = useMemo(() => {
     if (!groupBy) return null;
     const isStatusGroup = groupBy === "__status__";
+    const isQueue = groupBy === "__queue__";
     const groups: Record<string, typeof filteredSessions> = {};
     const ungrouped: typeof filteredSessions = [];
     for (const entry of filteredSessions) {
       if (entry.isChild) continue;
       let value: string;
-      if (isStatusGroup) {
+      if (isQueue) {
+        value = queueBucket(entry.session);
+      } else if (isStatusGroup) {
         value = getDisplayStatus(entry.session) || entry.session.status || "unknown";
       } else {
         value = entry.session.meta?.[groupBy] || "";
@@ -1481,6 +1546,14 @@ export function Dashboard() {
       );
       const target = value ? groups[value] : ungrouped;
       target!.push(...childEntries);
+    }
+    // The queue has one correct order, so it is fixed rather than sorted.
+    if (isQueue) {
+      const sorted: Record<string, typeof filteredSessions> = {};
+      for (const b of QUEUE_BUCKETS) {
+        if (groups[b.id] && groups[b.id]!.length) sorted[b.id] = groups[b.id]!;
+      }
+      return { groups: sorted, ungrouped: [] };
     }
     // For status grouping, order groups sensibly
     if (isStatusGroup) {
@@ -1680,10 +1753,18 @@ export function Dashboard() {
       if (activeSession) setActiveSession(null);
       return;
     }
-    const liveSessions = sessions.filter((s) => s.status !== "stopped");
-    const candidates = liveSessions.length > 0 ? liveSessions : sessions;
-    if (!activeSession || !sessions.find((s) => s.name === activeSession)) {
-      setActiveSession(candidates[0].name);
+    // Only auto-open something that actually wants attention. When nothing is
+    // blocked, reviewable or running, leaving the selection empty is what lets
+    // the quiet state show — the design's point being that "nothing needs you"
+    // deserves saying out loud rather than dropping you into an idle terminal.
+    const live = sessions.filter((s) => {
+      const b = queueBucket(s);
+      return b === "blocked" || b === "review" || b === "working";
+    });
+    const stillThere = activeSession && sessions.find((s) => s.name === activeSession);
+    if (!stillThere) {
+      if (live.length > 0) setActiveSession(live[0].name);
+      else if (activeSession) setActiveSession(null);
     }
   }, [sessions, loading, activeSession, setActiveSession]);
 
@@ -1710,6 +1791,178 @@ export function Dashboard() {
   useEffect(() => {
     setGoBack?.(() => setMobileShowTerminal(false));
   }, [setGoBack]);
+
+  // Notify across the whole queue, not just the session on screen.
+  useQueueNotifications(sessions, activeSession, {
+    enabled: appSettings.notificationsEnabled,
+    blocked: appSettings.notifyBlocked,
+    review: appSettings.notifyReview,
+    quietEnabled: appSettings.notifyQuietEnabled,
+    quietStart: appSettings.notifyQuietStart,
+    quietEnd: appSettings.notifyQuietEnd,
+  });
+
+  // Read hook state when the wizard reaches that step.
+  useEffect(() => {
+    if (setupStep !== "hooks") return;
+    fetchHookState().then(setSetupHooks).catch(() => setSetupHooks(null));
+  }, [setupStep]);
+
+  const handleSetupInstallHooks = async () => {
+    setSetupHooksBusy(true);
+    try {
+      const r = await installHooks();
+      if (r.ok) setSetupHooks(r);
+    } finally {
+      setSetupHooksBusy(false);
+    }
+  };
+
+  // One call feeds every panel badge, so they cannot disagree with each other.
+  useEffect(() => {
+    if (!activeSession || activeSessionPaths.length === 0) { setPanelSummary(null); return; }
+    let alive = true;
+    fetchCoverage(activeSession, activeSessionPaths)
+      .then((t) => {
+        if (!alive) return;
+        setPanelSummary({
+          planDone: t.steps.filter((x) => x.done).length,
+          planTotal: t.steps.length,
+          unplanned: t.stats.filesUnplanned,
+          plus: t.files.reduce((a, f) => a + f.plus, 0),
+          minus: t.files.reduce((a, f) => a + f.minus, 0),
+          fileCount: t.stats.filesTotal,
+        });
+        setOrphanPaths(t.files.filter((f) => f.step === null).slice(0, 3).map((f) => f.path));
+      })
+      .catch(() => { if (alive) { setPanelSummary(null); setOrphanPaths([]); } });
+    return () => { alive = false; };
+  }, [activeSession, activeSessionPaths.join("|")]);
+
+  /**
+   * Jump to whatever costs you most right now. Deciding what to look at next
+   * is itself part of the coordination cost the queue exists to reduce, so it
+   * is one keystroke rather than a scan.
+   */
+  const goNext = useCallback(() => {
+    const order = ["blocked", "review", "working", "idle", "stale"] as const;
+    const live = sessions.filter((x) => !x.parentSession);
+    for (const bucket of order) {
+      const candidates = live.filter((x) => queueBucket(x) === bucket);
+      if (candidates.length === 0) continue;
+      const at = candidates.findIndex((x) => x.name === activeSession);
+      const target = candidates[(at + 1) % candidates.length];
+      if (target) {
+        setActiveSession(target.name);
+        setMobileShowTerminal(true);
+      }
+      return;
+    }
+  }, [sessions, activeSession, setActiveSession]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); goNext(); }
+      if (e.key === "Escape") setFullSurface(null);
+    };
+    const onEvent = () => goNext();
+    const onFocusSearch = () => sessionSearchRef.current?.focus();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("agentdock-queue-next", onEvent);
+    window.addEventListener("agentdock-focus-search", onFocusSearch);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("agentdock-queue-next", onEvent);
+      window.removeEventListener("agentdock-focus-search", onFocusSearch);
+    };
+  }, [goNext]);
+
+  useEffect(() => {
+    if (!activeSession) { setSharedWith(null); return; }
+    let alive = true;
+    const short = activeSession.replace(/^claude-/, "");
+    fetchConflicts()
+      .then((r) => {
+        if (!alive) return;
+        const hit = r.conflicts.find((c) => c.sessions.includes(short));
+        setSharedWith(hit ? { session: hit.sessions.find((x) => x !== short) ?? hit.sessions[1], files: hit.files.length } : null);
+      })
+      .catch(() => alive && setSharedWith(null));
+    return () => { alive = false; };
+  }, [activeSession]);
+
+  const togglePanel = useCallback((id: string) => {
+    setOpenPanels((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** A count only where it means something you would act on. */
+  const railBadge = useCallback((id: FullSurface): string => {
+    if (id === "sub-agents") {
+      const kids = activeSessionInfo?.children?.length ?? 0;
+      return kids > 0 ? String(kids) : "";
+    }
+    if (!panelSummary) return "";
+    if (id === "coverage") return panelSummary.unplanned > 0 ? String(panelSummary.unplanned) : "";
+    if (id === "changes") return panelSummary.fileCount > 0 ? String(panelSummary.fileCount) : "";
+    if (id === "plan") {
+      const left = panelSummary.planTotal - panelSummary.planDone;
+      return panelSummary.planTotal > 0 && left > 0 ? String(left) : "";
+    }
+    return "";
+  }, [panelSummary, activeSessionInfo]);
+
+  const panelSummaryLine = useCallback((id: string): string => {
+    const kids = activeSessionInfo?.children?.length ?? 0;
+    if (id === "sub-agents") {
+      if (kids === 0) return "This agent has not delegated anything.";
+      const blocked = (activeSessionInfo?.children ?? [])
+        .map((c) => sessions.find((x) => x.name === c))
+        .filter((c) => c && queueBucket(c) === "blocked").length;
+      return blocked > 0
+        ? `${kids} sub-agent${kids === 1 ? "" : "s"}, ${blocked} waiting on you.`
+        : `${kids} sub-agent${kids === 1 ? "" : "s"} running under this session.`;
+    }
+    if (!panelSummary) return "Reading the worktree\u2026";
+    if (id === "plan") {
+      if (panelSummary.planTotal === 0) return "No plan file for this session yet.";
+      const left = panelSummary.planTotal - panelSummary.planDone;
+      return `${panelSummary.planDone} of ${panelSummary.planTotal} steps done, ${left} still open.`;
+    }
+    if (id === "coverage") {
+      return panelSummary.unplanned === 0
+        ? "Every changed file maps to a step in the plan."
+        : `${panelSummary.unplanned} changed file${panelSummary.unplanned === 1 ? "" : "s"} map to no step in the plan the agent wrote.`;
+    }
+    if (id === "changes") {
+      if (panelSummary.fileCount === 0) return "Nothing has changed in this worktree yet.";
+      return `${panelSummary.fileCount} file${panelSummary.fileCount === 1 ? "" : "s"} changed, +${panelSummary.plus} \u2212${panelSummary.minus}.`;
+    }
+    if (id === "files") {
+      return panelSummary.fileCount > 0
+        ? `${panelSummary.fileCount} changed file${panelSummary.fileCount === 1 ? "" : "s"} in this tree.`
+        : "Browse the worktree.";
+    }
+    return "";
+  }, [panelSummary, activeSessionInfo, sessions]);
+
+  const panelBadge = useCallback((id: string): string => {
+    const kids = activeSessionInfo?.children?.length ?? 0;
+    if (id === "sub-agents") return kids > 0 ? String(kids) : "";
+    if (!panelSummary) return "";
+    if (id === "plan") return panelSummary.planTotal > 0 ? `${panelSummary.planDone} / ${panelSummary.planTotal}` : "";
+    if (id === "coverage") return panelSummary.unplanned > 0 ? `${panelSummary.unplanned} unplanned` : "";
+    if (id === "changes") return panelSummary.plus + panelSummary.minus > 0 ? `+${panelSummary.plus} \u2212${panelSummary.minus}` : "";
+    return "";
+  }, [panelSummary, activeSessionInfo]);
+
+  useEffect(() => { setMobileApproveDismissed(false); }, [activeSession]);
 
   const mobileInSession = mobileShowTerminal && !!activeSession;
 
@@ -1754,7 +2007,7 @@ export function Dashboard() {
               onClick={() => setSidebarCollapsed(true)}
               title="Collapse sidebar"
             >
-              &laquo;
+              <Icon name="chevl" size={14} />
             </button>
           </div>
         </div>
@@ -1798,7 +2051,8 @@ export function Dashboard() {
               }
             }}
           >
-            <option value="">No grouping</option>
+            <option value="__queue__">Queue &mdash; by what it costs you</option>
+            <option value="">Flat list</option>
             <optgroup label="Sort by">
               <option value="recent">Recently used</option>
               <option value="frequent">Most used</option>
@@ -1823,20 +2077,20 @@ export function Dashboard() {
               }}
               title={collapsedGroups.size > 0 ? "Expand all" : "Collapse all"}
             >
-              {collapsedGroups.size > 0 ? "\u25B8\u25B8" : "\u25BE\u25BE"}
+              <Icon name={collapsedGroups.size > 0 ? "chevr" : "chev"} size={13} />
             </button>
           )}
         </div>
         </div>
         {missingTools.length > 0 && !missingToolsDismissed && (
           <div className="missing-tools-banner">
-            <span className="missing-tools-icon">⚠</span>
+            <span className="missing-tools-icon"><Icon name="alert" size={14} /></span>
             <span className="missing-tools-text">
               Required tool{missingTools.length > 1 ? "s" : ""} not installed:{" "}
               <strong>{missingTools.join(", ")}</strong>.
               {" "}Check Settings → Health for install instructions.
             </span>
-            <button className="missing-tools-dismiss" onClick={() => setMissingToolsDismissed(true)}>✕</button>
+            <button className="missing-tools-dismiss" onClick={() => setMissingToolsDismissed(true)}><Icon name="close" size={13} /></button>
           </div>
         )}
         <div className="session-list" data-tutorial="session-list">
@@ -1855,9 +2109,9 @@ export function Dashboard() {
               {Object.entries(groupedSessions.groups).map(([value, entries]) => (
                 <div
                   key={value}
-                  className={`session-group ${groupBy !== "__status__" && dragIdx !== null ? "session-group-drop-target" : ""}`}
-                  onDragOver={groupBy !== "__status__" ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
-                  onDrop={groupBy !== "__status__" ? (e) => {
+                  className={`session-group ${groupBy !== "__status__" && groupBy !== "__queue__" && dragIdx !== null ? "session-group-drop-target" : ""}`}
+                  onDragOver={groupBy !== "__status__" && groupBy !== "__queue__" ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
+                  onDrop={groupBy !== "__status__" && groupBy !== "__queue__" ? (e) => {
                     e.preventDefault();
                     const sessionName = e.dataTransfer.getData("text/plain");
                     if (sessionName) {
@@ -1870,10 +2124,19 @@ export function Dashboard() {
                     className="session-group-header"
                     onClick={() => toggleGroup(value)}
                   >
-                    <span className="session-group-chevron">{collapsedGroups.has(value) ? "\u25B8" : "\u25BE"}</span>
-                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""}`}>{value}</span>
+                    <span className="session-group-chevron"><Icon name={collapsedGroups.has(value) ? "chevr" : "chev"} size={12} /></span>
+                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""} ${groupBy === "__queue__" ? `queue-${value}` : ""}`}>
+                      {groupBy === "__queue__"
+                        ? (QUEUE_BUCKETS.find((b) => b.id === value)?.label ?? value)
+                        : value}
+                    </span>
                     <span className="session-group-count">{entries.filter(e => !e.isChild).length}</span>
-                    {groupBy !== "__status__" && (
+                    {groupBy === "__queue__" && (
+                      <span className="session-group-cost">
+                        {QUEUE_BUCKETS.find((b) => b.id === value)?.cost}
+                      </span>
+                    )}
+                    {groupBy !== "__status__" && groupBy !== "__queue__" && (
                       <button
                         className="session-group-add"
                         onClick={(e) => { e.stopPropagation(); navigate(`/create?${groupBy}=${encodeURIComponent(value)}`); }}
@@ -1931,7 +2194,7 @@ export function Dashboard() {
                     className="session-group-header session-group-ungrouped"
                     onClick={() => toggleGroup("__ungrouped__")}
                   >
-                    <span className="session-group-chevron">{collapsedGroups.has("__ungrouped__") ? "\u25B8" : "\u25BE"}</span>
+                    <span className="session-group-chevron"><Icon name={collapsedGroups.has("__ungrouped__") ? "chevr" : "chev"} size={12} /></span>
                     <span className="session-group-label">Ungrouped</span>
                     <span className="session-group-count">{groupedSessions.ungrouped.filter(e => !e.isChild).length}</span>
                   </div>
@@ -2034,7 +2297,7 @@ export function Dashboard() {
                   onClick={() => setSidebarCollapsed(false)}
                   title="Expand sidebar"
                 >
-                  &raquo;
+                  <Icon name="chevr" size={14} />
                 </button>
               )}
               <button
@@ -2057,20 +2320,33 @@ export function Dashboard() {
                   <span className="breadcrumb-child">{activeSessionInfo?.displayName}</span>
                 </button>
               )}
+              {!isMobile && activeSessionInfo?.status !== "stopped" && (
+                <button
+                  className="main-tab review-enter"
+                  onClick={() => setFullSurface("changes")}
+                  title="Review this session's changes in a full window"
+                >
+                  <Icon name="diff" size={14} />
+                  review
+                  {panelSummary && panelSummary.unplanned > 0 && (
+                    <span className="review-enter-badge">{panelSummary.unplanned}</span>
+                  )}
+                </button>
+              )}
               <div className="main-tabs-toolbar" ref={toolbarRef} />
             </div>
             <div className="main-content main-content-split" ref={splitContainerRef}>
               <div className="split-terminal-pane" data-tutorial="terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
                 {activeSessionInfo?.status === "stopped" ? (
                   <div className="stopped-session-placeholder">
-                    <div className="stopped-session-icon">◎</div>
+                    <div className="stopped-session-icon"><Icon name="clock" size={40} strokeWidth={1.4} /></div>
                     <div className="stopped-session-title">{activeSessionInfo.displayName}</div>
                     <div className="stopped-session-desc">This session stopped (e.g. after a reboot).<br />Restore it to resume with full conversation history.</div>
                     <button
                       className="btn btn-primary stopped-session-restore-btn"
                       onClick={() => handleRestoreSession(activeSession)}
                     >
-                      ↺ Restore Session
+                      <><Icon name="refresh" size={15} /> Restore Session</>
                     </button>
                   </div>
                 ) : (!isMobile || mobileShowTerminal) && (
@@ -2087,126 +2363,140 @@ export function Dashboard() {
                   />
                 )}
               </div>
-              <div className={`split-bottom-bar${bottomTab ? " split-bottom-bar-open" : ""}`}>
-                <div
-                  className="split-resize-handle"
-                  onMouseDown={handleSplitMouseDown}
+
+              {/* Prompt bar and status strip, per the design's centre column.
+
+                  Typing into a captured tmux pane means typing blind — no
+                  history, no idea whether the pane has focus. This is a real
+                  input that sends explicitly. */}
+              {!isMobile && activeSessionInfo && isBlocked(activeSessionInfo) && (
+                <BlockedCard
+                  key={activeSession}
+                  sessionName={activeSession}
+                  displayName={activeSessionInfo.displayName}
+                  /* The status hooks report *that* an agent is blocked, not the
+                     shape of the ask — so this is always the free-text form.
+                     Enumerated choices and the pending-edit diff would need the
+                     hook payload to carry the permission request itself. */
+                  mode="question"
+                  waited={timeAgo(activeSessionInfo.created)}
+                  question={activeSessionInfo.statusLine?.message || "This agent is waiting on you."}
+                  detail={activeSessionInfo.statusLine?.type === "error"
+                    ? "It reported a failure and stopped rather than guessing."
+                    : undefined}
+                  choices={[]}
+                  replyPlaceholder="Answer it…"
+                  context={[
+                    {
+                      label: "WORKTREE",
+                      text: activeSessionPaths[0] ?? activeSessionInfo.path ?? "—",
+                      sub: `${activeSessionInfo.worktrees?.length ?? 0} repo${(activeSessionInfo.worktrees?.length ?? 0) === 1 ? "" : "s"} in this session`,
+                    },
+                    ...(sharedWith ? [{
+                      label: "ALSO BEING CHANGED BY",
+                      text: sharedWith.session,
+                      sub: `${sharedWith.files} shared file${sharedWith.files === 1 ? "" : "s"}. Whichever merges second has to resolve it.`,
+                      warn: true,
+                    }] : []),
+                    ...(panelSummary && panelSummary.planTotal > 0 ? [{
+                      label: "PLAN PROGRESS",
+                      text: `${panelSummary.planDone} of ${panelSummary.planTotal} steps done`,
+                      sub: panelSummary.unplanned > 0
+                        ? `${panelSummary.unplanned} changed files the plan never mentions.`
+                        : undefined,
+                    }] : []),
+                  ]}
+                  onAnswer={(text) => { sendSessionInput(activeSession, text).catch(() => {}); }}
+                  onChoice={(label) => { sendSessionInput(activeSession, label).catch(() => {}); }}
                 />
-                <div className="split-bottom-tabs">
-                  <div className="plan-tab-wrap" ref={planMenuRef}>
-                    <button
-                      className={`main-tab ${bottomTab === "plan" ? "main-tab-active" : ""}`}
-                      data-tutorial="tab-plan"
-                      onClick={() => setBottomTab(bottomTab === "plan" ? null : "plan")}
-                    >
-                      plan
-                    </button>
-                    {bottomTab === "plan" && (
+              )}
+
+              {!isMobile && (
+                <div className="term-status">
+                  <span className="term-status-live">
+                    <span className="term-status-dot" />connected
+                  </span>
+                  <span className="term-status-path">{activeSessionPaths[0] ?? activeSessionInfo?.path ?? ""}</span>
+                  {panelSummary && (panelSummary.plus + panelSummary.minus > 0) && (
+                    <span className="term-status-diff">
+                      +{panelSummary.plus} &minus;{panelSummary.minus}
+                    </span>
+                  )}
+                  <span className="term-status-agent">
+                    {activeSessionInfo?.agentType === "cursor" ? "cursor" : "claude"}
+                  </span>
+                </div>
+              )}
+              {/* The right rail: icons only. Pressing one opens the surface
+                  fully expanded, rather than docking it in a column. */}
+              {!isMobile ? (
+                <nav className="split-rail" aria-label="Session surfaces">
+                  {RAIL.filter((r) => r.id !== "sub-agents" || hasChildren).map((r) => {
+                    const badge = railBadge(r.id);
+                    return (
                       <button
-                        className="plan-tab-menu-btn"
-                        onClick={() => setPlanMenuOpen(!planMenuOpen)}
+                        key={r.id}
+                        className={`rail-btn${fullSurface === r.id ? " rail-btn-active" : ""}`}
+                        onClick={() => setFullSurface(r.id)}
+                        title={`${r.label}${badge ? ` — ${badge}` : ""}`}
+                        aria-label={`Open ${r.label}${badge ? `, ${badge}` : ""}`}
                       >
-                        &#x22EE;
+                        <Icon name={r.icon} size={18} />
+                        {badge && <span className={`rail-badge rail-badge-${r.id}`}>{badge}</span>}
                       </button>
-                    )}
-                    {planMenuOpen && (
-                      <div className="plan-tab-menu">
-                        <button
-                          className="plan-tab-menu-item"
-                          onClick={() => {
-                            setPlanViewMode(planViewMode === "rendered" ? "raw" : "rendered");
-                            setPlanMenuOpen(false);
-                          }}
-                        >
-                          {planViewMode === "rendered" ? "View raw" : "View rendered"}
-                        </button>
-                        <button
-                          className="plan-tab-menu-item"
-                          onClick={() => {
-                            // Trigger download via a custom event the PlanView listens to
-                            window.dispatchEvent(new Event("plan-download"));
-                            setPlanMenuOpen(false);
-                          }}
-                        >
-                          Download
-                        </button>
-                      </div>
-                    )}
+                    );
+                  })}
+                </nav>
+              ) : (
+                <>
+                  <div className={`split-bottom-bar${bottomTab ? " split-bottom-bar-open" : ""}`}>
+                    <div className="split-bottom-tabs" />
                   </div>
-                  <button
-                    className={`main-tab ${bottomTab === "changes" ? "main-tab-active" : ""}`}
-                    data-tutorial="tab-changes"
-                    onClick={() => setBottomTab(bottomTab === "changes" ? null : "changes")}
-                  >
-                    changes
-                  </button>
-                  {hasChildren && (
-                    <button
-                      className={`main-tab main-tab-sub ${bottomTab === "sub-agents" ? "main-tab-active" : ""}`}
-                      onClick={() => setBottomTab(bottomTab === "sub-agents" ? null : "sub-agents")}
-                    >
-                      sub-agents
-                      <span className="tab-badge">{activeSessionInfo?.children?.length}</span>
-                    </button>
-                  )}
-                  <button
-                    className={`main-tab ${bottomTab === "files" ? "main-tab-active" : ""}`}
-                    onClick={() => setBottomTab(bottomTab === "files" ? null : "files")}
-                  >
-                    files
-                  </button>
                   {bottomTab && (
-                    <button
-                      className="main-tab split-maximize-btn"
-                      onClick={() => setBottomMaximized(!bottomMaximized)}
-                      title={bottomMaximized ? "Restore split" : "Maximize"}
-                    >
-                      {bottomMaximized ? "\u25BD" : "\u25B3"}
-                    </button>
+                    <div className="split-bottom-pane" style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
+                      {bottomTab === "changes" ? (
+                        <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setBottomTab(null)} />
+                      ) : bottomTab === "coverage" ? (
+                        <CoverageView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} />
+                                            ) : bottomTab === "sub-agents" && hasChildren ? (
+                        <SubAgentsView key={activeSession} parentSession={activeSession} sessions={sessions} onSelectChild={(c) => { setActiveSession(c); setBottomTab(null); setMobileShowTerminal(true); }} onRefresh={refresh} />
+                      ) : bottomTab === "files" ? (
+                        <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setBottomTab(null)} />
+                      ) : (
+                        <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+                      )}
+                    </div>
                   )}
-                </div>
-              </div>
-              {bottomTab && (
-                <div className="split-bottom-pane" data-tutorial={bottomTab === "plan" ? "plan-content" : bottomTab === "changes" ? "changes-content" : undefined} style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
-                  {bottomTab === "changes" ? (
-                    <ChangesView
-                      key={activeSession}
-                      sessionName={activeSession}
-                      sessionPaths={activeSessionPaths}
-                      onCommentsSent={() => setBottomTab(null)}
-                    />
-                  ) : bottomTab === "sub-agents" && hasChildren ? (
-                    <SubAgentsView
-                      key={activeSession}
-                      parentSession={activeSession}
-                      sessions={sessions}
-                      onSelectChild={(childName) => {
-                        setActiveSession(childName);
-                        setBottomTab(null);
-                        setMobileShowTerminal(true);
-                      }}
-                      onRefresh={refresh}
-                    />
-                  ) : bottomTab === "files" ? (
-                    <FileExplorer
-                      ref={fileExplorerRef}
-                      roots={activeSessionPaths}
-                      onClose={() => {
-                        setBottomTab(null);
-                        setTimeout(() => window.dispatchEvent(new Event("agentdock-focus-terminal")), 50);
-                      }}
-                    />
-                  ) : (
-                    <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
-                  )}
-                </div>
+                </>
               )}
             </div>
           </>
         ) : (
-          <div className="split-empty">
-            <span className="split-empty-text">select a session</span>
-          </div>
+          <QuietView
+            staleSessions={sessions
+              .filter((x) => queueBucket(x) === "stale")
+              .map((x) => ({
+                name: x.name,
+                displayName: x.displayName,
+                repo: (x.path || "").split("/").filter(Boolean).pop() || "—",
+                age: timeAgo(x.created),
+              }))}
+            onRestore={handleRestoreSession}
+            onRestoreAll={() => {
+              sessions
+                .filter((x) => queueBucket(x) === "stale")
+                .forEach((x) => handleRestoreSession(x.name));
+            }}
+            onStart={(kind) => {
+              if (kind === "chat") {
+                createSession({ targets: [], name: "general-chat", dangerouslySkipPermissions: true })
+                  .then((r) => { if (r.sessions?.[0]) setActiveSession(r.sessions[0]); refresh(); })
+                  .catch(() => {});
+              } else {
+                navigate("/create");
+              }
+            }}
+          />
         )}
       </div>
 
@@ -2248,6 +2538,62 @@ export function Dashboard() {
                       </button>
                     </div>
                   </>
+                ) : setupStep === "hooks" ? (
+                  <>
+                    <p className="setup-description">
+                      Let AgentDock see when an agent needs you.
+                      <span
+                        className="setup-help-icon"
+                        style={{ marginLeft: 6 }}
+                        data-tooltip={"Five lifecycle hooks in ~/.claude/settings.json.\nWithout them the queue reads the terminal to guess an agent's state, which is wrong often enough to matter."}
+                      >i</span>
+                    </p>
+                    <p className="setup-subtle">
+                      This is the difference between knowing an agent is blocked and finding out
+                      ninety seconds later. It writes to <code>~/.claude/settings.json</code>,
+                      outside AgentDock&rsquo;s own config, which is why it asks.
+                    </p>
+
+                    {setupHooks && (
+                      <div className="settings-hook-list" style={{ marginTop: 12 }}>
+                        {setupHooks.events.map((e) => {
+                          const on = setupHooks.installed.includes(e.event);
+                          return (
+                            <div key={e.event} className="settings-hook-row">
+                              <span className={`settings-hook-dot ${on ? "settings-hook-dot-on" : ""}`} />
+                              <span className="settings-hook-event">{e.event}</span>
+                              <span className="settings-hook-status">{e.status}</span>
+                              <span className="settings-hook-means">{e.means}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="setup-actions">
+                      {setupHooks?.ok ? (
+                        <button className="btn btn-primary" onClick={() => setSetupStep("password")}>
+                          Continue
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSetupInstallHooks}
+                          disabled={setupHooksBusy}
+                        >
+                          {setupHooksBusy ? "Installing..." : "Install and continue"}
+                        </button>
+                      )}
+                      <button className="btn" onClick={() => setSetupStep("password")}>
+                        Skip
+                      </button>
+                    </div>
+                    {setupHooks && !setupHooks.ok && (
+                      <p className="setup-subtle" style={{ marginTop: 10 }}>
+                        Skipping falls back to reading the terminal, which is what earlier versions did.
+                      </p>
+                    )}
+                  </>
                 ) : setupStep === "repos" ? (
                   <>
                     <p className="setup-description">
@@ -2283,7 +2629,7 @@ export function Dashboard() {
                       >
                         {setupSaving ? "Adding..." : `Add ${discoveredRepos.filter((r) => r.selected).length} repos`}
                       </button>
-                      <button className="btn" onClick={() => setSetupStep("password")}>
+                      <button className="btn" onClick={() => setSetupStep("hooks")}>
                         Skip
                       </button>
                     </div>
@@ -2291,13 +2637,35 @@ export function Dashboard() {
                 ) : (
                   <>
                     <p className="setup-description">
-                      Optionally set a password to protect the dashboard when accessed over the network.
+                      Who can reach this?
                       <span
                         className="setup-help-icon"
                         style={{ marginLeft: 6 }}
-                        data-tooltip={"Recommended if you access agentdock from your phone or other devices on your network.\nLeave blank if you only use it locally on this machine."}
+                        data-tooltip={"AgentDock runs on your machine. The only question is whether anything else on your network can open it."}
                       >i</span>
                     </p>
+                    <div className="setup-access">
+                      {([
+                        { id: "local" as const, title: "This machine only", detail: "Bound to localhost. Nothing else can connect, and no password is needed." },
+                        { id: "network" as const, title: "Reachable on my network", detail: "So you can answer a blocked agent from your phone. A password is required — this is the whole reason the password exists." },
+                      ]).map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className={`setup-access-card${setupAccess === a.id ? " setup-access-card-on" : ""}`}
+                          onClick={() => setSetupAccess(a.id)}
+                          aria-pressed={setupAccess === a.id}
+                        >
+                          <span className="setup-access-title">
+                            <span className="setup-access-radio" />
+                            {a.title}
+                          </span>
+                          <span className="setup-access-detail">{a.detail}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {setupAccess === "network" && (
+                    <>
                     <label className="form-label">Password</label>
                     <input
                       type="password"
@@ -2318,6 +2686,8 @@ export function Dashboard() {
                         else if (e.key === "Enter") setShowSetup(false);
                       }}
                     />
+                    </>
+                    )}
                     <div className="setup-actions">
                       <button
                         className="btn btn-primary"
@@ -2360,11 +2730,107 @@ export function Dashboard() {
       {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
     </div>
 
+    {/* Review takes the whole window, per the design.
+
+        Review effectiveness falls off sharply when it is cramped, which is the
+        entire reason the design gives it the window rather than a side panel. */}
+    {fullSurface && activeSession && (
+      <div className="review-mode">
+        <div className="review-bar">
+          <button className="review-back" onClick={() => setFullSurface(null)} aria-label="Back to the cockpit">
+            <Icon name="back" size={16} />
+          </button>
+          <span className="review-title">{FULL_TABS.find((t) => t.id === fullSurface)?.label ?? fullSurface}</span>
+          <span className="review-sep">/</span>
+          <span className="review-session">{activeSessionInfo?.displayName}</span>
+          <div className="review-tabs">
+            {FULL_TABS.map((t) => (
+              <button
+                key={t.id}
+                className={`review-tab${fullSurface === t.id ? " review-tab-active" : ""}`}
+                onClick={() => setFullSurface(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <button
+            className={`review-ship${fullSurface === "ship" ? " review-ship-active" : ""}`}
+            onClick={() => setFullSurface("ship")}
+          >
+            <Icon name="merge" size={14} />
+            Ship
+          </button>
+        </div>
+        <div className="review-body">
+          {fullSurface === "coverage" ? (
+            <CoverageView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} />
+          ) : fullSurface === "changes" ? (
+            <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setFullSurface(null)} />
+          ) : fullSurface === "plan" ? (
+            <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+          ) : fullSurface === "files" ? (
+            <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setFullSurface(null)} />
+          ) : fullSurface === "sub-agents" ? (
+            <SubAgentsView
+              key={activeSession}
+              parentSession={activeSession}
+              sessions={sessions}
+              onSelectChild={(c) => { setActiveSession(c); setFullSurface(null); }}
+              onRefresh={refresh}
+            />
+          ) : (
+            <ShipView activeSession={activeSession} />
+          )}
+        </div>
+      </div>
+    )}
+
     {/* FAB: new session, only on session list */}
     {!mobileInSession && (
       <button className="session-fab" onClick={() => navigate("/create")} aria-label="New session">
         +
       </button>
+    )}
+
+    {/* Mobile: the phone's one job the desktop cannot do — unblock an agent
+        while you are away from the machine. So blocked work leads, and the
+        approve sheet is reachable without opening a terminal at all. */}
+    {isMobile && !mobileInSession && !loading && sessions.length > 0 && (
+      <div className="mobile-queue-host">
+        <MobileQueue
+          rows={sessions
+            .filter((x) => !x.parentSession)
+            .map((x) => ({
+              name: x.name,
+              displayName: x.displayName,
+              bucket: queueBucket(x),
+              age: timeAgo(x.created),
+              repo: (x.path || "").split("/").filter(Boolean).pop() || "—",
+              line: x.statusLine?.message || "",
+              cta: queueBucket(x) === "blocked" ? "Answer" : queueBucket(x) === "review" ? "Review" : undefined,
+            }))}
+          onOpen={(name) => { setActiveSession(name); setMobileShowTerminal(true); }}
+          onAction={(name, cta) => {
+            setActiveSession(name);
+            if (cta === "Review") setFullSurface("changes");
+            else setMobileShowTerminal(true);
+          }}
+        />
+      </div>
+    )}
+
+    {isMobile && mobileInSession && activeSessionInfo && isBlocked(activeSessionInfo) && !mobileApproveDismissed && (
+      <MobileApprove
+        displayName={activeSessionInfo.displayName}
+        waited={timeAgo(activeSessionInfo.created)}
+        question={activeSessionInfo.statusLine?.message || "This agent is waiting on you."}
+        conflictWith={sharedWith?.session}
+        onAllowOnce={() => { sendSessionInput(activeSession!, "1").catch(() => {}); setMobileApproveDismissed(true); }}
+        onAllowSession={() => { sendSessionInput(activeSession!, "2").catch(() => {}); setMobileApproveDismissed(true); }}
+        onDeny={(reason) => { sendSessionInput(activeSession!, reason || "no").catch(() => {}); setMobileApproveDismissed(true); }}
+        onDismiss={() => setMobileApproveDismissed(true)}
+      />
     )}
 
     {/* Bottom navigation bar */}
@@ -2373,7 +2839,7 @@ export function Dashboard() {
         className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
         onClick={() => setMobileShowTerminal(false)}
       >
-        <span className="mobile-nav-icon">⊟</span>
+        <span className="mobile-nav-icon"><Icon name="layers" size={20} /></span>
         <span className="mobile-nav-label">Sessions</span>
       </button>
       {mobileInSession && (
@@ -2382,28 +2848,28 @@ export function Dashboard() {
             className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
             onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
           >
-            <span className="mobile-nav-icon">▶</span>
+            <span className="mobile-nav-icon"><Icon name="term" size={20} /></span>
             <span className="mobile-nav-label">Terminal</span>
           </button>
           <button
             className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
             onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
           >
-            <span className="mobile-nav-icon">≡</span>
+            <span className="mobile-nav-icon"><Icon name="plan" size={20} /></span>
             <span className="mobile-nav-label">Plan</span>
           </button>
           <button
             className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
             onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
           >
-            <span className="mobile-nav-icon">±</span>
+            <span className="mobile-nav-icon"><Icon name="diff" size={20} /></span>
             <span className="mobile-nav-label">Changes</span>
           </button>
           <button
             className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
             onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
           >
-            <span className="mobile-nav-icon">⊞</span>
+            <span className="mobile-nav-icon"><Icon name="folder" size={20} /></span>
             <span className="mobile-nav-label">Files</span>
           </button>
         </>
