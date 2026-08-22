@@ -91,7 +91,11 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
 
   // Prompt detection
   const isClaudePrompt = (line: string) => /^❯/.test(line);
-  const isCursorPrompt = (line: string) => /^>\s*$/.test(line) || /^> /.test(line);
+  // Cursor idles on "→ Add a follow-up" inside a box, not on a ">" prompt.
+  // Without this every idle Cursor session fell through to the default below.
+  const isCursorPrompt = (line: string) =>
+    /^>\s*$/.test(line) || /^> /.test(line) || /^[→>]\s*Add a follow-up/.test(line);
+  const isCursorFooter = (line: string) => /^(Auto|Agent)\s+·\s+[\d.]+%/.test(line);
   const isPromptLine = (line: string) => isClaudePrompt(line) || isCursorPrompt(line);
   const isPromptUI = (line: string) => /accept edits|shift.tab|⏵⏵|auto-compact|hold Space/.test(line);
   const hasBackgroundTask = (line: string) => /\(running\)/.test(line);
@@ -120,5 +124,17 @@ export function detectStatus(content: string, _cursorY: number, _scrollPosition:
     return "waiting";
   }
 
-  return "working";
+  if (tail.some(isCursorPrompt) || tail.some(isCursorFooter)) {
+    return "waiting";
+  }
+
+  // An agent that printed its closing [STATUS: …] line has finished its turn.
+  if (tail.some((line) => /\[STATUS:\s*(done|input|error)\s*\|/.test(line))) {
+    return "waiting";
+  }
+
+  // Nothing recognised. "working" used to be the default here, which meant any
+  // unfamiliar TUI showed a whole column of sessions as busy. Not knowing is
+  // not the same as working, and the queue treats unknown as idle.
+  return "unknown";
 }

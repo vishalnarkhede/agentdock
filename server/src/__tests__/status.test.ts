@@ -115,10 +115,14 @@ describe("detectStatus", () => {
     expect(detect("Edit plan\nctrl-g to edit in VS Code")).toBe("waiting");
   });
 
-  // ─── Default to working ───
+  // ─── Unrecognised output ───
 
-  test("defaults to 'working' when no prompt or spinner detected", () => {
-    expect(detect("Processing files...\nUpdated 3 files")).toBe("working");
+  // This used to assert "working". That default is why a column of idle
+  // sessions reported as busy: any TUI the matcher did not know became work in
+  // progress. Not knowing is not the same as working, and the queue treats
+  // unknown as idle.
+  test("reports 'unknown' when no prompt or spinner is recognised", () => {
+    expect(detect("Processing files...\nUpdated 3 files")).toBe("unknown");
   });
 
   // ─── Divider lines are skipped ───
@@ -174,5 +178,39 @@ describe("extractStatusLine", () => {
   test("ignores malformed status lines", () => {
     expect(extractStatusLine("[STATUS: unknown | something]")).toBeNull();
     expect(extractStatusLine("[STATUS: done]")).toBeNull();
+  });
+});
+
+describe("Cursor Agent idle detection", () => {
+  // Captured verbatim from a real idle Cursor session. Before this was
+  // recognised, detectStatus fell through to its "working" default and a whole
+  // column of idle sessions reported as busy.
+  const CURSOR_IDLE = [
+    " [STATUS: done | weekly status from GitHub + Linear]",
+    " ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
+    " → Add a follow-up",
+    " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+    " Auto · 56.7%",
+    " ~/projects/.worktrees/wt-2c0a7d/chat · wt-2c0a7d",
+  ].join("\n");
+
+  test("an idle Cursor session is waiting, not working", () => {
+    expect(detectStatus(CURSOR_IDLE, 0, 0, "cursor")).toBe("waiting");
+  });
+
+  test("the follow-up prompt alone is enough", () => {
+    expect(detectStatus("→ Add a follow-up", 0, 0, "cursor")).toBe("waiting");
+  });
+
+  test("a closing status line means the turn finished", () => {
+    expect(detectStatus("[STATUS: input | which database?]", 0, 0, "cursor")).toBe("waiting");
+  });
+
+  test("a spinner still wins — that session really is working", () => {
+    expect(detectStatus("⠹ thinking about it", 0, 0, "cursor")).toBe("working");
+  });
+
+  test("unrecognised output is unknown rather than assumed busy", () => {
+    expect(detectStatus("some tui nobody has taught us about", 0, 0, "cursor")).toBe("unknown");
   });
 });

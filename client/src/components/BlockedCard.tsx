@@ -8,10 +8,12 @@ import "../styles/blocked.css";
  * A blocked agent costs more than a slow one, so the ask leads and the
  * evidence sits beside it: the plan step it serves, the file it touches and
  * what you already allowed here. Every button the agent offered is a button
- * here, and there is always a way to answer in your own words instead — a
- * fixed set of choices is a guess about the question, not about the answer.
+ * here.
  *
- * Presentation only. The parent owns sending the answer.
+ * Answering in your own words happens in the terminal alongside this card,
+ * which already takes typing — a second text box just duplicated it.
+ *
+ * Presentation only. The parent owns acting on a choice.
  */
 
 export interface BlockedCardProps {
@@ -22,12 +24,10 @@ export interface BlockedCardProps {
   question: string;
   detail?: string;
   choices: { label: string; kind: "primary" | "plain" | "danger" }[];
-  replyPlaceholder: string;
   diff?: { path: string; plus: number; minus: number; lines: { sign: " " | "+" | "-"; text: string }[] };
   context: { label: string; text: string; sub?: string; warn?: boolean }[];
   rememberLabel?: string;
   rememberNote?: string;
-  onAnswer: (text: string) => void;
   onChoice: (label: string) => void;
   onRemember?: (on: boolean) => void;
 }
@@ -45,18 +45,14 @@ export function BlockedCard({
   question,
   detail,
   choices,
-  replyPlaceholder,
   diff,
   context,
   rememberLabel,
   rememberNote,
-  onAnswer,
   onChoice,
   onRemember,
 }: BlockedCardProps) {
-  const [reply, setReply] = useState("");
   const [remember, setRemember] = useState(false);
-  const replyId = `blk-reply-${sessionName}`;
 
   const meta =
     mode === "permission"
@@ -64,13 +60,6 @@ export function BlockedCard({
         ? "Edit · 1 file"
         : ""
       : `Open question · asked ${waited} ago`;
-
-  const send = () => {
-    const text = reply.trim();
-    if (!text) return;
-    onAnswer(text);
-    setReply("");
-  };
 
   const toggleRemember = (on: boolean) => {
     setRemember(on);
@@ -109,6 +98,7 @@ export function BlockedCard({
             </div>
           )}
 
+          {choices.length > 0 && (
           <div className="blk-actions">
             {choices.map((c) => (
               <button
@@ -120,27 +110,8 @@ export function BlockedCard({
                 {c.label}
               </button>
             ))}
-            <div className="blk-reply">
-              <label className="blk-sr" htmlFor={replyId}>
-                Your answer to {displayName}
-              </label>
-              <input
-                id={replyId}
-                className="blk-reply-input"
-                type="text"
-                value={reply}
-                placeholder={replyPlaceholder}
-                onChange={(e) => setReply(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-              />
-              <span className="blk-key" aria-hidden="true">&#8629;</span>
-            </div>
           </div>
+          )}
 
           {rememberLabel && (
             <label className="blk-remember">

@@ -181,42 +181,6 @@
 }
 .blk-btn-danger:hover { background: color-mix(in oklab, var(--intent-danger) 10%, var(--surface-2)); }
 
-.blk-reply {
-  flex: 1;
-  min-width: 160px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: 34px;
-  padding: 0 12px;
-  background: var(--surface-0);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-}
-.blk-reply:focus-within { border-color: var(--focus-ring); }
-
-.blk-reply-input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  outline: none;
-  font-family: inherit;
-  font-size: var(--fs-base);
-  color: var(--text-1);
-}
-.blk-reply-input::placeholder { color: var(--text-4); }
-
-.blk-key {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: max(11px, calc(var(--fs-base) - 3px));
-  color: var(--text-4);
-  border: 1px solid var(--border-subtle);
-  border-radius: 3px;
-  padding: 1px 5px;
-}
-
 /* ─── Remember this answer ─── */
 
 .blk-remember {
@@ -383,7 +347,6 @@
 
 /* The reply field cannot share a row with three buttons in a side panel. */
 @container (max-width: 520px) {
-  .blk-reply { flex-basis: 100%; }
 }
 
 @container (max-width: 900px) {
@@ -393,7 +356,6 @@
 
 @media (max-width: 768px) {
   .blk-btn { height: 44px; }
-  .blk-reply { height: 44px; }
   .blk-remember { padding: 14px 15px; min-height: 44px; }
   .blk-link { min-height: 44px; display: inline-flex; align-items: center; }
 }

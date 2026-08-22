@@ -147,6 +147,7 @@ function SessionRow({
   onToggleSelect?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [restoring, setRestoring] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -310,13 +311,25 @@ function SessionRow({
         {!selectionMode && <div className="session-row-menu-wrap" ref={menuRef}>
           <button
             className="session-row-menu-btn"
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              // .session-list scrolls, so an absolutely positioned menu is
+              // clipped by it — worst at the bottom of the list, which is
+              // exactly where stopped sessions sit.
+              const r = e.currentTarget.getBoundingClientRect();
+              const MENU_H = 260;
+              setMenuPos({
+                top: r.bottom + MENU_H > window.innerHeight ? r.top - MENU_H : r.bottom + 4,
+                right: Math.max(8, window.innerWidth - r.right),
+              });
+              setMenuOpen(!menuOpen);
+            }}
             aria-label="Session actions"
           >
             <Icon name="more" size={16} />
           </button>
-          {menuOpen && (
-            <div className="session-row-menu">
+          {menuOpen && menuPos && createPortal(
+            <div className="session-row-menu" style={{ top: menuPos.top, right: menuPos.right }}>
               {onTogglePin && (
                 <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); }}>
                   {pinned ? "Unpin" : "Pin to top"}
@@ -346,7 +359,8 @@ function SessionRow({
               <button className="session-row-menu-item danger" onClick={handleKill}>
                 {session.status === "stopped" ? "Delete" : "Kill session"}
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>}
       </div>
@@ -1924,20 +1938,17 @@ export function Dashboard() {
                 )}
               </div>
 
-              {/* Prompt bar and status strip, per the design's centre column.
-
-                  Typing into a captured tmux pane means typing blind — no
-                  history, no idea whether the pane has focus. This is a real
-                  input that sends explicitly. */}
+              {/* Surfaces what the agent is asking and the context to decide
+                  well. Answering happens in the terminal beside it. */}
               {!isMobile && activeSessionInfo && isBlocked(activeSessionInfo) && (
                 <BlockedCard
                   key={activeSession}
                   sessionName={activeSession}
                   displayName={activeSessionInfo.displayName}
-                  /* The status hooks report *that* an agent is blocked, not the
-                     shape of the ask — so this is always the free-text form.
-                     Enumerated choices and the pending-edit diff would need the
-                     hook payload to carry the permission request itself. */
+                  /* The status hooks report *that* an agent is blocked, not
+                     the shape of the ask, so there are no buttons to offer yet.
+                     Enumerated choices would need the hook payload to carry the
+                     permission request itself. */
                   mode="question"
                   waited={timeAgo(activeSessionInfo.created)}
                   question={activeSessionInfo.statusLine?.message || "This agent is waiting on you."}
@@ -1945,7 +1956,6 @@ export function Dashboard() {
                     ? "It reported a failure and stopped rather than guessing."
                     : undefined}
                   choices={[]}
-                  replyPlaceholder="Answer it…"
                   context={[
                     {
                       label: "WORKTREE",
@@ -1966,7 +1976,6 @@ export function Dashboard() {
                         : undefined,
                     }] : []),
                   ]}
-                  onAnswer={(text) => { sendSessionInput(activeSession, text).catch(() => {}); }}
                   onChoice={(label) => { sendSessionInput(activeSession, label).catch(() => {}); }}
                 />
               )}

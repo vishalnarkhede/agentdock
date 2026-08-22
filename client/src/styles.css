@@ -1248,12 +1248,12 @@ h1 {
 }
 
 .session-row-menu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 100;
-  background: var(--card-bg, var(--bg));
-  border: 1px solid var(--border);
+  /* Fixed and portalled to <body>: --card-bg was never defined, and the
+     absolute position was clipped by the scrolling session list. */
+  position: fixed;
+  z-index: 300;
+  background: var(--surface-float);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   min-width: 140px;
