@@ -171,14 +171,36 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [isActive]);
 
-  // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
+  /**
+   * Refit whenever the wrapper changes size — keyboard, window resize, opening
+   * a surface, toggling the sidebar.
+   *
+   * The refit must be told to tmux. It used to fit silently, so xterm shrank
+   * while the pane kept its old height and the two drifted apart. The cursor
+   * is placed by absolute row from tmux's report, so a three-row difference
+   * put it three rows above the input box — on the border, where it looks
+   * like there is no cursor at all.
+   */
   useEffect(() => {
     if (!containerRef.current) return;
+    let last = "";
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
       fitAddonRef.current?.fit();
+      const term = termRef.current;
+      if (!term) return;
+      const size = `${term.cols}x${term.rows}`;
+      if (size === last) return;
+      last = size;
+      if (timer) clearTimeout(timer);
+      // Debounced: a drag emits a resize per frame, and each one is a tmux call.
+      timer = setTimeout(() => sendResizeRef.current(term.cols, term.rows), 80);
     });
     ro.observe(containerRef.current);
-    return () => ro.disconnect();
+    return () => {
+      if (timer) clearTimeout(timer);
+      ro.disconnect();
+    };
   }, []);
 
   // Non-passive touchmove listener so we can call preventDefault and prevent
@@ -414,6 +436,21 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     // \x1b[H = cursor to home, \x1b[2J = erase display, \x1bc = full reset (parser + screen).
     // Using \x1bc inside write() resets the ANSI parser AND clears the screen within
     // the same render pass, eliminating the flicker that term.reset() caused.
+    /**
+     * KNOWN OFF BY ONE, diagnosed but not fixed.
+     *
+     * tmux is right: cursor_y equals the capture line holding the ❯ prompt,
+     * measured at the same instant. But xterm renders that content one row
+     * lower — capture line 0 is "} else {" while DOM row 0 is blank — so this
+     * absolute positioning lands on the box border above the input box, which
+     * reads as the cursor being missing.
+     *
+     * Tried and rejected, none of which moved it: anchoring up from the last
+     * written line, disabling auto-wrap for the write (DECAWM off) in case a
+     * full-width line added a row, homing explicitly after the reset, and
+     * stripping leading newlines. A magic +1 would paper over it without
+     * explaining the blank first row, so it is left alone.
+     */
     const row = snapshot.cursorY + 1;
     const col = snapshot.cursorX + 1;
     term.write(

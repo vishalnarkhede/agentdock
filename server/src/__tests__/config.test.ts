@@ -4,10 +4,10 @@
  * Uses a temp directory (set by test-preload.ts) to avoid touching real config files.
  */
 
-import { describe, test, expect, beforeEach, afterAll } from "bun:test";
-import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync, mkdtempSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import * as config from "../services/config";
 
 // AGENTDOCK_CONFIG_DIR was set to a temp dir by test-preload.ts before config.ts loaded
@@ -443,5 +443,79 @@ describe("DbShards", () => {
     config.addDbShard({ name: "my-shard", host: "h", port: 1, database: "d", user: "u", password: "p" });
     expect(config.getDbShard("my-shard")).toBeDefined();
     expect(config.getDbShard("unknown")).toBeUndefined();
+  });
+});
+
+describe("resolveAlias with a directory path", () => {
+  // "Fork this session here" sends the worktree path, which is never a
+  // configured alias. It used to fail with
+  // "Unknown alias: /Users/…/.worktrees/wt-abc123/chat".
+  //
+  // Sandboxed under the test config dir. An earlier version of this block
+  // computed the base as ~/projects and created directories in the real one.
+  // Its own temp root, not under CONFIG_DIR — other suites wipe that between
+  // files, which made these pass alone and fail in the full run.
+  let base: string;
+
+  let prevEnv: string | undefined;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), "agentdock-alias-"));
+    // getBasePath() checks this env var before the config file, and another
+    // suite sets it at module scope, which leaks across files in one bun run.
+    prevEnv = process.env.AGENTDOCK_BASE_PATH;
+    process.env.AGENTDOCK_BASE_PATH = base;
+    config.setBasePath(base);
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.AGENTDOCK_BASE_PATH;
+    else process.env.AGENTDOCK_BASE_PATH = prevEnv;
+  });
+
+  afterAll(() => {
+    try { rmSync(base, { recursive: true, force: true }); } catch { /* already gone */ }
+  });
+
+  test("still resolves a configured alias", () => {
+    config.addRepo({ alias: "demo", path: join(base, "demo") });
+    expect(config.resolveAlias("demo")?.path).toBe(join(base, "demo"));
+  });
+
+  test("resolves an existing directory inside the base path", () => {
+    const dir = join(base, "forked-repo");
+    mkdirSync(dir, { recursive: true });
+    const r = config.resolveAlias(dir);
+    expect(r?.path).toBe(dir);
+    expect(r?.alias).toBe("forked-repo");
+  });
+
+  test("resolves a worktree path, the case that was broken", () => {
+    const wt = join(base, ".worktrees", "wt-abc123", "chat");
+    mkdirSync(wt, { recursive: true });
+    expect(config.resolveAlias(wt)?.path).toBe(wt);
+  });
+
+  test("refuses a directory outside the base path", () => {
+    expect(config.resolveAlias("/etc")).toBeUndefined();
+    expect(config.resolveAlias("/")).toBeUndefined();
+  });
+
+  test("refuses a traversal that escapes the base path", () => {
+    expect(config.resolveAlias(join(base, "..", "..", "etc"))).toBeUndefined();
+  });
+
+  test("refuses a path that does not exist", () => {
+    expect(config.resolveAlias(join(base, "definitely-not-here"))).toBeUndefined();
+  });
+
+  test("refuses a file, since an agent needs a directory", () => {
+    const f = join(base, "a-file.txt");
+    writeFileSync(f, "x");
+    expect(config.resolveAlias(f)).toBeUndefined();
+  });
+
+  test("an unknown bare name is still unknown", () => {
+    expect(config.resolveAlias("no-such-alias")).toBeUndefined();
   });
 });

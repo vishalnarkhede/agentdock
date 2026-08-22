@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync, renameSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync, renameSync, statSync } from "fs";
 import { join, resolve } from "path";
 import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
 
@@ -153,7 +153,22 @@ export function resolveAlias(alias: string): RepoConfig | undefined {
   if (alias === "__agentdock__") {
     return { alias: "agentdock", path: AGENTDOCK_REPO_DIR };
   }
-  return getRepos().find((r) => r.alias === alias);
+  const known = getRepos().find((r) => r.alias === alias);
+  if (known) return known;
+
+  // An absolute directory is a valid target too. "Fork this session here" sends
+  // the worktree path, which is never a configured alias — it used to fail with
+  // "Unknown alias: /Users/…/.worktrees/wt-abc123/chat". Confined to the base
+  // path so a request cannot start an agent anywhere on disk.
+  if (alias.startsWith("/")) {
+    const resolved = resolve(alias);
+    const base = resolve(getBasePath());
+    const inside = resolved === base || resolved.startsWith(base + "/");
+    if (inside && existsSync(resolved) && statSync(resolved).isDirectory()) {
+      return { alias: resolved.split("/").filter(Boolean).pop() || resolved, path: resolved };
+    }
+  }
+  return undefined;
 }
 
 
