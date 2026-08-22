@@ -1075,10 +1075,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 {editing ? (
                   <>
                     <span className={`fe-editbar-state${dirty ? " fe-editbar-dirty" : ""}`}>
-                      {dirty ? "\u25cf unsaved" : "no changes"}
+                      {dirty ? "● unsaved" : "no changes"}
                     </span>
                     <button className="fe-editbtn fe-editbtn-primary" onClick={() => save()} disabled={!dirty || saving}>
-                      {saving ? "saving\u2026" : "save"}<kbd>\u2318S</kbd>
+                      {saving ? "saving…" : "save"}<kbd>⌘S</kbd>
                     </button>
                     <button className="fe-editbtn" onClick={stopEditing}>done</button>
                   </>
@@ -1103,6 +1103,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 </div>
               )}
 
+              <div className="fe-code-scroll">
               <pre
                 ref={fileContentRef}
                 className={`fe-file-content${modDown ? " fe-code-navmode" : ""}`}
@@ -1132,6 +1133,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   style={editorMetrics}
                 />
               )}
+              </div>
 
               {navBusy && <div className="fe-nav-busy">looking up…</div>}
 

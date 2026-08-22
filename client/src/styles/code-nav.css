@@ -269,13 +269,22 @@
 
 .fe-conflict-actions button:hover { color: var(--text-1); border-color: var(--border-strong); }
 
+/* Own positioning context: inset:0 on the wrapper put the overlay on top of
+   the toolbar, which swallowed every click on save and done. */
+.fe-code-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* The textarea sits exactly on top of the highlighted code: invisible text,
    visible caret. Every metric below must match .fe-file-content or the caret
    drifts away from the glyphs underneath it. */
 .fe-editor {
   position: absolute;
   inset: 0;
-  top: var(--fe-edit-offset, 0);
   z-index: 5;
   margin: 0;
   border: 0;

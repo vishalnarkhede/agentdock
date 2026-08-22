@@ -11,6 +11,7 @@ import { fetchHookState, installHooks, type HookState } from "../api";
 import { CoverageView } from "../components/CoverageView";
 import { ShipView } from "../components/ShipView";
 import { PlanView } from "../components/PlanView";
+import "../styles/sidebar-header.css";
 import { QUEUE_BUCKETS, queueBucket } from "../queue";
 import { fetchConflicts, fetchCoverage } from "../api";
 import { BlockedCard } from "../components/BlockedCard";
@@ -447,6 +448,89 @@ function SessionEditModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Rare and destructive sidebar actions. Kill-all was previously the largest,
+ * loudest control in the sidebar; here it takes a deliberate second step and
+ * sits below a separator.
+ */
+function SidebarMenu({
+  canSelect,
+  canKillAll,
+  onSelect,
+  onKillAll,
+  groupAction,
+}: {
+  canSelect: boolean;
+  canKillAll: boolean;
+  onSelect: () => void;
+  onKillAll: () => void;
+  groupAction?: { label: string; run: () => void };
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!btnRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    // Fixed + portal: the sidebar scrolls and clips, so an absolute menu here
+    // would be cut off.
+    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    setOpen((v) => !v);
+  };
+
+  if (!canSelect && !canKillAll && !groupAction) return null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        className={`sidebar-iconbtn${open ? " sidebar-iconbtn-on" : ""}`}
+        onClick={toggle}
+        title="More actions"
+        aria-label="More actions"
+        aria-expanded={open}
+      >
+        &#8943;
+      </button>
+      {open && pos && createPortal(
+        <div className="sidebar-menu" style={{ top: pos.top, right: pos.right }} role="menu">
+          {groupAction && (
+            <button className="sidebar-menu-item" role="menuitem" onClick={() => { setOpen(false); groupAction.run(); }}>
+              {groupAction.label}
+            </button>
+          )}
+          {canSelect && (
+            <button className="sidebar-menu-item" role="menuitem" onClick={() => { setOpen(false); onSelect(); }}>
+              Select multiple…
+            </button>
+          )}
+          {canSelect && canKillAll && <div className="sidebar-menu-sep" />}
+          {canKillAll && (
+            <button className="sidebar-menu-item danger" role="menuitem" onClick={() => { setOpen(false); onKillAll(); }}>
+              Kill all sessions
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -1457,39 +1541,13 @@ export function Dashboard() {
     <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <div className="split-sidebar">
         <div className="sidebar-header">
-          <span className="sidebar-title">sessions</span>
-          <div className="sidebar-actions">
-            {selectionMode ? (
-              <button className="btn btn-sm" onClick={handleExitSelectionMode}>cancel</button>
-            ) : (
-              <>
-                {sessions.length > 1 && (
-                  <button className="sidebar-select-link" onClick={() => setSelectionMode(true)}>select</button>
-                )}
-                {sessions.length > 0 && (
-                  <button className="btn btn-stop btn-sm" onClick={handleStopAll}>kill --all</button>
-                )}
-                <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")} data-tutorial="new-session-btn">+ new</button>
-              </>
-            )}
-            <button
-              className="btn btn-sm sidebar-collapse-btn"
-              onClick={() => setSidebarCollapsed(true)}
-              title="Collapse sidebar"
-            >
-              <Icon name="chevl" size={14} />
-            </button>
-          </div>
-        </div>
-
-        <div className="session-toolbar-row">
-        {sessions.length > 0 && (
-          <div className="session-search-wrap">
+          <div className="sidebar-search">
+            <Icon name="search" size={13} />
             <input
               ref={sessionSearchRef}
               type="text"
-              className="session-search"
-              placeholder="Search sessions... (⌘K)"
+              className="sidebar-search-input"
+              placeholder="Search sessions…"
               value={sessionSearch}
               onChange={(e) => setSessionSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -1499,58 +1557,90 @@ export function Dashboard() {
                 }
               }}
             />
+            {sessionSearch ? (
+              <button className="sidebar-search-clear" onClick={() => setSessionSearch("")} aria-label="Clear search">&times;</button>
+            ) : (
+              <kbd className="sidebar-search-kbd">&#8984;K</kbd>
+            )}
           </div>
-        )}
-        <div className="session-group-by-wrap">
-          <span className="session-group-by-icon">&#x25A4;</span>
-          <select
-            className="session-group-by-select"
-            data-tutorial="group-by-select"
-            title="Sort or group sessions"
-            value={sortBy || groupBy}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "recent" || v === "frequent") {
-                setSortBy(v);
-                setGroupBy("");
-                updatePreferences({ sortBy: v, groupBy: "" });
-              } else {
-                setGroupBy(v);
-                setSortBy("");
-                updatePreferences({ groupBy: v, sortBy: "" });
-              }
-            }}
+          <button
+            className="sidebar-iconbtn"
+            onClick={() => setSidebarCollapsed(true)}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
           >
-            <option value="__queue__">Queue &mdash; by what it costs you</option>
-            <option value="">Flat list</option>
-            <optgroup label="Sort by">
-              <option value="recent">Recently used</option>
-              <option value="frequent">Most used</option>
-            </optgroup>
-            <optgroup label="Group by">
-              <option value="__status__">Status</option>
-              {metaPresets.map((p) => (
-                <option key={p.key} value={p.key}>{p.label}</option>
-              ))}
-            </optgroup>
-          </select>
-          {groupBy && groupedSessions && (
-            <button
-              className="session-group-collapse-all"
-              onClick={() => {
-                const allKeys = [...Object.keys(groupedSessions.groups)];
-                if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
-                const allCollapsed = allKeys.every(k => collapsedGroups.has(k));
-                const next = allCollapsed ? new Set<string>() : new Set(allKeys);
-                setCollapsedGroups(next);
-                updatePreferences({ collapsedGroups: [...next] });
-              }}
-              title={collapsedGroups.size > 0 ? "Expand all" : "Collapse all"}
-            >
-              <Icon name={collapsedGroups.size > 0 ? "chevr" : "chev"} size={13} />
-            </button>
-          )}
+            <Icon name="chevl" size={14} />
+          </button>
         </div>
+
+        <div className="sidebar-controls">
+          {selectionMode ? (
+            <>
+              <span className="sidebar-count">{selectedSessions.size} selected</span>
+              <span className="sidebar-controls-spacer" />
+              <button className="sidebar-textbtn" onClick={handleExitSelectionMode}>cancel</button>
+            </>
+          ) : (
+            <>
+              <select
+                className="sidebar-mode"
+                data-tutorial="group-by-select"
+                title="Sort or group sessions"
+                value={sortBy || groupBy}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "recent" || v === "frequent") {
+                    setSortBy(v);
+                    setGroupBy("");
+                    updatePreferences({ sortBy: v, groupBy: "" });
+                  } else {
+                    setGroupBy(v);
+                    setSortBy("");
+                    updatePreferences({ groupBy: v, sortBy: "" });
+                  }
+                }}
+              >
+                <option value="__queue__">Queue</option>
+                <option value="">Flat list</option>
+                <optgroup label="Sort by">
+                  <option value="recent">Recently used</option>
+                  <option value="frequent">Most used</option>
+                </optgroup>
+                <optgroup label="Group by">
+                  <option value="__status__">Status</option>
+                  {metaPresets.map((p) => (
+                    <option key={p.key} value={p.key}>{p.label}</option>
+                  ))}
+                </optgroup>
+              </select>
+
+              <span className="sidebar-controls-spacer" />
+              <span className="sidebar-count">
+                {sessions.length} session{sessions.length === 1 ? "" : "s"}
+              </span>
+              <SidebarMenu
+                canSelect={sessions.length > 1}
+                canKillAll={sessions.length > 0}
+                onSelect={() => setSelectionMode(true)}
+                onKillAll={handleStopAll}
+                groupAction={
+                  groupBy && groupedSessions
+                    ? {
+                        label: collapsedGroups.size > 0 ? "Expand all groups" : "Collapse all groups",
+                        run: () => {
+                          const allKeys = [...Object.keys(groupedSessions.groups)];
+                          if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
+                          const allCollapsed = allKeys.every((k) => collapsedGroups.has(k));
+                          const next = allCollapsed ? new Set<string>() : new Set(allKeys);
+                          setCollapsedGroups(next);
+                          updatePreferences({ collapsedGroups: [...next] });
+                        },
+                      }
+                    : undefined
+                }
+              />
+            </>
+          )}
         </div>
         {missingTools.length > 0 && !missingToolsDismissed && (
           <div className="missing-tools-banner">

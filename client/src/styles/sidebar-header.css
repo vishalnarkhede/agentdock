@@ -1,0 +1,183 @@
+/* Sidebar header: search, then one control strip. Was three stacked bands
+   (146px before the first session) with four different control heights. */
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px 5px;
+  flex: 0 0 auto;
+}
+
+.sidebar-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.sidebar-search:focus-within {
+  border-color: var(--border-strong);
+}
+
+.sidebar-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}
+
+.sidebar-search-input::placeholder { color: var(--text-4); }
+
+.sidebar-search-kbd {
+  flex: 0 0 auto;
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+}
+
+.sidebar-search-clear {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.sidebar-search-clear:hover { color: var(--text-1); }
+
+/* One height for every control in this region. */
+.sidebar-iconbtn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  line-height: 1;
+}
+
+.sidebar-iconbtn:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.sidebar-iconbtn-on {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+
+.sidebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 7px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex: 0 0 auto;
+}
+
+.sidebar-controls-spacer { flex: 1 1 auto; }
+
+/* Native select on purpose: the OS draws its popup, so it is opaque on every
+   theme and keyboard-accessible for free. */
+.sidebar-mode {
+  height: 26px;
+  max-width: 55%;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  cursor: pointer;
+}
+
+.sidebar-mode:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.sidebar-count {
+  color: var(--text-4);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sidebar-textbtn {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.sidebar-textbtn:hover { background: var(--hover); color: var(--text-1); }
+
+.sidebar-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 170px;
+  padding: 4px 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+
+.sidebar-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}
+
+.sidebar-menu-item:hover { background: var(--hover); color: var(--text-1); }
+
+.sidebar-menu-item.danger { color: var(--intent-danger); }
+
+.sidebar-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-subtle);
+}
+
+@media (max-width: 780px) {
+  .sidebar-search { height: 38px; }
+  .sidebar-iconbtn { width: 38px; height: 38px; }
+  .sidebar-mode, .sidebar-textbtn { height: 38px; }
+  .sidebar-menu-item { padding: 12px; min-height: 44px; }
+}
