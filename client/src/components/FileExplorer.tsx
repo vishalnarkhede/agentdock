@@ -435,7 +435,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   // Filename search state
   const fileSearchRef = useRef<FileSearchHandle>(null);
-  const pendingMarkLineRef = useRef<number | null>(null);
+  const pendingMarkRef = useRef<{ path: string; line: number | null } | null>(null);
+  // Bumped on every open-from-search, so clicking a second match in the file
+  // already on screen still moves the active highlight.
+  const [markNonce, setMarkNonce] = useState(0);
 
   // When opening a grep result, remember target line to scroll to after render
   const targetLineRef = useRef<number | null>(null);
@@ -524,19 +527,29 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     }
 
     setFileSearchMatchCount(marks.length);
-    const wanted = pendingMarkLineRef.current;
-    pendingMarkLineRef.current = null;
+
+    const pending = pendingMarkRef.current;
+    const forThisFile = pending !== null && openFile?.path === pending.path;
     const onWantedLine =
-      wanted === null ? -1 : marks.findIndex((m) => Number(m.dataset.line) === wanted);
+      forThisFile && pending.line !== null
+        ? marks.findIndex((m) => Number(m.dataset.line) === pending.line)
+        : -1;
+    if (forThisFile) pendingMarkRef.current = null;
+
     const clampedIdx =
       onWantedLine >= 0
         ? onWantedLine
         : Math.min(fileSearchIdx, Math.max(marks.length - 1, 0));
     setFileSearchIdx(clampedIdx);
     marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === clampedIdx));
-    scrollMarkIntoView(pre, marks[clampedIdx]);
+    if (marks[clampedIdx]) {
+      scrollMarkIntoView(pre, marks[clampedIdx]);
+      // The line-arithmetic scroll below would otherwise fight this and land
+      // slightly off, since it cannot see wrapped lines.
+      targetLineRef.current = null;
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openFile, fileSearchQuery, fileSearchActive]);
+  }, [openFile, fileSearchQuery, fileSearchActive, markNonce]);
 
   // Sync active mark when index changes
   useEffect(() => {
@@ -741,9 +754,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             if (term) {
               // Reuse the in-file search: the term lights up everywhere in the
               // file and the match on the clicked line becomes the active one.
-              pendingMarkLineRef.current = line ?? null;
+              pendingMarkRef.current = { path, line: line ?? null };
               setFileSearchQuery(term);
               setFileSearchActive(true);
+              setMarkNonce((n) => n + 1);
             }
             if (line) handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
             else handleOpenFile(path);
