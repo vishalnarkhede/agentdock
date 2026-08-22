@@ -3,6 +3,7 @@ import { fetchFsDir, fetchFsFile } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
 import { FileSearch, type FileSearchHandle } from "./FileSearch";
+import { markHtml } from "../mark-html";
 import "../styles/files.css";
 import "highlight.js/styles/atom-one-dark.css";
 import hljs from "highlight.js/lib/core";
@@ -428,7 +429,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // File search (Cmd+F)
   const [fileSearchActive, setFileSearchActive] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
-  const [fileSearchMatchCount, setFileSearchMatchCount] = useState(0);
   const [fileSearchIdx, setFileSearchIdx] = useState(0);
   const fileContentRef = useRef<HTMLPreElement>(null);
   const fileSearchInputRef = useRef<HTMLInputElement>(null);
@@ -467,98 +467,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [openFile]);
-
-  // Apply/clear in-file search marks in DOM
-  useEffect(() => {
-    const pre = fileContentRef.current;
-    if (!pre) return;
-
-    // Clear existing marks — extract children back into parent, then remove the mark
-    // NOTE: do NOT call parent.normalize() here — it merges adjacent text nodes and
-    // destroys any active browser text selection.
-    pre.querySelectorAll("mark.fe-match").forEach((el) => {
-      const parent = el.parentNode;
-      if (parent) {
-        while (el.firstChild) parent.insertBefore(el.firstChild, el);
-        parent.removeChild(el);
-      }
-    });
-
-    if (!fileSearchQuery.trim() || !fileSearchActive) {
-      setFileSearchMatchCount(0);
-      return;
-    }
-
-    const query = fileSearchQuery.toLowerCase();
-    const marks: HTMLElement[] = [];
-    const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
-    const textNodes: Text[] = [];
-    let node: Text | null;
-    while ((node = walker.nextNode() as Text | null)) {
-      textNodes.push(node);
-    }
-
-    let line = 1;
-    for (const textNode of textNodes) {
-      const text = textNode.textContent || "";
-      const lower = text.toLowerCase();
-      let start = 0;
-      let idx: number;
-      const parts: (string | HTMLElement)[] = [];
-      while ((idx = lower.indexOf(query, start)) !== -1) {
-        if (idx > start) parts.push(text.slice(start, idx));
-        const mark = document.createElement("mark");
-        mark.className = "fe-match";
-        mark.textContent = text.slice(idx, idx + query.length);
-        mark.dataset.line = String(line + countNewlines(text, 0, idx));
-        parts.push(mark);
-        marks.push(mark);
-        start = idx + query.length;
-      }
-      line += countNewlines(text, 0, text.length);
-      if (parts.length > 0) {
-        if (start < text.length) parts.push(text.slice(start));
-        const frag = document.createDocumentFragment();
-        for (const p of parts) {
-          frag.appendChild(typeof p === "string" ? document.createTextNode(p) : p);
-        }
-        textNode.parentNode?.replaceChild(frag, textNode);
-      }
-    }
-
-    setFileSearchMatchCount(marks.length);
-
-    const pending = pendingMarkRef.current;
-    const forThisFile = pending !== null && openFile?.path === pending.path;
-    const onWantedLine =
-      forThisFile && pending.line !== null
-        ? marks.findIndex((m) => Number(m.dataset.line) === pending.line)
-        : -1;
-    if (forThisFile) pendingMarkRef.current = null;
-
-    const clampedIdx =
-      onWantedLine >= 0
-        ? onWantedLine
-        : Math.min(fileSearchIdx, Math.max(marks.length - 1, 0));
-    setFileSearchIdx(clampedIdx);
-    marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === clampedIdx));
-    if (marks[clampedIdx]) {
-      scrollMarkIntoView(pre, marks[clampedIdx]);
-      // The line-arithmetic scroll below would otherwise fight this and land
-      // slightly off, since it cannot see wrapped lines.
-      targetLineRef.current = null;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openFile, fileSearchQuery, fileSearchActive, markNonce]);
-
-  // Sync active mark when index changes
-  useEffect(() => {
-    const pre = fileContentRef.current;
-    if (!pre) return;
-    const marks = Array.from(pre.querySelectorAll<HTMLElement>("mark.fe-match"));
-    marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === fileSearchIdx));
-    scrollMarkIntoView(pre, marks[fileSearchIdx]);
-  }, [fileSearchIdx]);
 
   const closeFileSearch = useCallback(() => {
     setFileSearchActive(false);
@@ -605,20 +513,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       targetLineRef.current = null;
     }
   }, [openFile, roots]);
-
-  const handleFileSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeFileSearch();
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (fileSearchMatchCount === 0) return;
-      const delta = e.shiftKey ? -1 : 1;
-      setFileSearchIdx((i) => (i + delta + fileSearchMatchCount) % fileSearchMatchCount);
-    }
-  }, [fileSearchMatchCount, closeFileSearch]);
 
   const handleToggleDir = useCallback(async (path: string) => {
     setExpandedDirs((prev) => {
@@ -728,10 +622,61 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // Memoize highlighted HTML — prevents React from needlessly resetting the code element's
   // innerHTML on unrelated state changes (e.g. fileSearchIdx), which would destroy marks
   // and any in-progress text selection.
-  const highlightedHtml = useMemo(
-    () => openFile ? highlight(openFile.content, openFile.language) : "",
+  const baseHtml = useMemo(
+    () => (openFile ? highlight(openFile.content, openFile.language) : ""),
     [openFile],
   );
+
+  // Marks are rendered by React rather than injected afterwards. Injecting
+  // them into this subtree meant the next commit re-applied the whole string
+  // and deleted every mark a few milliseconds after it was created.
+  const marked = useMemo(
+    () =>
+      fileSearchActive && fileSearchQuery.trim()
+        ? markHtml(baseHtml, fileSearchQuery.trim(), fileSearchIdx)
+        : { html: baseHtml, lines: [] as number[], count: 0 },
+    [baseHtml, fileSearchQuery, fileSearchActive, fileSearchIdx],
+  );
+  const highlightedHtml = marked.html;
+  const fileSearchMatchCount = marked.count;
+
+  const handleFileSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeFileSearch();
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (fileSearchMatchCount === 0) return;
+      const delta = e.shiftKey ? -1 : 1;
+      setFileSearchIdx((i) => (i + delta + fileSearchMatchCount) % fileSearchMatchCount);
+    }
+  }, [fileSearchMatchCount, closeFileSearch]);
+
+  // Land on the match the user clicked in the search results, not the first in
+  // the file. Consumed only once the file it names is the one on screen.
+  useEffect(() => {
+    const pending = pendingMarkRef.current;
+    if (!pending || openFile?.path !== pending.path) return;
+    pendingMarkRef.current = null;
+    if (pending.line === null || marked.lines.length === 0) return;
+    const idx = marked.lines.indexOf(pending.line);
+    if (idx >= 0) setFileSearchIdx(idx);
+  }, [openFile, marked.lines, markNonce]);
+
+
+  // The active class is baked into the rendered html, so this only scrolls.
+  useEffect(() => {
+    const pre = fileContentRef.current;
+    if (!pre) return;
+    const active = pre.querySelector<HTMLElement>("mark.fe-match-active");
+    if (active) {
+      scrollMarkIntoView(pre, active);
+      targetLineRef.current = null;
+    }
+  }, [fileSearchIdx, highlightedHtml]);
+
 
   // Relative path from root for breadcrumb
   function getBreadcrumb(filePath: string): string {
