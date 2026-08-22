@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
-import { fetchFsDir, fetchFsFile, searchFsFiles, grepFsFiles } from "../api";
+import { fetchFsDir, fetchFsFile } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
+import { FileSearch, type FileSearchHandle } from "./FileSearch";
 import "../styles/files.css";
 import "highlight.js/styles/atom-one-dark.css";
 import hljs from "highlight.js/lib/core";
@@ -60,11 +61,6 @@ interface OpenFile {
   size: number;
 }
 
-interface SearchResult {
-  path: string;
-  name: string;
-  type: "file" | "dir";
-}
 
 // Map of dirPath → entries (only what's been expanded)
 type DirContents = Map<string, FsEntry[]>;
@@ -432,30 +428,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const fileSearchInputRef = useRef<HTMLInputElement>(null);
 
   // Filename search state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [focusedResultIdx, setFocusedResultIdx] = useState<number>(-1);
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const fileSearchRef = useRef<FileSearchHandle>(null);
 
-  // Content search state (Cmd+Shift+F)
-  type SearchMode = "files" | "content";
-  const [searchMode, setSearchMode] = useState<SearchMode>("files");
-  const [contentQuery, setContentQuery] = useState("");
-  const [contentResults, setContentResults] = useState<GrepResult[] | null>(null);
-  const [contentLoading, setContentLoading] = useState(false);
-  const [contentError, setContentError] = useState<string | null>(null);
-  const contentSearchInputRef = useRef<HTMLInputElement>(null);
-  const contentSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   // When opening a grep result, remember target line to scroll to after render
   const targetLineRef = useRef<number | null>(null);
 
   useImperativeHandle(ref, () => ({
-    focusSearch: () => {
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    },
+    focusSearch: () => fileSearchRef.current?.focus(),
   }));
 
   // Cmd+Shift+F — switch to content search mode
@@ -465,11 +444,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key === "F" && e.shiftKey) {
         e.preventDefault();
-        setSearchMode("content");
-        setTimeout(() => {
-          contentSearchInputRef.current?.focus();
-          contentSearchInputRef.current?.select();
-        }, 30);
+        fileSearchRef.current?.focus();
       } else if (e.key === "f" && !e.shiftKey && openFile) {
         e.preventDefault();
         setFileSearchActive(true);
@@ -560,30 +535,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setFileSearchQuery("");
   }, []);
 
-  // Debounced content search
-  useEffect(() => {
-    if (contentSearchTimeout.current) clearTimeout(contentSearchTimeout.current);
-    if (!contentQuery.trim() || searchMode !== "content") {
-      setContentResults(null);
-      return;
-    }
-    contentSearchTimeout.current = setTimeout(async () => {
-      setContentLoading(true);
-      setContentError(null);
-      try {
-        const results = await grepFsFiles(contentQuery.trim(), roots);
-        setContentResults(results);
-      } catch (err: any) {
-        setContentError(err.message || "Search failed");
-        setContentResults([]);
-      } finally {
-        setContentLoading(false);
-      }
-    }, 400);
-    return () => { if (contentSearchTimeout.current) clearTimeout(contentSearchTimeout.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentQuery, searchMode, roots.join(",")]);
-
   // After a grep result opens a file, scroll to the target line
   useEffect(() => {
     const line = targetLineRef.current;
@@ -638,64 +589,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setFileSearchIdx((i) => (i + delta + fileSearchMatchCount) % fileSearchMatchCount);
     }
   }, [fileSearchMatchCount, closeFileSearch]);
-
-  // Debounced search
-  useEffect(() => {
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    if (!searchQuery.trim()) {
-      setSearchResults(null);
-      return;
-    }
-    searchTimeout.current = setTimeout(async () => {
-      setSearchLoading(true);
-      setError(null);
-      try {
-        const results = await searchFsFiles(searchQuery.trim(), roots);
-        setSearchResults(results);
-      } catch (err: any) {
-        setError(err.message || "Search failed");
-        setSearchResults([]);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 300);
-    return () => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, roots.join(",")]); // roots.join avoids re-running when array ref changes but content is same
-
-  // Reset focused result when results change
-  useEffect(() => {
-    setFocusedResultIdx(-1);
-  }, [searchResults]);
-
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape") {
-      if (searchQuery) {
-        setSearchQuery("");
-      } else {
-        onClose?.();
-      }
-      return;
-    }
-    if (!searchResults || searchResults.length === 0) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setFocusedResultIdx((i) => Math.min(i + 1, searchResults.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setFocusedResultIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const idx = focusedResultIdx >= 0 ? focusedResultIdx : 0;
-      const result = searchResults[idx];
-      if (result) {
-        if (result.type === "file") handleOpenFile(result.path);
-        else handleToggleDir(result.path);
-      }
-    }
-  }, [searchQuery, searchResults, focusedResultIdx, onClose]);
 
   const handleToggleDir = useCallback(async (path: string) => {
     setExpandedDirs((prev) => {
@@ -823,141 +716,15 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   return (
     <div className="fe-container">
       <div className="fe-tree-panel" style={{ width: treePanelWidth, minWidth: treePanelWidth, maxWidth: treePanelWidth }}>
-        <div className="fe-search-bar">
-          {searchMode === "content" ? (
-            <>
-              <input
-                ref={contentSearchInputRef}
-                className="fe-search-input"
-                type="text"
-                placeholder="search in files…"
-                value={contentQuery}
-                onChange={(e) => setContentQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    if (contentQuery) setContentQuery("");
-                    else { setSearchMode("files"); setTimeout(() => searchInputRef.current?.focus(), 30); }
-                  }
-                }}
-              />
-              {contentQuery && (
-                <button className="fe-search-clear" onClick={() => setContentQuery("")} title="Clear">
-                  <Icon name="close" size={12} />
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <input
-                ref={searchInputRef}
-                className="fe-search-input"
-                type="text"
-                placeholder="search files…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-              />
-              {searchQuery && (
-                <button className="fe-search-clear" onClick={() => setSearchQuery("")} title="Clear">
-                  <Icon name="close" size={12} />
-                </button>
-              )}
-            </>
-          )}
-          <div className="fe-seg" role="tablist" aria-label="Search scope">
-            <button
-              role="tab"
-              aria-selected={searchMode === "files"}
-              className={`fe-seg-option${searchMode === "files" ? " fe-seg-option-active" : ""}`}
-              title="Search file names (⌘P)"
-              onClick={() => { setSearchMode("files"); setTimeout(() => searchInputRef.current?.focus(), 30); }}
-            >Names</button>
-            <button
-              role="tab"
-              aria-selected={searchMode === "content"}
-              className={`fe-seg-option${searchMode === "content" ? " fe-seg-option-active" : ""}`}
-              title="Search file contents (⌘⇧F)"
-              onClick={() => { setSearchMode("content"); setTimeout(() => contentSearchInputRef.current?.focus(), 30); }}
-            >Contents</button>
-          </div>
-        </div>
-
-        {searchMode === "content" ? (
-          <div className="fe-content-search">
-            <div className="fe-content-results">
-              {contentLoading && <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>searching…</div>}
-              {contentError && <div className="fe-tree-empty" style={{ padding: "8px 12px", color: "var(--red)" }}>{contentError}</div>}
-              {!contentLoading && contentResults !== null && contentResults.length === 0 && (
-                <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>no matches</div>
-              )}
-              {contentResults && (() => {
-                // Group results by file path
-                const byFile = new Map<string, GrepResult[]>();
-                for (const r of contentResults) {
-                  if (!byFile.has(r.path)) byFile.set(r.path, []);
-                  byFile.get(r.path)!.push(r);
-                }
-                return Array.from(byFile.entries()).map(([filePath, matches]) => (
-                  <div key={filePath} className="fe-content-file-group">
-                    <div className="fe-content-file-header" title={filePath}>
-                      <span className="fe-icon fe-icon-file"><Icon name="file" size={13} /></span>
-                      <span className="fe-content-file-name">{matches[0].name}</span>
-                      <span className="fe-content-file-path">{getBreadcrumb(filePath)}</span>
-                    </div>
-                    {matches.map((m) => (
-                      <div
-                        key={m.lineNumber}
-                        className={`fe-content-match${openFile?.path === filePath ? " fe-content-match-open" : ""}`}
-                        onClick={() => handleOpenGrepResult(m)}
-                        title={`Line ${m.lineNumber}`}
-                      >
-                        <span className="fe-content-linenum">{m.lineNumber}</span>
-                        <span className="fe-content-line">{m.line}</span>
-                      </div>
-                    ))}
-                  </div>
-                ));
-              })()}
-              {contentResults && contentResults.length >= 10 && (
-                <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 10 matches</div>
-              )}
-            </div>
-          </div>
-        ) : searchQuery ? (
-          <div className="fe-search-results" ref={rowContainerRef} role="listbox">
-            {searchLoading && <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>searching…</div>}
-            {!searchLoading && searchResults !== null && searchResults.length === 0 && (
-              <div className="fe-tree-empty" style={{ padding: "8px 12px" }}>no matches</div>
-            )}
-            {searchResults?.map((result, idx) => (
-              <div
-                key={result.path}
-                className={`fe-tree-item fe-search-result${openFilePath === result.path || focusedResultIdx === idx ? " fe-tree-item-active" : ""}`}
-                onClick={() => result.type === "file" ? handleOpenFile(result.path) : handleToggleDir(result.path)}
-                onKeyDown={(e) => handleRowKeyDown(e, result.path, result.type)}
-                data-fe-row=""
-                tabIndex={idx === 0 ? 0 : -1}
-                role="option"
-                aria-selected={openFilePath === result.path}
-                title={result.path}
-              >
-                <span className={`fe-icon${result.type === "dir" ? " fe-icon-dir" : " fe-icon-file"}`}>
-                  <Icon name={result.type === "dir" ? "folder" : "file"} size={13} />
-                </span>
-                <div className="fe-search-result-text">
-                  <span className="fe-tree-name">{result.name}</span>
-                  <span className="fe-search-result-path">{getBreadcrumb(result.path)}</span>
-                </div>
-                {result.type === "dir"
-                  ? dirHasChanges(changes, result.path) && <Icon name="dot" size={8} className="fe-change-dot" title="contains changes" />
-                  : <ChangeCounts count={changes.files.get(result.path)} />}
-              </div>
-            ))}
-            {searchResults && searchResults.length === 100 && (
-              <div className="fe-tree-empty" style={{ padding: "4px 12px", fontSize: "11px" }}>showing first 100 results</div>
-            )}
-          </div>
-        ) : (
+        <FileSearch
+          ref={fileSearchRef}
+          roots={roots}
+          activePath={openFilePath}
+          onOpenFile={(path, line) => {
+            if (line) handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
+            else handleOpenFile(path);
+          }}
+        >
           <div className="fe-tree-body" ref={rowContainerRef} role="tree">
             {roots.map((root) => (
               <div key={root} className="fe-root-section">
@@ -1005,7 +772,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               </div>
             ))}
           </div>
-        )}
+        </FileSearch>
       </div>
 
       <div

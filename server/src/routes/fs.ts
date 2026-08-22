@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, resolve, extname, basename } from "path";
 import { getBasePath } from "../services/config";
+import { getIndex, invalidate } from "../services/file-index";
+import { rank } from "../services/fuzzy";
+import { searchContent } from "../services/content-search";
 
 const app = new Hono();
 
@@ -178,204 +181,186 @@ app.get("/read", async (c) => {
   }
 });
 
-const SKIP_DIRS = new Set([
-  "node_modules", ".git", "dist", "build", ".next", ".nuxt",
-  "__pycache__", ".cache", ".parcel-cache", "vendor", "target",
-  ".turbo", "coverage", ".nyc_output",
-]);
+const DEFAULT_LIMIT = 200;
+const MAX_LIMIT = 1000;
 
-/**
- * Match a file/dir against the search query.
- * Supports path-aware queries like "types/moderation.go":
- *   - Split query by "/" into parts
- *   - Each part must appear as a substring in the relative path, in order
- *   - e.g. "types/mod" matches "services/types/moderation.go"
- */
-function matchesQuery(relativePath: string, parts: string[]): boolean {
-  const lower = relativePath.toLowerCase();
-  let pos = 0;
-  for (const part of parts) {
-    const idx = lower.indexOf(part, pos);
-    if (idx === -1) return false;
-    pos = idx + part.length;
-  }
-  return true;
+function clampLimit(raw: string | undefined, fallback = DEFAULT_LIMIT): number {
+  const n = parseInt(raw || "", 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(n, MAX_LIMIT);
 }
 
-async function searchFiles(
-  dir: string,
-  root: string,
-  parts: string[],
-  results: Array<{ path: string; name: string; type: "file" | "dir" }>,
-  maxResults: number
-): Promise<void> {
-  if (results.length >= maxResults) return;
-  let names: string[];
-  try {
-    names = await readdir(dir);
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (results.length >= maxResults) return;
-    const fullPath = join(dir, name);
-    let s;
-    try {
-      s = await stat(fullPath);
-    } catch {
-      continue;
-    }
-    const isDir = s.isDirectory();
-    if (isDir && SKIP_DIRS.has(name)) continue;
-    // Compute relative path from search root for path-aware matching
-    const relativePath = fullPath.slice(root.length + 1);
-    if (matchesQuery(relativePath, parts)) {
-      results.push({ path: fullPath, name, type: isDir ? "dir" : "file" });
-    }
-    if (isDir) {
-      await searchFiles(fullPath, root, parts, results, maxResults);
-    }
-  }
-}
-
-// GET /api/fs/search?q=<query>&roots=<comma-separated-abs-paths>
-app.get("/search", async (c) => {
-  const q = c.req.query("q");
-  const rootsParam = c.req.query("roots");
-
-  if (!q || q.length < 1) {
-    return c.json({ results: [] });
-  }
-
-  const roots = parseRoots(rootsParam);
+function resolveRoots(c: any): { roots: string[]; error?: Response } {
+  const roots = parseRoots(c.req.query("roots"));
   const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
-
-  // Validate all roots are within base path
   for (const root of searchRoots) {
     if (!isWithinBasePath(root)) {
-      return c.json({ error: "roots outside allowed directory" }, 403);
+      return { roots: [], error: c.json({ error: "roots outside allowed directory" }, 403) };
+    }
+  }
+  return { roots: searchRoots };
+}
+
+interface FileHit {
+  path: string;
+  rel: string;
+  root: string;
+  name: string;
+  type: "file";
+  score: number;
+  positions: number[];
+}
+
+async function findFiles(
+  roots: string[],
+  query: string,
+  limit: number,
+): Promise<{ hits: FileHit[]; truncated: boolean; indexed: number }> {
+  const indexes = await Promise.all(roots.map((r) => getIndex(r).catch(() => null)));
+  const candidates: { root: string; rel: string; lower: string }[] = [];
+  let indexed = 0;
+
+  for (const idx of indexes) {
+    if (!idx) continue;
+    indexed += idx.count;
+    for (let i = 0; i < idx.paths.length; i++) {
+      candidates.push({ root: idx.root, rel: idx.paths[i], lower: idx.lower[i] });
     }
   }
 
-  // Split query by "/" so "types/moderation.go" matches path segments in order
-  const parts = q.toLowerCase().split("/").map((p) => p.trim()).filter(Boolean);
+  const ranked = rank(
+    query,
+    candidates,
+    (c) => c.rel,
+    (c) => c.lower,
+    limit,
+  );
 
-  const results: Array<{ path: string; name: string; type: "file" | "dir" }> = [];
-  for (const root of searchRoots) {
-    await searchFiles(root, root, parts, results, 100);
-    if (results.length >= 100) break;
+  const hits: FileHit[] = ranked.map((r) => ({
+    path: join(r.item.root, r.item.rel),
+    rel: r.item.rel,
+    root: r.item.root,
+    name: basename(r.item.rel),
+    type: "file" as const,
+    score: r.score,
+    positions: r.positions,
+  }));
+
+  return { hits, truncated: hits.length >= limit, indexed };
+}
+
+// GET /api/fs/find?q=&roots=&limit=&kind=name|content|both&re=1&case=1&word=1&glob=
+app.get("/find", async (c) => {
+  const started = Date.now();
+  const q = (c.req.query("q") || "").trim();
+  const kind = (c.req.query("kind") || "both") as "name" | "content" | "both";
+  const limit = clampLimit(c.req.query("limit"));
+
+  const { roots, error } = resolveRoots(c);
+  if (error) return error;
+
+  if (!q) {
+    return c.json({
+      files: [], content: [],
+      truncated: { files: false, content: false },
+      tookMs: 0, indexed: 0, tool: "none",
+    });
   }
 
-  return c.json({ results });
+  const wantNames = kind !== "content";
+  const wantContent = kind !== "name";
+
+  const [names, content] = await Promise.all([
+    wantNames
+      ? findFiles(roots, q, limit).catch(() => ({ hits: [], truncated: false, indexed: 0 }))
+      : Promise.resolve({ hits: [], truncated: false, indexed: 0 }),
+    wantContent
+      ? searchContent({
+          roots,
+          query: q,
+          limit,
+          regex: c.req.query("re") === "1",
+          caseSensitive: c.req.query("case") === "1",
+          wholeWord: c.req.query("word") === "1",
+          glob: c.req.query("glob") || undefined,
+          signal: c.req.raw.signal,
+        }).catch(() => ({ matches: [], truncated: false, tookMs: 0, tool: "error" }))
+      : Promise.resolve({ matches: [], truncated: false, tookMs: 0, tool: "none" }),
+  ]);
+
+  const files = names.hits.filter((f) => isWithinBasePath(f.path));
+  const matches = content.matches.filter((m) => isWithinBasePath(m.path));
+
+  return c.json({
+    files,
+    content: matches,
+    truncated: { files: names.truncated, content: content.truncated },
+    tookMs: Date.now() - started,
+    indexed: names.indexed,
+    tool: content.tool,
+  });
 });
 
-interface GrepMatch {
-  path: string;
-  name: string;
-  lineNumber: number;
-  line: string;
-}
+// GET /api/fs/index-status?roots=
+app.get("/index-status", async (c) => {
+  const { roots, error } = resolveRoots(c);
+  if (error) return error;
+  const out = await Promise.all(
+    roots.map(async (root) => {
+      const idx = await getIndex(root).catch(() => null);
+      return idx
+        ? { root, count: idx.count, builtAt: idx.builtAt, isGit: idx.isGit, truncated: idx.truncated }
+        : { root, count: 0, builtAt: 0, isGit: false, truncated: false };
+    }),
+  );
+  return c.json({ roots: out });
+});
 
-/**
- * Search file contents using ripgrep (fast) with grep -r fallback.
- * Returns up to maxMatches results across all roots.
- * Per-file match limit keeps any single file from dominating results.
- */
-async function grepContent(roots: string[], query: string, maxMatches: number): Promise<GrepMatch[]> {
-  const SKIP_GLOBS = ["!node_modules", "!.git", "!dist", "!build", "!.next", "!vendor", "!target", "!coverage", "!.venv", "!venv", "!__pycache__", "!*.min.js", "!*.map"];
+// POST /api/fs/reindex?roots=
+app.post("/reindex", async (c) => {
+  const { roots, error } = resolveRoots(c);
+  if (error) return error;
+  for (const root of roots) invalidate(root);
+  const out = await Promise.all(
+    roots.map(async (root) => {
+      const idx = await getIndex(root).catch(() => null);
+      return { root, count: idx?.count ?? 0, builtAt: idx?.builtAt ?? 0 };
+    }),
+  );
+  return c.json({ roots: out });
+});
 
-  // Try ripgrep first (much faster than grep -r)
-  const rgArgs = [
-    "--no-heading", "-n",
-    "--max-count=2",       // max 2 matches per file — keeps total bounded
-    "--max-columns=200",   // truncate long lines
-    "--fixed-strings",     // literal match, not regex
-    "--ignore-case",
-    ...SKIP_GLOBS.map((g) => ["--glob", g]).flat(),
-    query,
-    ...roots,
-  ];
+// GET /api/fs/search — kept so older clients keep working.
+app.get("/search", async (c) => {
+  const q = (c.req.query("q") || "").trim();
+  if (!q) return c.json({ results: [] });
+  const { roots, error } = resolveRoots(c);
+  if (error) return error;
+  const { hits } = await findFiles(roots, q, clampLimit(c.req.query("limit"), 100));
+  return c.json({
+    results: hits
+      .filter((h) => isWithinBasePath(h.path))
+      .map((h) => ({ path: h.path, name: h.name, type: h.type })),
+  });
+});
 
-  let rawOutput = "";
-  let usedTool = "";
-
-  try {
-    const proc = Bun.spawn(["rg", ...rgArgs], { stdout: "pipe", stderr: "pipe" });
-    rawOutput = await new Response(proc.stdout).text();
-    usedTool = "rg";
-  } catch {
-    // rg not available as binary — fall back to grep with exclusions
-    try {
-      const EXCLUDE_DIRS = ["node_modules", ".git", "dist", "build", ".next", "vendor", "target", "coverage", ".venv", "venv", "__pycache__"];
-      const grepArgs = [
-        "-r", "-n", "-i",
-        "-I",               // skip binary files
-        "--include=*.*",
-        ...EXCLUDE_DIRS.flatMap((d) => ["--exclude-dir", d]),
-        "-m", "2",          // max 2 matches per file
-        query,
-        ...roots,
-      ];
-      const proc = Bun.spawn(["grep", ...grepArgs], { stdout: "pipe", stderr: "pipe" });
-      rawOutput = await new Response(proc.stdout).text();
-      usedTool = "grep";
-    } catch {
-      return [];
-    }
-  }
-
-  const results: GrepMatch[] = [];
-  for (const rawLine of rawOutput.split("\n")) {
-    if (results.length >= maxMatches) break;
-    if (!rawLine.trim()) continue;
-
-    // Format: /abs/path/to/file:linenum:content
-    // Find first two colons that separate path, line number, content
-    const first = rawLine.indexOf(":");
-    if (first === -1) continue;
-    // On Windows there would be drive letter colons, but this runs on macOS/Linux
-    const second = rawLine.indexOf(":", first + 1);
-    if (second === -1) continue;
-
-    const filePath = resolve(rawLine.slice(0, first));
-    const lineNumber = parseInt(rawLine.slice(first + 1, second), 10);
-    const line = rawLine.slice(second + 1);
-    if (!filePath || isNaN(lineNumber)) continue;
-    if (!isWithinBasePath(filePath)) continue;
-
-    results.push({ path: filePath, name: basename(filePath), lineNumber, line });
-  }
-
-  // Sort by path so results are grouped by file
-  results.sort((a, b) => a.path.localeCompare(b.path) || a.lineNumber - b.lineNumber);
-  return results;
-}
-
-// GET /api/fs/grep?q=<query>&roots=<comma-separated-abs-paths>
+// GET /api/fs/grep — kept so older clients keep working.
 app.get("/grep", async (c) => {
-  try {
-    const q = c.req.query("q");
-    const rootsParam = c.req.query("roots");
-
-    if (!q || q.trim().length < 2) {
-      return c.json({ results: [] });
-    }
-
-    const roots = parseRoots(rootsParam);
-    const searchRoots = roots.length > 0 ? roots : [resolve(getBasePath())];
-
-    for (const root of searchRoots) {
-      if (!isWithinBasePath(root)) {
-        return c.json({ error: "roots outside allowed directory" }, 403);
-      }
-    }
-
-    const results = await grepContent(searchRoots, q.trim(), 10);
-    return c.json({ results });
-  } catch (err) {
-    console.error("[fs/grep] error:", err);
-    return c.json({ results: [] });
-  }
+  const q = (c.req.query("q") || "").trim();
+  if (q.length < 2) return c.json({ results: [] });
+  const { roots, error } = resolveRoots(c);
+  if (error) return error;
+  const r = await searchContent({
+    roots,
+    query: q,
+    limit: clampLimit(c.req.query("limit")),
+    signal: c.req.raw.signal,
+  });
+  return c.json({
+    results: r.matches
+      .filter((m) => isWithinBasePath(m.path))
+      .map((m) => ({ path: m.path, line: m.line, text: m.text })),
+  });
 });
 
 export default app;

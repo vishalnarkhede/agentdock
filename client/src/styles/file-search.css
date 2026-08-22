@@ -1,0 +1,293 @@
+/* Unified file + content search. Inline in the tree panel, never floating, so
+   the semi-transparent surface tokens are safe here. */
+
+.fsx {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.fsx-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+  flex: 0 0 auto;
+}
+
+.fsx-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  padding: 2px 0;
+}
+
+.fsx-input::placeholder {
+  color: var(--text-4);
+}
+
+.fsx-clear,
+.fsx-optbtn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.fsx-clear:hover,
+.fsx-optbtn:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.fsx-optbtn-on {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+
+.fsx-optbtn-dirty::after {
+  content: "";
+  position: absolute;
+  margin: -14px 0 0 14px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--intent-primary);
+}
+
+.fsx-opts {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex: 0 0 auto;
+}
+
+.fsx-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  min-height: 26px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  cursor: pointer;
+}
+
+.fsx-opt:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.fsx-opt-on {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+
+.fsx-opt-label {
+  font-family: inherit;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.fsx-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  min-height: 20px;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  flex: 0 0 auto;
+}
+
+.fsx-spin {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: fsx-spin 0.7s linear infinite;
+}
+
+@keyframes fsx-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fsx-spin { animation-duration: 2s; }
+}
+
+.fsx-error {
+  padding: 5px 10px;
+  color: var(--intent-danger);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  flex: 0 0 auto;
+}
+
+.fsx-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.fsx-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px 3px;
+  /* Sticky: rows scroll underneath, so this must be opaque on every theme.
+     --surface-1 is 5% white on glass. */
+  background: var(--surface-float);
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fsx-group-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.fsx-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 10px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  line-height: 1.45;
+}
+
+.fsx-row-cursor {
+  background: var(--surface-3);
+}
+
+.fsx-row-active .fsx-name {
+  color: var(--intent-primary);
+}
+
+.fsx-name {
+  flex: 0 0 auto;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.fsx-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.fsx-row-content {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+}
+
+.fsx-code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fsx-where {
+  display: block;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fsx-line {
+  color: var(--text-4);
+}
+
+.fsx-mark {
+  background: none;
+  color: var(--intent-primary);
+  font-weight: 600;
+}
+
+.fsx-empty,
+.fsx-hint {
+  padding: 14px 10px;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  text-align: center;
+}
+
+.fsx-hint {
+  color: var(--text-4);
+}
+
+@media (max-width: 780px) {
+  .fsx-row {
+    padding: 9px 12px;
+    min-height: 44px;
+  }
+  .fsx-clear,
+  .fsx-optbtn {
+    width: 34px;
+    height: 34px;
+  }
+  .fsx-opt {
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+}
+
+.fsx-idle {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
