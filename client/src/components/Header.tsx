@@ -29,7 +29,6 @@ const MAX_CHIPS = 3;
 
 /** Fired when the search affordance is used. The page that owns the session
  *  search listens for it — the header has no input of its own. */
-export const FOCUS_SEARCH_EVENT = "agentdock-focus-search";
 
 /** Fired by the Next button. Dashboard owns the jump and the N key binding. */
 export const QUEUE_NEXT_EVENT = "agentdock-queue-next";
@@ -324,15 +323,6 @@ export function Header({ onSelectSession }: HeaderProps = {}) {
         )}
       </div>
       <nav className="header-nav header-nav-desktop">
-        <button
-          className="hdr-search"
-          onClick={() => window.dispatchEvent(new CustomEvent(FOCUS_SEARCH_EVENT))}
-          title="Jump to a session (⌘K)"
-        >
-          <Icon name="search" size={14} />
-          <span className="hdr-search-label">Jump to&hellip;</span>
-          <span className="hdr-keycap">&#8984;K</span>
-        </button>
         {/* The launch actions collapse into one control. Inline they run to
             ~500px with a few quick launches configured, which starves the
             attention line the bar exists for. */}

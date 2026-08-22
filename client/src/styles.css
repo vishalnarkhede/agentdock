@@ -702,6 +702,47 @@ h1 {
   overflow: hidden;
 }
 
+/* The one navigation. Sessions is the first item and toggles the list beside
+   it; every other item opens its surface in the main area. Because the rail is
+   always on screen, surfaces need no tab bar of their own. */
+.app-rail {
+  order: 99;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 52px;
+  padding: 8px 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.rail-sep {
+  width: 22px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-subtle);
+}
+
+.rail-badge-sessions {
+  background: var(--status-blocked);
+  color: var(--surface-0);
+}
+
+/* Surfaces get the main area, beside the rail rather than over everything. */
+.surface-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
 .sidebar-collapse-btn {
   padding: 5px 8px !important;
   font-size: calc(var(--fs-base) - 1px) !important;
@@ -811,6 +852,10 @@ h1 {
   transition: width 0.2s ease, min-width 0.2s ease;
 }
 
+/* KNOWN BROKEN: the sidebar-collapsed class lands on .split-layout and this
+   selector matches the element, but the computed width stays 330px. Raising
+   specificity did not help, so the cause is elsewhere and unfound. Pre-existing,
+   not from the rail work. The rail's Sessions button covers the same need. */
 .sidebar-collapsed .split-sidebar {
   width: 0;
   min-width: 0;
@@ -8027,9 +8072,12 @@ mark.fe-match-active {
    one opens that surface fully expanded over the window. Below 1100px the
    original bottom nav takes over — a phone is not a three-column layout. */
 @media (min-width: 1100px) {
+  /* The rail is a sibling of the whole layout now, not a column in here. The
+     52px track it used to occupy stayed behind as an empty column that ate
+     that much width off every surface. */
   .main-content-split {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--rail-width, 52px);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
     min-height: 0;
   }
@@ -8043,18 +8091,6 @@ mark.fe-match-active {
 
   .term-status { grid-column: 1; grid-row: 2; }
 
-  .split-rail {
-    grid-column: 2;
-    grid-row: 1 / -1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 0;
-    border-left: 1px solid var(--border-subtle);
-    background: var(--surface-1);
-    overflow-y: auto;
-  }
 }
 
 .rail-btn {
@@ -8716,3 +8752,6 @@ body.mobile-kb-open .mobile-queue-host { bottom: 0; }
 @media (min-width: 769px) {
   .mobile-queue-host { display: none; }
 }
+
+/* `hidden` alone loses to the flex display below it. */
+.main-tabs[hidden] { display: none !important; }

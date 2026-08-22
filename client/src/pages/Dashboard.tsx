@@ -61,7 +61,8 @@ function getDisplayStatus(session: SessionInfo): string {
     ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
 }
 
-type FullSurface = "plan" | "coverage" | "changes" | "files" | "sub-agents" | "ship";
+const FULL_SURFACES = ["plan", "coverage", "changes", "files", "sub-agents", "ship"] as const;
+type FullSurface = (typeof FULL_SURFACES)[number];
 
 /** Surfaces reachable from the full-window host's own tab bar. */
 const FULL_TABS: { id: FullSurface; label: string }[] = [
@@ -576,7 +577,6 @@ export function Dashboard() {
    * no cockpit around it. The accordion carries a summary and an "open"
    * affordance; the surface itself takes the window.
    */
-  const [fullSurface, setFullSurface] = useState<FullSurface | null>(null);
   const [sharedWith, setSharedWith] = useState<{ session: string; files: number } | null>(null);
   const [mobileApproveDismissed, setMobileApproveDismissed] = useState(false);
   const [panelSummary, setPanelSummary] = useState<{
@@ -727,8 +727,35 @@ export function Dashboard() {
 
   const toolbarRef = useRef<HTMLDivElement>(null);
   const activeSession = searchParams.get("session");
+
+  /**
+   * Session and open surface both live in the URL, so a refresh lands you back
+   * where you were. Each setter preserves the other key — the previous
+   * implementation replaced the whole param set, so switching session silently
+   * dropped whatever surface was open.
+   */
   const setActiveSession = useCallback((name: string | null) => {
-    setSearchParams(name ? { session: name } : {}, { replace: true });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (name) next.set("session", name);
+      else next.delete("session");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const rawView = searchParams.get("view");
+  const fullSurface: FullSurface | null =
+    rawView && (FULL_SURFACES as readonly string[]).includes(rawView)
+      ? (rawView as FullSurface)
+      : null;
+
+  const setFullSurface = useCallback((id: FullSurface | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set("view", id);
+      else next.delete("view");
+      return next;
+    }, { replace: true });
   }, [setSearchParams]);
 
   // Tour mode: active when ?tour=1 is in the URL (demo mode only)
@@ -1436,14 +1463,11 @@ export function Dashboard() {
       if (e.key === "Escape") setFullSurface(null);
     };
     const onEvent = () => goNext();
-    const onFocusSearch = () => sessionSearchRef.current?.focus();
     window.addEventListener("keydown", onKey);
     window.addEventListener("agentdock-queue-next", onEvent);
-    window.addEventListener("agentdock-focus-search", onFocusSearch);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("agentdock-queue-next", onEvent);
-      window.removeEventListener("agentdock-focus-search", onFocusSearch);
     };
   }, [goNext]);
 
@@ -1470,6 +1494,13 @@ export function Dashboard() {
   }, []);
 
   /** A count only where it means something you would act on. */
+  // What is waiting on you, so the Sessions button carries the same kind of
+  // badge the surface buttons do.
+  const sessionsBadge = useMemo(
+    () => sessions.filter((x) => !x.parentSession && queueBucket(x) === "blocked").length,
+    [sessions],
+  );
+
   const railBadge = useCallback((id: FullSurface): string => {
     if (id === "sub-agents") {
       const kids = activeSessionInfo?.children?.length ?? 0;
@@ -1552,6 +1583,7 @@ export function Dashboard() {
   return (
     <>
     <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      {(isMobile || !fullSurface) && (
       <div className="split-sidebar">
         <div className="sidebar-header">
           <div className="sidebar-search">
@@ -1859,11 +1891,15 @@ export function Dashboard() {
           </div>
         )}
       </div>
+      )}
 
       <div className="split-main">
         {activeSession ? (
           <>
-            <div className="main-tabs">
+            {/* The surface carries its own identity strip, and the rail is
+                always on screen, so this bar would be a second header offering
+                a jump the rail already offers. */}
+            <div className="main-tabs" hidden={!isMobile && !!fullSurface}>
               {sidebarCollapsed && (
                 <button
                   className="main-tab sidebar-expand-btn"
@@ -1909,6 +1945,47 @@ export function Dashboard() {
               <div className="main-tabs-toolbar" ref={toolbarRef} />
             </div>
             <div className="main-content main-content-split" ref={splitContainerRef}>
+              {/* One surface at a time in the main area, chosen from the rail.
+                  There is no second row of tabs: the rail stays visible, so the
+                  thing you would switch with is already on screen. */}
+              {!isMobile && fullSurface && activeSession ? (
+                <div className="surface-pane">
+                  {/* Identity, not navigation. With the session list hidden,
+                      nothing else on screen says whose Plan or Files this is. */}
+                  <div className="surface-head">
+                    <span className="surface-head-name">{RAIL.find((r) => r.id === fullSurface)?.label ?? fullSurface}</span>
+                    <span className="surface-head-sep">/</span>
+                    <button
+                      className="surface-head-session"
+                      onClick={() => setFullSurface(null)}
+                      title="Back to sessions"
+                    >
+                      {activeSessionInfo?.displayName ?? activeSession}
+                    </button>
+                    <span className="surface-head-spacer" />
+                    <span className="surface-head-path">{activeSessionPaths[0] ?? ""}</span>
+                  </div>
+                  {fullSurface === "coverage" ? (
+                    <CoverageView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} />
+                  ) : fullSurface === "changes" ? (
+                    <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setFullSurface(null)} />
+                  ) : fullSurface === "plan" ? (
+                    <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+                  ) : fullSurface === "files" ? (
+                    <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setFullSurface(null)} />
+                  ) : fullSurface === "sub-agents" ? (
+                    <SubAgentsView
+                      key={activeSession}
+                      parentSession={activeSession}
+                      sessions={sessions}
+                      onSelectChild={(c) => { setActiveSession(c); setFullSurface(null); }}
+                      onRefresh={refresh}
+                    />
+                  ) : (
+                    <ShipView activeSession={activeSession} />
+                  )}
+                </div>
+              ) : (
               <div className="split-terminal-pane" data-tutorial="terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
                 {activeSessionInfo?.status === "stopped" ? (
                   <div className="stopped-session-placeholder">
@@ -1936,8 +2013,9 @@ export function Dashboard() {
                   />
                 )}
               </div>
+              )}
 
-              {!isMobile && (
+              {!isMobile && !fullSurface && (
                 <div className="term-status">
                   <span className="term-status-live">
                     <span className="term-status-dot" />connected
@@ -1956,23 +2034,7 @@ export function Dashboard() {
               {/* The right rail: icons only. Pressing one opens the surface
                   fully expanded, rather than docking it in a column. */}
               {!isMobile ? (
-                <nav className="split-rail" aria-label="Session surfaces">
-                  {RAIL.filter((r) => r.id !== "sub-agents" || hasChildren).map((r) => {
-                    const badge = railBadge(r.id);
-                    return (
-                      <button
-                        key={r.id}
-                        className={`rail-btn${fullSurface === r.id ? " rail-btn-active" : ""}`}
-                        onClick={() => setFullSurface(r.id)}
-                        title={`${r.label}${badge ? ` — ${badge}` : ""}`}
-                        aria-label={`Open ${r.label}${badge ? `, ${badge}` : ""}`}
-                      >
-                        <Icon name={r.icon} size={18} />
-                        {badge && <span className={`rail-badge rail-badge-${r.id}`}>{badge}</span>}
-                      </button>
-                    );
-                  })}
-                </nav>
+                <></>
               ) : (
                 <>
                   <div className={`split-bottom-bar${bottomTab ? " split-bottom-bar-open" : ""}`}>
@@ -2254,63 +2316,41 @@ export function Dashboard() {
         />
       )}
       {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
-    </div>
-
-    {/* Review takes the whole window, per the design.
-
-        Review effectiveness falls off sharply when it is cramped, which is the
-        entire reason the design gives it the window rather than a side panel. */}
-    {fullSurface && activeSession && (
-      <div className="review-mode">
-        <div className="review-bar">
-          <button className="review-back" onClick={() => setFullSurface(null)} aria-label="Back to the cockpit">
-            <Icon name="back" size={16} />
-          </button>
-          <span className="review-title">{FULL_TABS.find((t) => t.id === fullSurface)?.label ?? fullSurface}</span>
-          <span className="review-sep">/</span>
-          <span className="review-session">{activeSessionInfo?.displayName}</span>
-          <div className="review-tabs">
-            {FULL_TABS.map((t) => (
-              <button
-                key={t.id}
-                className={`review-tab${fullSurface === t.id ? " review-tab-active" : ""}`}
-                onClick={() => setFullSurface(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+      {!isMobile && (
+        <nav className="app-rail" aria-label="Surfaces">
           <button
-            className={`review-ship${fullSurface === "ship" ? " review-ship-active" : ""}`}
-            onClick={() => setFullSurface("ship")}
+            className={`rail-btn${!fullSurface ? " rail-btn-active" : ""}`}
+            onClick={() => setFullSurface(null)}
+            title="Sessions"
+            aria-label="Sessions"
+            aria-pressed={!fullSurface}
           >
-            <Icon name="merge" size={14} />
-            Ship
+            <Icon name="layers" size={18} />
+            {sessionsBadge > 0 && <span className="rail-badge rail-badge-sessions">{sessionsBadge}</span>}
           </button>
-        </div>
-        <div className="review-body">
-          {fullSurface === "coverage" ? (
-            <CoverageView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} />
-          ) : fullSurface === "changes" ? (
-            <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setFullSurface(null)} />
-          ) : fullSurface === "plan" ? (
-            <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
-          ) : fullSurface === "files" ? (
-            <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setFullSurface(null)} />
-          ) : fullSurface === "sub-agents" ? (
-            <SubAgentsView
-              key={activeSession}
-              parentSession={activeSession}
-              sessions={sessions}
-              onSelectChild={(c) => { setActiveSession(c); setFullSurface(null); }}
-              onRefresh={refresh}
-            />
-          ) : (
-            <ShipView activeSession={activeSession} />
-          )}
-        </div>
-      </div>
-    )}
+
+          <span className="rail-sep" aria-hidden="true" />
+
+          {RAIL.filter((r) => r.id !== "sub-agents" || hasChildren).map((r) => {
+            const badge = railBadge(r.id);
+            const on = fullSurface === r.id;
+            return (
+              <button
+                key={r.id}
+                className={`rail-btn${on ? " rail-btn-active" : ""}`}
+                onClick={() => setFullSurface(on ? null : r.id)}
+                title={`${r.label}${badge ? ` — ${badge}` : ""}`}
+                aria-label={`${on ? "Close" : "Open"} ${r.label}${badge ? `, ${badge}` : ""}`}
+                aria-pressed={on}
+              >
+                <Icon name={r.icon} size={18} />
+                {badge && <span className={`rail-badge rail-badge-${r.id}`}>{badge}</span>}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+    </div>
 
     {/* FAB: new session, only on session list */}
     {!mobileInSession && (

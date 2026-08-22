@@ -181,3 +181,45 @@
   .sidebar-mode, .sidebar-textbtn { height: 38px; }
   .sidebar-menu-item { padding: 12px; min-height: 44px; }
 }
+
+/* Surface identity strip. The rail already says which surface is open; this
+   says which session it belongs to, which is otherwise invisible once the
+   session list is hidden. */
+.surface-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  flex: 0 0 auto;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.surface-head-name { color: var(--text-1); }
+.surface-head-sep { color: var(--text-4); }
+
+.surface-head-session {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--intent-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.surface-head-session:hover { text-decoration: underline; }
+
+.surface-head-spacer { flex: 1 1 auto; }
+
+.surface-head-path {
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+  direction: rtl;
+}

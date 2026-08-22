@@ -220,46 +220,6 @@
   border-radius: var(--radius);
 }
 
-/* Search affordance — presentational; the real ⌘K binding lives on the page
-   that owns the session search. */
-.hdr-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 190px;
-  min-width: 30px;
-  flex-shrink: 1;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-3);
-  font-size: max(11px, calc(var(--fs-base) - 1px));
-  cursor: pointer;
-  text-align: left;
-}
-
-.hdr-search:hover {
-  border-color: var(--border-strong);
-  color: var(--text-2);
-}
-
-.hdr-search:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
-.hdr-search-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hdr-search .hdr-keycap {
-  margin-left: auto;
-}
-
 /* ─── Launch actions overflow ─── */
 
 .hdr-more-wrap {
@@ -365,17 +325,6 @@
    truncate. Verified against a 1100px viewport. */
 
 @media (max-width: 1240px) {
-  .hdr-search {
-    width: 30px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .hdr-search-label,
-  .hdr-search .hdr-keycap {
-    display: none;
-  }
-
   /* Squeezed to ~40px each the chips are unreadable stubs. Dropped whole:
      the count still names the cost, and the list is one click away. */
   .hdr-attn-chips {
@@ -415,7 +364,6 @@
   }
 
   /* Holds if the bar's own controls are ever shown at this width. */
-  .hdr-search,
   .hdr-new,
   .hdr-next,
   .hdr-more {
