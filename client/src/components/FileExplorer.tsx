@@ -337,6 +337,12 @@ function TreeNode({
   );
 }
 
+function countNewlines(s: string, from: number, to: number): number {
+  let n = 0;
+  for (let i = from; i < to; i++) if (s.charCodeAt(i) === 10) n++;
+  return n;
+}
+
 /** Scroll the pre container so the mark is vertically centered in the viewport. */
 function scrollMarkIntoView(pre: HTMLElement, mark: HTMLElement | undefined): void {
   if (!mark) return;
@@ -429,6 +435,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   // Filename search state
   const fileSearchRef = useRef<FileSearchHandle>(null);
+  const pendingMarkLineRef = useRef<number | null>(null);
 
   // When opening a grep result, remember target line to scroll to after render
   const targetLineRef = useRef<number | null>(null);
@@ -488,6 +495,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       textNodes.push(node);
     }
 
+    let line = 1;
     for (const textNode of textNodes) {
       const text = textNode.textContent || "";
       const lower = text.toLowerCase();
@@ -499,10 +507,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         const mark = document.createElement("mark");
         mark.className = "fe-match";
         mark.textContent = text.slice(idx, idx + query.length);
+        mark.dataset.line = String(line + countNewlines(text, 0, idx));
         parts.push(mark);
         marks.push(mark);
         start = idx + query.length;
       }
+      line += countNewlines(text, 0, text.length);
       if (parts.length > 0) {
         if (start < text.length) parts.push(text.slice(start));
         const frag = document.createDocumentFragment();
@@ -514,7 +524,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     }
 
     setFileSearchMatchCount(marks.length);
-    const clampedIdx = Math.min(fileSearchIdx, Math.max(marks.length - 1, 0));
+    const wanted = pendingMarkLineRef.current;
+    pendingMarkLineRef.current = null;
+    const onWantedLine =
+      wanted === null ? -1 : marks.findIndex((m) => Number(m.dataset.line) === wanted);
+    const clampedIdx =
+      onWantedLine >= 0
+        ? onWantedLine
+        : Math.min(fileSearchIdx, Math.max(marks.length - 1, 0));
     setFileSearchIdx(clampedIdx);
     marks.forEach((m, i) => m.classList.toggle("fe-match-active", i === clampedIdx));
     scrollMarkIntoView(pre, marks[clampedIdx]);
@@ -720,7 +737,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           ref={fileSearchRef}
           roots={roots}
           activePath={openFilePath}
-          onOpenFile={(path, line) => {
+          onOpenFile={(path, line, term) => {
+            if (term) {
+              // Reuse the in-file search: the term lights up everywhere in the
+              // file and the match on the clicked line becomes the active one.
+              pendingMarkLineRef.current = line ?? null;
+              setFileSearchQuery(term);
+              setFileSearchActive(true);
+            }
             if (line) handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
             else handleOpenFile(path);
           }}

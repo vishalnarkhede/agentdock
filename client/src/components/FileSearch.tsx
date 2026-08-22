@@ -26,7 +26,7 @@ export interface FileSearchHandle {
 
 interface Props {
   roots: string[];
-  onOpenFile: (path: string, line?: number) => void;
+  onOpenFile: (path: string, line?: number, term?: string) => void;
   activePath?: string | null;
   /** Shown in place of results when the query is empty — the file tree. */
   children?: React.ReactNode;
@@ -35,6 +35,26 @@ interface Props {
 type Row =
   | { kind: "file"; hit: FileHit }
   | { kind: "content"; hit: ContentHit };
+
+interface ContentGroup {
+  path: string;
+  rel: string;
+  hits: ContentHit[];
+}
+
+/** One header per file instead of the path repeated on every matching line. */
+export function groupByFile(hits: ContentHit[]): ContentGroup[] {
+  const out: ContentGroup[] = [];
+  let cur: ContentGroup | null = null;
+  for (const h of hits) {
+    if (!cur || cur.path !== h.path) {
+      cur = { path: h.path, rel: h.rel, hits: [] };
+      out.push(cur);
+    }
+    cur.hits.push(h);
+  }
+  return out;
+}
 
 interface Options {
   regex: boolean;
@@ -218,6 +238,8 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
     contentAbort.current?.abort();
   }, []);
 
+  const groups = useMemo(() => groupByFile(content.content), [content.content]);
+
   const rows: Row[] = useMemo(() => {
     const f: Row[] = names.files.map((hit) => ({ kind: "file" as const, hit }));
     const c: Row[] = content.content.map((hit) => ({ kind: "content" as const, hit }));
@@ -358,33 +380,50 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
           </div>
         )}
 
-        {content.content.length > 0 && (
+        {groups.length > 0 && (
           <div className="fsx-group">
             <div className="fsx-group-head">
-              in files<span className="fsx-group-count">{content.content.length}{content.truncated.content ? "+" : ""}</span>
+              in files
+              <span className="fsx-group-count">
+                {content.content.length}{content.truncated.content ? "+" : ""} in {groups.length} file{groups.length === 1 ? "" : "s"}
+              </span>
             </div>
-            {content.content.map((hit, j) => {
-              const i = names.files.length + j;
-              return (
-                <button
-                  key={`c:${hit.path}:${hit.line}:${hit.col}`}
-                  data-row={i}
-                  role="option"
-                  aria-selected={cursor === i}
-                  className={`fsx-row fsx-row-content${cursor === i ? " fsx-row-cursor" : ""}`}
-                  onMouseEnter={() => setCursor(i)}
-                  onClick={() => onOpenFile(hit.path, hit.line)}
-                >
-                  <span className="fsx-code">
-                    <Marked parts={markRange(hit.text, hit.col, queryLen)} />
-                  </span>
-                  <span className="fsx-where">
-                    {hit.rel}
-                    <span className="fsx-line">:{hit.line}</span>
-                  </span>
-                </button>
-              );
-            })}
+            {(() => {
+              let i = names.files.length - 1;
+              return groups.map((g) => (
+                <div key={g.path} className="fsx-filegroup">
+                  <button
+                    className="fsx-filegroup-head"
+                    onClick={() => onOpenFile(g.path)}
+                    title={g.path}
+                  >
+                    <span className="fsx-filegroup-name">{g.rel.split("/").pop()}</span>
+                    <span className="fsx-filegroup-dir">{g.rel.slice(0, Math.max(0, g.rel.length - (g.rel.split("/").pop()?.length ?? 0)))}</span>
+                    <span className="fsx-filegroup-count">{g.hits.length}</span>
+                  </button>
+                  {g.hits.map((hit) => {
+                    i += 1;
+                    const idx = i;
+                    return (
+                      <button
+                        key={`${hit.line}:${hit.col}`}
+                        data-row={idx}
+                        role="option"
+                        aria-selected={cursor === idx}
+                        className={`fsx-hit${cursor === idx ? " fsx-hit-cursor" : ""}`}
+                        onMouseEnter={() => setCursor(idx)}
+                        onClick={() => onOpenFile(hit.path, hit.line, q)}
+                      >
+                        <span className="fsx-hit-line">{hit.line}</span>
+                        <span className="fsx-hit-code">
+                          <Marked parts={markRange(hit.text, hit.col, queryLen)} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ));
+            })()}
           </div>
         )}
 
