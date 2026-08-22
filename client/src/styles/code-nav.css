@@ -1,0 +1,183 @@
+/* Go-to-definition affordances in the file viewer. Floating panels use
+   --surface-float: --surface-1 resolves to 5% white on the glass theme. */
+
+.fe-code-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fe-code-navmode code span:hover,
+.fe-code-navmode code:hover {
+  cursor: pointer;
+}
+
+.fe-code-navmode {
+  cursor: pointer;
+}
+
+.fe-nav-busy {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  pointer-events: none;
+}
+
+.fe-picker,
+.fe-outline {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.fe-picker {
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(620px, calc(100% - 32px));
+  max-height: min(60%, 420px);
+}
+
+.fe-outline {
+  top: 8px;
+  right: 8px;
+  width: min(320px, calc(100% - 32px));
+  max-height: calc(100% - 24px);
+}
+
+.fe-picker-head,
+.fe-outline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-2);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}
+
+.fe-picker-head button,
+.fe-outline-head button {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.fe-picker-head button:hover,
+.fe-outline-head button:hover { color: var(--text-1); }
+
+.fe-picker-name {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+}
+
+.fe-outline-count {
+  margin-left: 6px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.fe-picker-list,
+.fe-outline-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.fe-picker-row,
+.fe-outline-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}
+
+.fe-picker-row + .fe-picker-row,
+.fe-outline-row + .fe-outline-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.fe-picker-row:hover,
+.fe-outline-row:hover { background: var(--hover); }
+
+.fe-kind {
+  flex: 0 0 auto;
+  min-width: 62px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  text-align: center;
+}
+
+.fe-kind-func, .fe-kind-function, .fe-kind-method, .fe-kind-def { color: var(--status-working); }
+.fe-kind-type, .fe-kind-interface, .fe-kind-struct, .fe-kind-class, .fe-kind-enum { color: var(--status-ready); }
+
+.fe-picker-sym,
+.fe-outline-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-picker-recv { color: var(--text-3); }
+
+.fe-picker-loc,
+.fe-outline-line {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  font-variant-numeric: tabular-nums;
+}
+
+.fe-picker-loc {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.fe-picker-foot {
+  padding: 5px 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-4);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+}
+
+@media (max-width: 780px) {
+  .fe-picker-row,
+  .fe-outline-row { padding: 10px; min-height: 44px; align-items: center; }
+  .fe-outline { width: calc(100% - 16px); }
+}

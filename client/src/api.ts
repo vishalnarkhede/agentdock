@@ -334,7 +334,7 @@ export async function grepFsFiles(query: string, roots: string[]): Promise<GrepR
   return data.results ?? [];
 }
 
-export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number }> {
+export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number; version: string }> {
   const params = new URLSearchParams({ path });
   if (roots.length > 0) params.set("roots", roots.join(","));
   const res = await fetch(`${BASE}/api/fs/read?${params}`);
@@ -343,6 +343,42 @@ export async function fetchFsFile(path: string, roots: string[]): Promise<{ cont
     throw new Error(data.error || "Failed to read file");
   }
   return res.json();
+}
+
+export interface WriteConflict {
+  conflict: true;
+  error: string;
+  currentVersion: string;
+  currentContent: string;
+}
+
+export interface WriteOk {
+  ok: true;
+  version: string;
+  size: number;
+}
+
+/**
+ * Save a file. `version` is the token /read handed back; the server refuses the
+ * write if the file changed since, which is what stops a save from quietly
+ * overwriting whatever the agent wrote in the meantime.
+ */
+export async function writeFsFile(
+  path: string,
+  roots: string[],
+  content: string,
+  version: string,
+  force = false,
+): Promise<WriteOk | WriteConflict> {
+  const res = await fetch(`${BASE}/api/fs/write`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, roots: roots.join(","), content, version, force }),
+  });
+  const data = await res.json();
+  if (res.status === 409) return data as WriteConflict;
+  if (!res.ok) throw new Error(data.error || "Failed to save file");
+  return data as WriteOk;
 }
 
 // ─── Settings API ───

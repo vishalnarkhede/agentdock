@@ -1,9 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
-import { fetchFsDir, fetchFsFile } from "../api";
+import { fetchFsDir, fetchFsFile, writeFsFile } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
 import { FileSearch, type FileSearchHandle } from "./FileSearch";
 import { markHtml } from "../mark-html";
+import { wordAtPoint } from "../word-at";
+import "../styles/code-nav.css";
+import { findDefinition, fetchDocSymbols, type Candidate, type DocSymbol } from "../code-api";
 import "../styles/files.css";
 import "highlight.js/styles/atom-one-dark.css";
 import hljs from "highlight.js/lib/core";
@@ -60,6 +63,7 @@ interface OpenFile {
   content: string;
   language: string;
   size: number;
+  version: string;
 }
 
 
@@ -436,6 +440,20 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // Filename search state
   const fileSearchRef = useRef<FileSearchHandle>(null);
   const pendingMarkRef = useRef<{ path: string; line: number | null } | null>(null);
+  // Editing. `draft` is null while the file is being viewed rather than edited.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<{ theirs: string; version: string } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+
+  // Code navigation
+  const [navBusy, setNavBusy] = useState(false);
+  const [picker, setPicker] = useState<{ name: string; candidates: Candidate[] } | null>(null);
+  const [outline, setOutline] = useState<DocSymbol[] | null>(null);
+  const [showOutline, setShowOutline] = useState(false);
+  const [modDown, setModDown] = useState(false);
+  const backStack = useRef<{ path: string; line: number }[]>([]);
   // Bumped on every open-from-search, so clicking a second match in the file
   // already on screen still moves the active highlight.
   const [markNonce, setMarkNonce] = useState(0);
@@ -622,9 +640,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // Memoize highlighted HTML — prevents React from needlessly resetting the code element's
   // innerHTML on unrelated state changes (e.g. fileSearchIdx), which would destroy marks
   // and any in-progress text selection.
+  const shownContent = draft ?? openFile?.content ?? "";
+
   const baseHtml = useMemo(
-    () => (openFile ? highlight(openFile.content, openFile.language) : ""),
-    [openFile],
+    () => (openFile ? highlight(shownContent, openFile.language) : ""),
+    [openFile, shownContent],
   );
 
   // Marks are rendered by React rather than injected afterwards. Injecting
@@ -639,6 +659,181 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   );
   const highlightedHtml = marked.html;
   const fileSearchMatchCount = marked.count;
+
+  const dirty = draft !== null && openFile !== null && draft !== openFile.content;
+
+  const currentLine = useCallback((): number => {
+    const pre = fileContentRef.current;
+    if (!pre) return 1;
+    const style = window.getComputedStyle(pre);
+    const lh = parseFloat(style.lineHeight) || 18;
+    return Math.max(1, Math.round(pre.scrollTop / lh) + 1);
+  }, []);
+
+  const goTo = useCallback(
+    async (path: string, line: number, pushHistory = true) => {
+      if (pushHistory && openFile) {
+        backStack.current.push({ path: openFile.path, line: currentLine() });
+        if (backStack.current.length > 50) backStack.current.shift();
+      }
+      setPicker(null);
+      await handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
+    },
+    [openFile, currentLine],
+  );
+
+  const goBack = useCallback(() => {
+    const prev = backStack.current.pop();
+    if (prev) goTo(prev.path, prev.line, false);
+  }, [goTo]);
+
+  /**
+   * Clicking a name jumps to where it is declared. Clicking the declaration
+   * itself is a different question — you already know where it is — so that
+   * shows where it is used instead.
+   */
+  const navigateToSymbol = useCallback(
+    async (name: string) => {
+      if (!openFile) return;
+      setNavBusy(true);
+      try {
+        const res = await findDefinition(name, roots, openFile.path);
+        const here = res.candidates.filter((c) => c.path === openFile.path);
+        const atDefinition = here.some((c) => Math.abs(c.line - currentLine()) < 3);
+
+        if (res.candidates.length === 0 || atDefinition) {
+          // Textual usages, not semantic references — the index knows
+          // declarations, not call sites.
+          window.dispatchEvent(new CustomEvent("agentdock-find-usages", { detail: { name } }));
+          setFileSearchQuery(name);
+          setFileSearchActive(true);
+          return;
+        }
+        if (res.candidates.length === 1) {
+          await goTo(res.candidates[0].path, res.candidates[0].line);
+          return;
+        }
+        setPicker({ name, candidates: res.candidates });
+      } finally {
+        setNavBusy(false);
+      }
+    },
+    [openFile, roots, goTo, currentLine],
+  );
+
+  // Cmd/Ctrl underlines identifiers so it is obvious what is clickable.
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.metaKey || e.ctrlKey) setModDown(true); };
+    const up = (e: KeyboardEvent) => { if (!e.metaKey && !e.ctrlKey) setModDown(false); };
+    const blur = () => setModDown(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+
+  const onCodeClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const pre = fileContentRef.current;
+      if (!pre) return;
+      const word = wordAtPoint(e.clientX, e.clientY, pre);
+      if (!word) return;
+      e.preventDefault();
+      navigateToSymbol(word);
+    },
+    [navigateToSymbol],
+  );
+
+  useEffect(() => {
+    if (!openFile) { setOutline(null); return; }
+    let alive = true;
+    fetchDocSymbols(openFile.path, roots)
+      .then((s) => { if (alive) setOutline(s); })
+      .catch(() => { if (alive) setOutline([]); });
+    return () => { alive = false; };
+  }, [openFile?.path, roots.join(",")]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA");
+      if (e.key === "F12" && !typing && openFile) {
+        e.preventDefault();
+        const sel = window.getSelection()?.toString().trim();
+        if (sel && /^[A-Za-z_$][\w$]*$/.test(sel)) navigateToSymbol(sel);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "[") { e.preventDefault(); goBack(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "o" || e.key === "O")) {
+        if (!openFile) return;
+        e.preventDefault();
+        setShowOutline((v) => !v);
+        return;
+      }
+      if (e.key === "Escape" && picker) { e.preventDefault(); setPicker(null); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openFile, navigateToSymbol, goBack, picker]);
+
+  const discardEdits = useCallback(() => {
+    setDraft(null);
+    setConflict(null);
+    setSaveError(null);
+  }, []);
+
+  const save = useCallback(async (force = false) => {
+    if (!openFile || draft === null) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await writeFsFile(openFile.path, roots, draft, openFile.version, force);
+      if ("conflict" in res) {
+        setConflict({ theirs: res.currentContent, version: res.currentVersion });
+        return;
+      }
+      setOpenFile({ ...openFile, content: draft, version: res.version, size: res.size });
+      setDraft(null);
+      setConflict(null);
+    } catch (err: any) {
+      setSaveError(err?.message || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [openFile, draft, roots]);
+
+  const takeTheirs = useCallback(() => {
+    if (!openFile || !conflict) return;
+    setOpenFile({ ...openFile, content: conflict.theirs, version: conflict.version });
+    setDraft(null);
+    setConflict(null);
+  }, [openFile, conflict]);
+
+  // Cmd+S saves. Without this the browser offers to save the page instead.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        if (!openFile) return;
+        e.preventDefault();
+        if (dirty) save();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dirty, save, openFile]);
+
+  // Leaving a file with unsaved edits would lose them silently.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   const handleFileSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") {
@@ -803,10 +998,71 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 </button>
               </div>
             )}
-            <pre ref={fileContentRef} className="fe-file-content"><code
-              className={`hljs language-${openFile.language}`}
-              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-            /></pre>
+            <div className="fe-code-wrap">
+              <pre
+                ref={fileContentRef}
+                className={`fe-file-content${modDown ? " fe-code-navmode" : ""}`}
+                onClick={onCodeClick}
+              ><code
+                className={`hljs language-${openFile.language}`}
+                dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+              /></pre>
+
+              {navBusy && <div className="fe-nav-busy">looking up…</div>}
+
+              {picker && (
+                <div className="fe-picker" role="dialog" aria-label="Choose a definition">
+                  <div className="fe-picker-head">
+                    <span><code className="fe-picker-name">{picker.name}</code> is declared in {picker.candidates.length} places</span>
+                    <button onClick={() => setPicker(null)} aria-label="Close">×</button>
+                  </div>
+                  <div className="fe-picker-list">
+                    {picker.candidates.map((c) => (
+                      <button
+                        key={`${c.path}:${c.line}`}
+                        className="fe-picker-row"
+                        onClick={() => goTo(c.path, c.line)}
+                      >
+                        <span className={`fe-kind fe-kind-${c.kind}`}>{c.kind}</span>
+                        <span className="fe-picker-sym">
+                          {c.container ? <span className="fe-picker-recv">{c.container}.</span> : null}
+                          {c.name}
+                        </span>
+                        <span className="fe-picker-loc">{c.file}:{c.line}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="fe-picker-foot">
+                    matched by name — no type information, so pick the one you meant
+                  </div>
+                </div>
+              )}
+
+              {showOutline && outline && outline.length > 0 && (
+                <div className="fe-outline" role="navigation" aria-label="Outline">
+                  <div className="fe-outline-head">
+                    <span>outline<span className="fe-outline-count">{outline.length}</span></span>
+                    <button onClick={() => setShowOutline(false)} aria-label="Close">×</button>
+                  </div>
+                  <div className="fe-outline-list">
+                    {outline.map((sym) => (
+                      <button
+                        key={`${sym.line}:${sym.name}`}
+                        className="fe-outline-row"
+                        onClick={() => goTo(openFile.path, sym.line, false)}
+                      >
+                        <span className={`fe-kind fe-kind-${sym.kind}`}>{sym.kind}</span>
+                        <span className="fe-outline-name">
+                          {sym.container ? <span className="fe-picker-recv">{sym.container}.</span> : null}
+                          {sym.name}
+                        </span>
+                        <span className="fe-outline-line">{sym.line}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         ) : (
           <div className="fe-file-empty">

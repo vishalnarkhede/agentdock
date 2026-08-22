@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { readdir, readFile, stat } from "fs/promises";
+import { readdir, readFile, stat, writeFile, rename } from "fs/promises";
+import { createHash } from "crypto";
 import { join, resolve, extname, basename } from "path";
 import { getBasePath } from "../services/config";
 import { getIndex, invalidate } from "../services/file-index";
@@ -175,9 +176,79 @@ app.get("/read", async (c) => {
       content,
       language: getLanguage(resolvedPath),
       size: info.size,
+      version: fileVersion(content, info.mtimeMs),
     });
   } catch (err: any) {
     return c.json({ error: err.message || "failed to read file" }, 500);
+  }
+});
+
+/**
+ * Identifies the exact bytes a client read. Agents write to these worktrees
+ * continuously, so a save has to prove it is replacing the content the user
+ * actually saw rather than whatever is there now.
+ */
+function fileVersion(content: string, mtimeMs: number): string {
+  return createHash("sha1").update(content).digest("hex").slice(0, 16) + "-" + Math.round(mtimeMs);
+}
+
+// POST /api/fs/write  { path, roots?, content, version, force? }
+app.post("/write", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body?.path || typeof body.content !== "string") {
+    return c.json({ error: "path and content are required" }, 400);
+  }
+
+  const resolvedPath = resolve(body.path);
+  if (!isWithinBasePath(resolvedPath)) {
+    return c.json({ error: "path is outside allowed directory" }, 403);
+  }
+  if (body.roots) {
+    const roots = parseRoots(String(body.roots));
+    if (roots.length > 0 && !isWithinRoots(resolvedPath, roots)) {
+      return c.json({ error: "path is outside session repo roots" }, 403);
+    }
+  }
+  if (BINARY_EXTENSIONS.has(extname(resolvedPath).toLowerCase())) {
+    return c.json({ error: "binary files cannot be edited" }, 400);
+  }
+  if (Buffer.byteLength(body.content, "utf-8") > MAX_FILE_SIZE) {
+    return c.json({ error: "file too large to save (max 500KB)" }, 400);
+  }
+
+  try {
+    const info = await stat(resolvedPath);
+    if (!info.isFile()) return c.json({ error: "not a file" }, 400);
+
+    const current = await readFile(resolvedPath, "utf-8");
+    const currentVersion = fileVersion(current, info.mtimeMs);
+
+    if (!body.force && body.version && body.version !== currentVersion) {
+      return c.json(
+        {
+          error: "changed on disk since you opened it",
+          conflict: true,
+          currentVersion,
+          currentContent: current,
+        },
+        409,
+      );
+    }
+
+    // Write to a sibling then rename, so a crash mid-write cannot leave the
+    // agent looking at a truncated file.
+    const tmp = `${resolvedPath}.agentdock-tmp`;
+    await writeFile(tmp, body.content, "utf-8");
+    await rename(tmp, resolvedPath);
+
+    const after = await stat(resolvedPath);
+    return c.json({
+      ok: true,
+      version: fileVersion(body.content, after.mtimeMs),
+      size: after.size,
+    });
+  } catch (err: any) {
+    return c.json({ error: err?.message || "failed to save file" }, 500);
   }
 });
 
