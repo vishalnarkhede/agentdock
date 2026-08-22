@@ -307,6 +307,30 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
     if (!isMobile) term.focus();
 
+    /**
+     * xterm only paints a cursor while it believes it is focused, and it learns
+     * that from a focus event on its hidden textarea. Focusing an element that
+     * is already document.activeElement fires nothing — which happens when the
+     * page loads with the window unfocused, and again whenever the blur handler
+     * below calls textarea.focus() on an already-active textarea. The result is
+     * a terminal that is genuinely focused and accepts typing but shows no
+     * cursor until you click it.
+     *
+     * So reconcile: if the textarea holds focus but xterm does not know, bounce
+     * it once to generate the event.
+     */
+    const syncFocusState = () => {
+      const ta = term.textarea;
+      const root = containerRef.current?.querySelector(".xterm");
+      if (!ta || !root) return;
+      if (document.activeElement === ta && !root.classList.contains("focus")) {
+        ta.blur();
+        term.focus();
+      }
+    };
+    window.addEventListener("focus", syncFocusState);
+    const syncTimer = setTimeout(syncFocusState, 300);
+
     // Detect scroll position on xterm's viewport — pause rendering when
     // user scrolls up, resume when they scroll back to the bottom.
     // Also updates the custom scrollbar thumb position.
@@ -358,6 +382,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
 
     return () => {
+      clearTimeout(syncTimer);
+      window.removeEventListener("focus", syncFocusState);
       clearTimeout(viewportScrollTimer);
       const viewport = containerRef.current?.querySelector(".xterm-viewport");
       viewport?.removeEventListener("scroll", handleViewportScroll);
