@@ -30,6 +30,32 @@ export function expandWord(text: string, offset: number): { word: string; start:
  * Walk outward from `node` across sibling text so an identifier broken into
  * several spans still reads as one word.
  */
+export interface WordHit {
+  word: string;
+  /** 1-based line within `root`, so callers know where the click landed. */
+  line: number;
+}
+
+/** Newlines in `root` before (node, offset) — the line the click is on. */
+function lineOf(node: Text, offset: number, root: Element): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n: Text | null;
+  let line = 1;
+  while ((n = walker.nextNode() as Text | null)) {
+    const t = n.textContent ?? "";
+    if (n === node) {
+      for (let i = 0; i < Math.min(offset, t.length); i++) {
+        if (t.charCodeAt(i) === 10) line++;
+      }
+      return line;
+    }
+    for (let i = 0; i < t.length; i++) {
+      if (t.charCodeAt(i) === 10) line++;
+    }
+  }
+  return line;
+}
+
 export function wordFromNode(node: Node, offset: number, root: Element): string | null {
   if (node.nodeType !== Node.TEXT_NODE) return null;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -58,7 +84,7 @@ export function wordFromNode(node: Node, offset: number, root: Element): string 
   return hit?.word ?? null;
 }
 
-export function wordAtPoint(x: number, y: number, root: Element): string | null {
+export function wordAtPoint(x: number, y: number, root: Element): WordHit | null {
   const doc = document as any;
   let node: Node | null = null;
   let offset = 0;
@@ -70,5 +96,7 @@ export function wordAtPoint(x: number, y: number, root: Element): string | null 
     if (p) { node = p.offsetNode; offset = p.offset; }
   }
   if (!node || !root.contains(node)) return null;
-  return wordFromNode(node, offset, root);
+  const word = wordFromNode(node, offset, root);
+  if (!word) return null;
+  return { word, line: lineOf(node as Text, offset, root) };
 }

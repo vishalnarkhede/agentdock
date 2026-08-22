@@ -181,3 +181,121 @@
   .fe-outline-row { padding: 10px; min-height: 44px; align-items: center; }
   .fe-outline { width: calc(100% - 16px); }
 }
+
+/* ── Editing ───────────────────────────────────────────────────────────── */
+
+.fe-editbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  flex: 0 0 auto;
+}
+
+.fe-editbar-spacer { flex: 1 1 auto; }
+
+.fe-editbar-state {
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fe-editbar-dirty { color: var(--status-blocked); }
+
+.fe-editbar-error {
+  color: var(--intent-danger);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fe-editbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  min-height: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fe-editbtn:hover:not(:disabled) { background: var(--hover); color: var(--text-1); }
+.fe-editbtn:disabled { opacity: 0.5; cursor: default; }
+
+.fe-editbtn-primary {
+  background: var(--intent-primary);
+  border-color: var(--intent-primary);
+  color: var(--intent-primary-ink);
+}
+
+.fe-editbtn kbd {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 4px));
+  opacity: 0.75;
+}
+
+.fe-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: var(--status-blocked);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  flex: 0 0 auto;
+}
+
+.fe-conflict-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.fe-conflict-actions button {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  color: var(--text-2);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.fe-conflict-actions button:hover { color: var(--text-1); border-color: var(--border-strong); }
+
+/* The textarea sits exactly on top of the highlighted code: invisible text,
+   visible caret. Every metric below must match .fe-file-content or the caret
+   drifts away from the glyphs underneath it. */
+.fe-editor {
+  position: absolute;
+  inset: 0;
+  top: var(--fe-edit-offset, 0);
+  z-index: 5;
+  margin: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-1);
+  -webkit-text-fill-color: transparent;
+  white-space: pre;
+  word-wrap: normal;
+  tab-size: 2;
+}
+
+.fe-editor::selection {
+  background: var(--surface-4, rgba(120, 160, 255, 0.35));
+  -webkit-text-fill-color: transparent;
+}
+
+.fe-code-editing .fe-file-content {
+  pointer-events: none;
+}

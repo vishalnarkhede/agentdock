@@ -22,6 +22,8 @@ const LIMIT = 200;
 
 export interface FileSearchHandle {
   focus: () => void;
+  /** Run a search from elsewhere — used by "find usages". */
+  search: (term: string, opts?: { wholeWord?: boolean }) => void;
 }
 
 interface Props {
@@ -142,6 +144,11 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
     focus: () => {
       inputRef.current?.focus();
       inputRef.current?.select();
+    },
+    search: (term, o) => {
+      if (o?.wholeWord) setOpts((prev) => ({ ...prev, wholeWord: true, regex: false }));
+      setQuery(term);
+      inputRef.current?.focus();
     },
   }));
 

@@ -453,6 +453,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [outline, setOutline] = useState<DocSymbol[] | null>(null);
   const [showOutline, setShowOutline] = useState(false);
   const [modDown, setModDown] = useState(false);
+  const [usagesFor, setUsagesFor] = useState<string | null>(null);
   const backStack = useRef<{ path: string; line: number }[]>([]);
   // Bumped on every open-from-search, so clicking a second match in the file
   // already on screen still moves the active highlight.
@@ -658,9 +659,74 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     [baseHtml, fileSearchQuery, fileSearchActive, fileSearchIdx],
   );
   const highlightedHtml = marked.html;
+
+  // The object identity matters, not just the string. A fresh
+  // {__html} literal each render makes React re-apply innerHTML, which blows
+  // away the user's text selection on every unrelated re-render — and the
+  // session list polls every 3 seconds.
+  const innerHtml = useMemo(() => ({ __html: highlightedHtml }), [highlightedHtml]);
   const fileSearchMatchCount = marked.count;
 
   const dirty = draft !== null && openFile !== null && draft !== openFile.content;
+  const editing = draft !== null;
+
+  // Copy the rendered code's metrics onto the overlay, so the caret lands on
+  // the glyph it appears to be next to.
+  const [editorMetrics, setEditorMetrics] = useState<React.CSSProperties>({});
+  useEffect(() => {
+    if (!editing) return;
+    const pre = fileContentRef.current;
+    if (!pre) return;
+    const cs = window.getComputedStyle(pre);
+    setEditorMetrics({
+      fontFamily: cs.fontFamily,
+      fontSize: cs.fontSize,
+      lineHeight: cs.lineHeight,
+      letterSpacing: cs.letterSpacing,
+      padding: cs.padding,
+      tabSize: (cs as any).tabSize || "2",
+    });
+  }, [editing, openFile?.path]);
+
+  const startEditing = useCallback(() => {
+    if (!openFile) return;
+    setDraft(openFile.content);
+    setSaveError(null);
+  }, [openFile]);
+
+  // Focus once the overlay is actually mounted — a rAF scheduled from the
+  // click runs before React has committed it.
+  useEffect(() => {
+    if (!editing) return;
+    const ta = editorRef.current;
+    const pre = fileContentRef.current;
+    if (!ta) return;
+    if (pre) ta.scrollTop = pre.scrollTop;
+    ta.focus();
+  }, [editing]);
+
+  const stopEditing = useCallback(() => {
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    setDraft(null);
+    setConflict(null);
+    setSaveError(null);
+  }, [dirty]);
+
+  const onEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const ta = e.currentTarget;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const { selectionStart: a, selectionEnd: b, value } = ta;
+      const next = value.slice(0, a) + "  " + value.slice(b);
+      setDraft(next);
+      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = a + 2; });
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      stopEditing();
+    }
+  }, [stopEditing]);
 
   const currentLine = useCallback((): number => {
     const pre = fileContentRef.current;
@@ -677,6 +743,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         if (backStack.current.length > 50) backStack.current.shift();
       }
       setPicker(null);
+      setUsagesFor(null);
       await handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
     },
     [openFile, currentLine],
@@ -693,20 +760,25 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
    * shows where it is used instead.
    */
   const navigateToSymbol = useCallback(
-    async (name: string) => {
+    async (name: string, atLine?: number) => {
       if (!openFile) return;
       setNavBusy(true);
       try {
         const res = await findDefinition(name, roots, openFile.path);
+        // Judged by the line that was clicked. Using the scroll position for
+        // this made the answer depend on where the file happened to be
+        // scrolled, which is why repeat clicks behaved differently each time.
         const here = res.candidates.filter((c) => c.path === openFile.path);
-        const atDefinition = here.some((c) => Math.abs(c.line - currentLine()) < 3);
+        const atDefinition = atLine !== undefined && here.some((c) => Math.abs(c.line - atLine) <= 1);
 
         if (res.candidates.length === 0 || atDefinition) {
           // Textual usages, not semantic references — the index knows
-          // declarations, not call sites.
-          window.dispatchEvent(new CustomEvent("agentdock-find-usages", { detail: { name } }));
+          // declarations, not call sites. Whole-word so `Load` does not drag in
+          // `Loader` and `Preload`.
+          fileSearchRef.current?.search(name, { wholeWord: true });
           setFileSearchQuery(name);
           setFileSearchActive(true);
+          setUsagesFor(name);
           return;
         }
         if (res.candidates.length === 1) {
@@ -741,10 +813,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       if (!(e.metaKey || e.ctrlKey)) return;
       const pre = fileContentRef.current;
       if (!pre) return;
-      const word = wordAtPoint(e.clientX, e.clientY, pre);
-      if (!word) return;
+      const hit = wordAtPoint(e.clientX, e.clientY, pre);
+      if (!hit) return;
       e.preventDefault();
-      navigateToSymbol(word);
+      navigateToSymbol(hit.word, hit.line);
     },
     [navigateToSymbol],
   );
@@ -998,15 +1070,68 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 </button>
               </div>
             )}
-            <div className="fe-code-wrap">
+            <div className={`fe-code-wrap${editing ? " fe-code-editing" : ""}`}>
+              <div className="fe-editbar">
+                {editing ? (
+                  <>
+                    <span className={`fe-editbar-state${dirty ? " fe-editbar-dirty" : ""}`}>
+                      {dirty ? "\u25cf unsaved" : "no changes"}
+                    </span>
+                    <button className="fe-editbtn fe-editbtn-primary" onClick={() => save()} disabled={!dirty || saving}>
+                      {saving ? "saving\u2026" : "save"}<kbd>\u2318S</kbd>
+                    </button>
+                    <button className="fe-editbtn" onClick={stopEditing}>done</button>
+                  </>
+                ) : (
+                  <button className="fe-editbtn" onClick={startEditing} title="Edit this file">
+                    <Icon name="edit" size={12} /> edit
+                  </button>
+                )}
+                <span className="fe-editbar-spacer" />
+                {saveError && <span className="fe-editbar-error">{saveError}</span>}
+              </div>
+
+              {conflict && (
+                <div className="fe-conflict" role="alert">
+                  <Icon name="alert" size={13} />
+                  <span>Changed on disk since you opened it — the agent probably wrote to it.</span>
+                  <span className="fe-conflict-actions">
+                    <button onClick={takeTheirs}>reload theirs</button>
+                    <button onClick={() => save(true)}>overwrite anyway</button>
+                    <button onClick={() => setConflict(null)}>cancel</button>
+                  </span>
+                </div>
+              )}
+
               <pre
                 ref={fileContentRef}
                 className={`fe-file-content${modDown ? " fe-code-navmode" : ""}`}
                 onClick={onCodeClick}
               ><code
                 className={`hljs language-${openFile.language}`}
-                dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+                dangerouslySetInnerHTML={innerHtml}
               /></pre>
+
+              {editing && (
+                <textarea
+                  ref={editorRef}
+                  className="fe-editor"
+                  value={draft ?? ""}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  onChange={(e) => setDraft(e.target.value)}
+                  onScroll={(e) => {
+                    const pre = fileContentRef.current;
+                    if (!pre) return;
+                    pre.scrollTop = e.currentTarget.scrollTop;
+                    pre.scrollLeft = e.currentTarget.scrollLeft;
+                  }}
+                  onKeyDown={onEditorKeyDown}
+                  style={editorMetrics}
+                />
+              )}
 
               {navBusy && <div className="fe-nav-busy">looking up…</div>}
 
