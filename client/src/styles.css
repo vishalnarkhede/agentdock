@@ -852,6 +852,23 @@ h1 {
   transition: width 0.2s ease, min-width 0.2s ease;
 }
 
+[data-theme="win98"] .split-sidebar {
+  border-right: 2px outset #dfdfdf;
+}
+
+[data-theme="glass"] .split-sidebar {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-right-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="macos"] .split-sidebar {
+  background: rgba(246, 246, 248, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
 /* KNOWN BROKEN: the sidebar-collapsed class lands on .split-layout and this
    selector matches the element, but the computed width stays 330px. Raising
    specificity did not help, so the cause is elsewhere and unfound. Pre-existing,
@@ -6477,6 +6494,24 @@ mark.fe-match-active {
   /* Split layout: full-width stacked, toggle between sidebar and main */
   .split-layout {
     flex-direction: column;
+  }
+
+  /* A phone is one column: the list is full width, and it gets out of the way
+     entirely once you open a session. Both of these were collateral from the
+     same bad cleanup that ate the desktop width rule — the dead-list contained
+     "split-side", a substring of ".split-sidebar". */
+  .split-sidebar {
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .split-layout.mobile-show-terminal .split-sidebar {
+    display: none;
   }
 
   /* Bottom tab bar replaced by bottom nav — hide the inline tab strip */

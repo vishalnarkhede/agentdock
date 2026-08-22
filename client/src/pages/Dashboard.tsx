@@ -758,6 +758,21 @@ export function Dashboard() {
     }, { replace: true });
   }, [setSearchParams]);
 
+  /**
+   * A phone renders surfaces through bottomTab; fullSurface is desktop only.
+   * A ?view= link shared from a desktop would otherwise leave the main area
+   * blank, so translate it once on arrival.
+   */
+  useEffect(() => {
+    if (!isMobile || !fullSurface) return;
+    if (fullSurface !== "ship") {
+      setBottomTab(fullSurface as typeof bottomTab);
+      setBottomMaximized(true);
+      setMobileShowTerminal(true);
+    }
+    setFullSurface(null);
+  }, [isMobile, fullSurface, setFullSurface]);
+
   // Tour mode: active when ?tour=1 is in the URL (demo mode only)
   const [tourActive, setTourActive] = useState(() =>
     isDemo() && new URLSearchParams(window.location.search).has("tour")
@@ -2379,8 +2394,13 @@ export function Dashboard() {
           onOpen={(name) => { setActiveSession(name); setMobileShowTerminal(true); }}
           onAction={(name, cta) => {
             setActiveSession(name);
-            if (cta === "Review") setFullSurface("changes");
-            else setMobileShowTerminal(true);
+            setMobileShowTerminal(true);
+            // A phone shows surfaces through bottomTab, not fullSurface — the
+            // latter only renders on desktop, so Review was a dead tap.
+            if (cta === "Review") {
+              setBottomTab("changes");
+              setBottomMaximized(true);
+            }
           }}
         />
       </div>
