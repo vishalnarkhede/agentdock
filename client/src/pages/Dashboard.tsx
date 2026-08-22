@@ -14,7 +14,6 @@ import { PlanView } from "../components/PlanView";
 import "../styles/sidebar-header.css";
 import { QUEUE_BUCKETS, queueBucket } from "../queue";
 import { fetchConflicts, fetchCoverage } from "../api";
-import { BlockedCard } from "../components/BlockedCard";
 import { QuietView } from "../components/QuietView";
 import { MobileQueue } from "../components/MobileQueue";
 import { MobileApprove } from "../components/MobileApprove";
@@ -1937,48 +1936,6 @@ export function Dashboard() {
                   />
                 )}
               </div>
-
-              {/* Surfaces what the agent is asking and the context to decide
-                  well. Answering happens in the terminal beside it. */}
-              {!isMobile && activeSessionInfo && isBlocked(activeSessionInfo) && (
-                <BlockedCard
-                  key={activeSession}
-                  sessionName={activeSession}
-                  displayName={activeSessionInfo.displayName}
-                  /* The status hooks report *that* an agent is blocked, not
-                     the shape of the ask, so there are no buttons to offer yet.
-                     Enumerated choices would need the hook payload to carry the
-                     permission request itself. */
-                  mode="question"
-                  waited={timeAgo(activeSessionInfo.created)}
-                  question={activeSessionInfo.statusLine?.message || "This agent is waiting on you."}
-                  detail={activeSessionInfo.statusLine?.type === "error"
-                    ? "It reported a failure and stopped rather than guessing."
-                    : undefined}
-                  choices={[]}
-                  context={[
-                    {
-                      label: "WORKTREE",
-                      text: activeSessionPaths[0] ?? activeSessionInfo.path ?? "—",
-                      sub: `${activeSessionInfo.worktrees?.length ?? 0} repo${(activeSessionInfo.worktrees?.length ?? 0) === 1 ? "" : "s"} in this session`,
-                    },
-                    ...(sharedWith ? [{
-                      label: "ALSO BEING CHANGED BY",
-                      text: sharedWith.session,
-                      sub: `${sharedWith.files} shared file${sharedWith.files === 1 ? "" : "s"}. Whichever merges second has to resolve it.`,
-                      warn: true,
-                    }] : []),
-                    ...(panelSummary && panelSummary.planTotal > 0 ? [{
-                      label: "PLAN PROGRESS",
-                      text: `${panelSummary.planDone} of ${panelSummary.planTotal} steps done`,
-                      sub: panelSummary.unplanned > 0
-                        ? `${panelSummary.unplanned} changed files the plan never mentions.`
-                        : undefined,
-                    }] : []),
-                  ]}
-                  onChoice={(label) => { sendSessionInput(activeSession, label).catch(() => {}); }}
-                />
-              )}
 
               {!isMobile && (
                 <div className="term-status">
