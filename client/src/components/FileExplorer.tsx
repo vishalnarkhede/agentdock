@@ -3,52 +3,10 @@ import { fetchFsDir, fetchFsFile, writeFsFile } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
 import { FileSearch, type FileSearchHandle } from "./FileSearch";
-import { markHtml } from "../mark-html";
-import { wordAtPoint } from "../word-at";
+import { CodeViewLazy, type CodeViewHandle } from "./CodeViewLazy";
 import "../styles/code-nav.css";
 import { findDefinition, fetchDocSymbols, type Candidate, type DocSymbol } from "../code-api";
 import "../styles/files.css";
-import "highlight.js/styles/atom-one-dark.css";
-import hljs from "highlight.js/lib/core";
-// Register only the languages we actually need — keeps bundle lean
-import typescript from "highlight.js/lib/languages/typescript";
-import javascript from "highlight.js/lib/languages/javascript";
-import python from "highlight.js/lib/languages/python";
-import go from "highlight.js/lib/languages/go";
-import rust from "highlight.js/lib/languages/rust";
-import bash from "highlight.js/lib/languages/bash";
-import json from "highlight.js/lib/languages/json";
-import yaml from "highlight.js/lib/languages/yaml";
-import css from "highlight.js/lib/languages/css";
-import xml from "highlight.js/lib/languages/xml"; // html
-import sql from "highlight.js/lib/languages/sql";
-import markdown from "highlight.js/lib/languages/markdown";
-import plaintext from "highlight.js/lib/languages/plaintext";
-
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("go", go);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("yaml", yaml);
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("xml", xml);
-hljs.registerLanguage("html", xml);
-hljs.registerLanguage("sql", sql);
-hljs.registerLanguage("markdown", markdown);
-hljs.registerLanguage("plaintext", plaintext);
-
-function highlight(content: string, language: string): string {
-  try {
-    const lang = hljs.getLanguage(language) ? language : "plaintext";
-    return hljs.highlight(content, { language: lang }).value;
-  } catch {
-    return content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-}
-
 interface Props {
   roots: string[]; // absolute paths to repo root(s)
   onClose?: () => void;
@@ -342,22 +300,6 @@ function TreeNode({
   );
 }
 
-function countNewlines(s: string, from: number, to: number): number {
-  let n = 0;
-  for (let i = from; i < to; i++) if (s.charCodeAt(i) === 10) n++;
-  return n;
-}
-
-/** Scroll the pre container so the mark is vertically centered in the viewport. */
-function scrollMarkIntoView(pre: HTMLElement, mark: HTMLElement | undefined): void {
-  if (!mark) return;
-  const preRect = pre.getBoundingClientRect();
-  const markRect = mark.getBoundingClientRect();
-  // markRect is relative to viewport; convert to position within the pre's scroll content
-  const markTopInPre = markRect.top - preRect.top + pre.scrollTop;
-  pre.scrollTop = markTopInPre - pre.clientHeight / 3;
-}
-
 type PerRootsState = {
   openFile: OpenFile | null;
   expandedDirs: Set<string>;
@@ -434,7 +376,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [fileSearchActive, setFileSearchActive] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
   const [fileSearchIdx, setFileSearchIdx] = useState(0);
-  const fileContentRef = useRef<HTMLPreElement>(null);
   const fileSearchInputRef = useRef<HTMLInputElement>(null);
 
   // Filename search state
@@ -445,7 +386,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<{ theirs: string; version: string } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
 
   // Code navigation
   const [navBusy, setNavBusy] = useState(false);
@@ -459,8 +399,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // already on screen still moves the active highlight.
   const [markNonce, setMarkNonce] = useState(0);
 
-  // When opening a grep result, remember target line to scroll to after render
-  const targetLineRef = useRef<number | null>(null);
 
   useImperativeHandle(ref, () => ({
     focusSearch: () => fileSearchRef.current?.focus(),
@@ -492,44 +430,24 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setFileSearchQuery("");
   }, []);
 
-  // After a grep result opens a file, scroll to the target line
-  useEffect(() => {
-    const line = targetLineRef.current;
-    if (!line || !fileContentRef.current) return;
-    targetLineRef.current = null;
-    const pre = fileContentRef.current;
-    // Approximate: measure line height from computed style
-    const style = window.getComputedStyle(pre);
-    const lineHeight = parseFloat(style.lineHeight) || 18;
-    // Add padding offset
-    const paddingTop = parseFloat(style.paddingTop) || 12;
-    pre.scrollTop = paddingTop + (line - 1) * lineHeight - pre.clientHeight / 3;
-  }, [openFile]);
-
   const handleOpenGrepResult = useCallback(async (result: GrepResult) => {
-    targetLineRef.current = result.lineNumber;
-    if (openFile?.path !== result.path) {
-      setLoadingPath(result.path);
-      setError(null);
-      try {
-        const data = await fetchFsFile(result.path, roots);
-        setOpenFile({ path: result.path, ...data });
-      } catch (err: any) {
-        setError(err.message || "Failed to read file");
-        targetLineRef.current = null;
-      } finally {
-        setLoadingPath(null);
-      }
-    } else {
-      // File already open — scroll immediately
-      const pre = fileContentRef.current;
-      if (pre) {
-        const style = window.getComputedStyle(pre);
-        const lineHeight = parseFloat(style.lineHeight) || 18;
-        const paddingTop = parseFloat(style.paddingTop) || 12;
-        pre.scrollTop = paddingTop + (result.lineNumber - 1) * lineHeight - pre.clientHeight / 3;
-      }
-      targetLineRef.current = null;
+    if (openFile?.path === result.path) {
+      // Already open: CodeMirror knows where line N is; no line-height maths.
+      setActiveMatchLine(result.lineNumber);
+      codeRef.current?.goToLine(result.lineNumber);
+      return;
+    }
+    pendingMarkRef.current = { path: result.path, line: result.lineNumber };
+    setLoadingPath(result.path);
+    setError(null);
+    try {
+      const data = await fetchFsFile(result.path, roots);
+      setOpenFile({ path: result.path, ...data });
+    } catch (err: any) {
+      setError(err.message || "Failed to read file");
+      pendingMarkRef.current = null;
+    } finally {
+      setLoadingPath(null);
     }
   }, [openFile, roots]);
 
@@ -638,72 +556,24 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setTreePanelWidth((w) => Math.max(140, Math.min(480, w + step)));
   }, []);
 
-  // Memoize highlighted HTML — prevents React from needlessly resetting the code element's
-  // innerHTML on unrelated state changes (e.g. fileSearchIdx), which would destroy marks
-  // and any in-progress text selection.
   const shownContent = draft ?? openFile?.content ?? "";
 
-  const baseHtml = useMemo(
-    () => (openFile ? highlight(shownContent, openFile.language) : ""),
-    [openFile, shownContent],
-  );
-
-  // Marks are rendered by React rather than injected afterwards. Injecting
-  // them into this subtree meant the next commit re-applied the whole string
-  // and deleted every mark a few milliseconds after it was created.
-  const marked = useMemo(
-    () =>
-      fileSearchActive && fileSearchQuery.trim()
-        ? markHtml(baseHtml, fileSearchQuery.trim(), fileSearchIdx)
-        : { html: baseHtml, lines: [] as number[], count: 0 },
-    [baseHtml, fileSearchQuery, fileSearchActive, fileSearchIdx],
-  );
-  const highlightedHtml = marked.html;
-
-  // The object identity matters, not just the string. A fresh
-  // {__html} literal each render makes React re-apply innerHTML, which blows
-  // away the user's text selection on every unrelated re-render — and the
-  // session list polls every 3 seconds.
-  const innerHtml = useMemo(() => ({ __html: highlightedHtml }), [highlightedHtml]);
-  const fileSearchMatchCount = marked.count;
+  // CodeMirror owns rendering: highlighting, caret, selection and search marks
+  // all come from it. The hand-rolled stack it replaces was highlight.js into
+  // dangerouslySetInnerHTML, marks spliced into that html, and a transparent
+  // textarea laid on top.
+  const [fileSearchMatchCount, setFileSearchMatchCount] = useState(0);
+  const [activeMatchLine, setActiveMatchLine] = useState<number | null>(null);
+  const codeRef = useRef<CodeViewHandle>(null);
 
   const dirty = draft !== null && openFile !== null && draft !== openFile.content;
   const editing = draft !== null;
-
-  // Copy the rendered code's metrics onto the overlay, so the caret lands on
-  // the glyph it appears to be next to.
-  const [editorMetrics, setEditorMetrics] = useState<React.CSSProperties>({});
-  useEffect(() => {
-    if (!editing) return;
-    const pre = fileContentRef.current;
-    if (!pre) return;
-    const cs = window.getComputedStyle(pre);
-    setEditorMetrics({
-      fontFamily: cs.fontFamily,
-      fontSize: cs.fontSize,
-      lineHeight: cs.lineHeight,
-      letterSpacing: cs.letterSpacing,
-      padding: cs.padding,
-      tabSize: (cs as any).tabSize || "2",
-    });
-  }, [editing, openFile?.path]);
 
   const startEditing = useCallback(() => {
     if (!openFile) return;
     setDraft(openFile.content);
     setSaveError(null);
   }, [openFile]);
-
-  // Focus once the overlay is actually mounted — a rAF scheduled from the
-  // click runs before React has committed it.
-  useEffect(() => {
-    if (!editing) return;
-    const ta = editorRef.current;
-    const pre = fileContentRef.current;
-    if (!ta) return;
-    if (pre) ta.scrollTop = pre.scrollTop;
-    ta.focus();
-  }, [editing]);
 
   const stopEditing = useCallback(() => {
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
@@ -712,41 +582,17 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     setSaveError(null);
   }, [dirty]);
 
-  const onEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const ta = e.currentTarget;
-    if (e.key === "Tab") {
-      e.preventDefault();
-      const { selectionStart: a, selectionEnd: b, value } = ta;
-      const next = value.slice(0, a) + "  " + value.slice(b);
-      setDraft(next);
-      requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = a + 2; });
-      return;
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      stopEditing();
-    }
-  }, [stopEditing]);
-
-  const currentLine = useCallback((): number => {
-    const pre = fileContentRef.current;
-    if (!pre) return 1;
-    const style = window.getComputedStyle(pre);
-    const lh = parseFloat(style.lineHeight) || 18;
-    return Math.max(1, Math.round(pre.scrollTop / lh) + 1);
-  }, []);
-
   const goTo = useCallback(
     async (path: string, line: number, pushHistory = true) => {
       if (pushHistory && openFile) {
-        backStack.current.push({ path: openFile.path, line: currentLine() });
+        backStack.current.push({ path: openFile.path, line: 1 });
         if (backStack.current.length > 50) backStack.current.shift();
       }
       setPicker(null);
       setUsagesFor(null);
       await handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
     },
-    [openFile, currentLine],
+    [openFile],
   );
 
   const goBack = useCallback(() => {
@@ -790,7 +636,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         setNavBusy(false);
       }
     },
-    [openFile, roots, goTo, currentLine],
+    [openFile, roots, goTo],
   );
 
   // Cmd/Ctrl underlines identifiers so it is obvious what is clickable.
@@ -807,19 +653,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       window.removeEventListener("blur", blur);
     };
   }, []);
-
-  const onCodeClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const pre = fileContentRef.current;
-      if (!pre) return;
-      const hit = wordAtPoint(e.clientX, e.clientY, pre);
-      if (!hit) return;
-      e.preventDefault();
-      navigateToSymbol(hit.word, hit.line);
-    },
-    [navigateToSymbol],
-  );
 
   useEffect(() => {
     if (!openFile) { setOutline(null); return; }
@@ -921,29 +754,15 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     }
   }, [fileSearchMatchCount, closeFileSearch]);
 
-  // Land on the match the user clicked in the search results, not the first in
-  // the file. Consumed only once the file it names is the one on screen.
+  // Jump to the match the search result pointed at, once its file is open.
   useEffect(() => {
     const pending = pendingMarkRef.current;
     if (!pending || openFile?.path !== pending.path) return;
     pendingMarkRef.current = null;
-    if (pending.line === null || marked.lines.length === 0) return;
-    const idx = marked.lines.indexOf(pending.line);
-    if (idx >= 0) setFileSearchIdx(idx);
-  }, [openFile, marked.lines, markNonce]);
-
-
-  // The active class is baked into the rendered html, so this only scrolls.
-  useEffect(() => {
-    const pre = fileContentRef.current;
-    if (!pre) return;
-    const active = pre.querySelector<HTMLElement>("mark.fe-match-active");
-    if (active) {
-      scrollMarkIntoView(pre, active);
-      targetLineRef.current = null;
-    }
-  }, [fileSearchIdx, highlightedHtml]);
-
+    if (pending.line === null) return;
+    setActiveMatchLine(pending.line);
+    codeRef.current?.goToLine(pending.line);
+  }, [openFile]);
 
   // Relative path from root for breadcrumb
   function getBreadcrumb(filePath: string): string {
@@ -1103,37 +922,17 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 </div>
               )}
 
-              <div className="fe-code-scroll">
-              <pre
-                ref={fileContentRef}
-                className={`fe-file-content${modDown ? " fe-code-navmode" : ""}`}
-                onClick={onCodeClick}
-              ><code
-                className={`hljs language-${openFile.language}`}
-                dangerouslySetInnerHTML={innerHtml}
-              /></pre>
-
-              {editing && (
-                <textarea
-                  ref={editorRef}
-                  className="fe-editor"
-                  value={draft ?? ""}
-                  spellCheck={false}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  onChange={(e) => setDraft(e.target.value)}
-                  onScroll={(e) => {
-                    const pre = fileContentRef.current;
-                    if (!pre) return;
-                    pre.scrollTop = e.currentTarget.scrollTop;
-                    pre.scrollLeft = e.currentTarget.scrollLeft;
-                  }}
-                  onKeyDown={onEditorKeyDown}
-                  style={editorMetrics}
-                />
-              )}
-              </div>
+              <CodeViewLazy
+                viewRef={codeRef}
+                path={openFile.path}
+                content={shownContent}
+                editable={editing}
+                onChange={setDraft}
+                highlightTerm={fileSearchActive ? fileSearchQuery : ""}
+                activeLine={activeMatchLine}
+                onCmdClick={(word: string, line: number) => navigateToSymbol(word, line)}
+                onMatchCount={setFileSearchMatchCount}
+              />
 
               {navBusy && <div className="fe-nav-busy">looking up…</div>}
 
