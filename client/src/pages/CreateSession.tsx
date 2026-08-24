@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { RepoSelector, saveRecentRepos } from "../components/RepoSelector";
 import { MetaSelect } from "../components/MetaSelect";
+import { parseTicketId } from "../ticket-id";
 import { Icon, type IconName } from "../components/Icon";
 import type { AgentType, MetaPropertyPreset, RepoConfig } from "../types";
 import "../styles/create.css";
@@ -74,6 +75,7 @@ export function CreateSession() {
   const [ticketDraft, setTicketDraft] = useState("");
   const [ticketId, setTicketId] = useState("");
   const [ticketNote, setTicketNote] = useState("");
+  const [ticketError, setTicketError] = useState("");
   const [slackOpen, setSlackOpen] = useState(false);
   const [slackDraft, setSlackDraft] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -117,8 +119,12 @@ export function CreateSession() {
       : `Linear ticket ${id} — I have not attached its text, so ask me for anything you need from it.`;
 
   const attachTicket = () => {
-    const id = ticketDraft.trim().toUpperCase();
-    if (!id) return;
+    const id = parseTicketId(ticketDraft);
+    if (!id) {
+      if (ticketDraft.trim()) setTicketError("That does not contain a ticket id like MOD2-1289.");
+      return;
+    }
+    setTicketError("");
     const line = ticketLine(id);
     setTicketId(id);
     setTicketNote(line);
@@ -296,10 +302,20 @@ export function CreateSession() {
     setSubmitting(true);
     setError("");
     try {
+      // A ticket typed but never attached used to be dropped in silence: no
+      // brief, no worktree, an agent booted into a bare shell. Fold it in here
+      // rather than depend on having pressed "Add to the brief".
+      let prompt = taskPrompt.trim();
+      const pendingId = source === "ticket" && !ticketId ? parseTicketId(ticketDraft) : null;
+      if (pendingId) {
+        const line = ticketLine(pendingId);
+        prompt = prompt ? `${line}\n\n${prompt}` : `${line}\n\nConstraint:\nDone when:`;
+      }
+
       const result = await createSession({
         targets,
         name: sessionName.trim() || undefined,
-        prompt: taskPrompt.trim() || undefined,
+        prompt: prompt || undefined,
         grouped,
         isolated,
         dangerouslySkipPermissions: dangerouslySkipPermissions || undefined,
@@ -455,7 +471,7 @@ export function CreateSession() {
                       className="cs-input cs-input-mono"
                       placeholder="MOD-412"
                       value={ticketDraft}
-                      onChange={(e) => setTicketDraft(e.target.value)}
+                      onChange={(e) => { setTicketDraft(e.target.value); setTicketError(""); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
@@ -473,6 +489,14 @@ export function CreateSession() {
                     Add to the brief
                   </button>
                 </div>
+              )}
+
+              {source === "ticket" && !ticketId && ticketDraft.trim() && (
+                <p className={`cs-ticket-note${ticketError ? " cs-ticket-note-bad" : ""}`}>
+                  {ticketError
+                    ? ticketError
+                    : `Reads as ${parseTicketId(ticketDraft)} — added to the brief when you launch.`}
+                </p>
               )}
 
               {source === "ticket" && ticketId && (

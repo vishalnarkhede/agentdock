@@ -852,3 +852,11 @@
   .cs-footer-hint { display: none; }
   .cs-btn-launch { flex: 1 1 auto; min-height: 44px; justify-content: center; }
 }
+
+.cs-ticket-note {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.cs-ticket-note-bad { color: var(--intent-danger); }
