@@ -510,39 +510,48 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       return;
     }
 
-    // Write the clear + content in a single term.write() call so xterm batches
-    // them atomically in one animation frame — no blank flash between clear and render.
-    // \x1b[H = cursor to home, \x1b[2J = erase display, \x1bc = full reset (parser + screen).
-    // Using \x1bc inside write() resets the ANSI parser AND clears the screen within
-    // the same render pass, eliminating the flicker that term.reset() caused.
+    // Clear and content in one term.write() so xterm batches them into a single
+    // animation frame — no blank flash between the clear and the render.
+    // \x1bc is a full reset: it resets the ANSI parser AND clears the screen
+    // inside the same render pass, which term.reset() did not.
     /**
-     * KNOWN OFF BY ONE, diagnosed but not fixed.
+     * The cursor is placed by counting up from the bottom rather than by
+     * addressing a row — which is what finally fixed the off-by-one this code
+     * carried a note about for weeks.
      *
-     * tmux is right: cursor_y equals the capture line holding the ❯ prompt,
-     * measured at the same instant. But xterm renders that content one row
-     * lower — capture line 0 is "} else {" while DOM row 0 is blank — so this
-     * absolute positioning lands on the box border above the input box, which
-     * reads as the cursor being missing.
+     * Two faults compounded. tmux's capture ends in a newline, so the write
+     * left the cursor on the row *below* the pane's last line; that scrolled
+     * the screen up by one and left row 0 blank — the blank first row the old
+     * note could not explain. And stripping *every* trailing newline made a
+     * pane with blank rows at the bottom come out short, after which an
+     * absolute row address was pointing into a screen whose rows no longer
+     * lined up with tmux's at all.
      *
-     * Tried and rejected, none of which moved it: anchoring up from the last
-     * written line, disabling auto-wrap for the write (DECAWM off) in case a
-     * full-width line added a row, homing explicitly after the reset, and
-     * stripping leading newlines. A magic +1 would paper over it without
-     * explaining the blank first row, so it is left alone.
+     * So: drop exactly one trailing newline, which leaves the cursor on the
+     * pane's last row, then move up by however many rows the real cursor sits
+     * above it. Relative movement needs no agreement between xterm's row count
+     * and tmux's — and that agreement was the assumption that kept breaking.
      */
-    const row = snapshot.cursorY + 1;
-    const col = snapshot.cursorX + 1;
+    const body = snapshot.content.endsWith("\n")
+      ? snapshot.content.slice(0, -1)
+      : snapshot.content;
+    const paneHeight = snapshot.paneHeight || term.rows;
+    const rowsUp = Math.max(0, paneHeight - 1 - snapshot.cursorY);
     term.write(
-      "\x1bc" +         // full reset (parser + screen) — atomic with content below
-      "\x1b[?25l" +     // hide cursor during render
-      snapshot.content.replace(/\n+$/, "") +
-      `\x1b[${row};${col}H` +
-      "\x1b[?25h"       // show cursor at final position
+      "\x1bc" +                                  // full reset — atomic with the content below
+      "\x1b[?25l" +                              // hide the cursor while painting
+      body +
+      (rowsUp > 0 ? `\x1b[${rowsUp}A` : "") +    // up from the pane's last row
+      `\x1b[${snapshot.cursorX + 1}G` +          // and across to the column
+      "\x1b[?25h"                                // show it where it really is
     );
-    /* Streaming paints this once and then appends, so the reader has to end up
-       at the bottom of it: absolute cursor addressing above moves the cursor,
-       and xterm follows the cursor, not the last line written. */
-    if (streamingRef.current) term.scrollToBottom();
+
+    /* The capture carries the scrollback above the pane as well, so the write
+       leaves the viewport partway up that history. tmux owns the real history —
+       xterm's buffer only ever holds what we paint plus what the stream appends
+       after it — so this is the reader's whole scrollback, and they should start
+       at the end of it. */
+    term.scrollToBottom();
     setLastContent(snapshot.content);
 
     // Update scrollbar thumb after render

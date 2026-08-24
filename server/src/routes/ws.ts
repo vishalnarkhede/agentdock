@@ -20,9 +20,10 @@ const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
 export async function handleWsOpen(ws: any, sessionName: string) {
   console.log(`[ws] open: session="${sessionName}"`);
 
-  /* The streaming path paints this capture once and then appends, so it wants
-     the visible pane and nothing above it — see capturePaneSnapshot. */
-  const result = await capturePaneSnapshot(sessionName, STREAM_ENABLED ? 0 : 200);
+  /* With scrollback: tmux owns the pane's history, so whatever this capture
+     does not carry is history the reader cannot reach — xterm's buffer starts
+     empty and only grows from what the stream appends after this point. */
+  const result = await capturePaneSnapshot(sessionName, 200);
   if (!result.ok) {
     console.error(`[ws] snapshot failed: ${result.error}`);
     ws.send(JSON.stringify({ type: "error", data: result.error }));
@@ -44,10 +45,6 @@ export async function handleWsOpen(ws: any, sessionName: string) {
       return;
     }
     console.warn(`[ws] control mode unavailable, polling: session="${sessionName}"`);
-    /* Polling repaints from scratch, so it does want the scrollback that the
-       capture above deliberately left out. */
-    const withHistory = await capturePaneSnapshot(sessionName, 200);
-    if (withHistory.ok) initial = withHistory.data;
   }
 
   ws.send(JSON.stringify({ type: "mode", mode: "snapshot" }));

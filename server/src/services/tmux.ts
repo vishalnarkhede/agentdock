@@ -172,14 +172,9 @@ export interface PaneSnapshot {
 export async function capturePaneSnapshot(
   name: string,
   /**
-   * Lines of scrollback to include above the visible pane.
-   *
-   * The polling path wants some, because it repaints from scratch every time and
-   * the reader would otherwise have nothing to scroll back through. The
-   * streaming path wants none: it paints this once and then appends, and the
-   * cursor it places afterwards is addressed against the viewport, which only
-   * lines up with the pane when the capture *is* the pane. Scrollback there
-   * shifted the cursor by however many history lines came back.
+   * Lines of scrollback to include above the visible pane. tmux owns the
+   * pane's history, so this is the only history a viewer ever gets: what the
+   * capture leaves out, the reader cannot scroll back to.
    */
   scrollbackLines = 200,
 ): Promise<{ ok: true; data: PaneSnapshot } | { ok: false; error: string }> {
