@@ -150,14 +150,17 @@ function SessionRow({
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [restoring, setRestoring] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const rowMenuRef = useRef<HTMLDivElement>(null);
 
   // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      const t = e.target as Node;
+      // Same portal caveat as SidebarMenu: the menu no longer lives inside the
+      // wrap that menuRef points at.
+      if (menuRef.current?.contains(t) || rowMenuRef.current?.contains(t)) return;
+      setMenuOpen(false);
     }
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
@@ -329,7 +332,7 @@ function SessionRow({
             <Icon name="more" size={16} />
           </button>
           {menuOpen && menuPos && createPortal(
-            <div className="session-row-menu" style={{ top: menuPos.top, right: menuPos.right }}>
+            <div ref={rowMenuRef} className="session-row-menu" style={{ top: menuPos.top, right: menuPos.right }}>
               {onTogglePin && (
                 <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); }}>
                   {pinned ? "Unpin" : "Pin to top"}
@@ -486,11 +489,17 @@ function SidebarMenu({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
-      if (!btnRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The menu is portalled to <body>, so it is not inside btnRef. Without
+      // checking it too, mousedown on an item closed the menu before the click
+      // could reach the item's handler — every option looked inert.
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("mousedown", close);
@@ -524,7 +533,7 @@ function SidebarMenu({
         &#8943;
       </button>
       {open && pos && createPortal(
-        <div className="sidebar-menu" style={{ top: pos.top, right: pos.right }} role="menu">
+        <div ref={menuRef} className="sidebar-menu" style={{ top: pos.top, right: pos.right }} role="menu">
           {groupAction && (
             <button className="sidebar-menu-item" role="menuitem" onClick={() => { setOpen(false); groupAction.run(); }}>
               {groupAction.label}
