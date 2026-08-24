@@ -8,12 +8,10 @@ import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
 import { Icon, type IconName } from "../components/Icon";
 import { fetchHookState, installHooks, type HookState } from "../api";
-import { CoverageView } from "../components/CoverageView";
-import { ShipView } from "../components/ShipView";
 import { PlanView } from "../components/PlanView";
 import "../styles/sidebar-header.css";
 import { QUEUE_BUCKETS, queueBucket } from "../queue";
-import { fetchConflicts, fetchCoverage } from "../api";
+import { fetchConflicts, fetchPanelSummary } from "../api";
 import { QuietView } from "../components/QuietView";
 import { MobileQueue } from "../components/MobileQueue";
 import { MobileApprove } from "../components/MobileApprove";
@@ -61,14 +59,13 @@ function getDisplayStatus(session: SessionInfo): string {
     ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
 }
 
-const FULL_SURFACES = ["plan", "coverage", "changes", "files", "sub-agents", "ship"] as const;
+const FULL_SURFACES = ["plan", "changes", "files", "sub-agents"] as const;
 type FullSurface = (typeof FULL_SURFACES)[number];
 
 /** Surfaces reachable from the full-window host's own tab bar. */
 const FULL_TABS: { id: FullSurface; label: string }[] = [
   { id: "plan", label: "plan" },
   { id: "changes", label: "changes" },
-  { id: "coverage", label: "coverage" },
   { id: "files", label: "files" },
 ];
 
@@ -85,8 +82,6 @@ function isBlocked(session: SessionInfo): boolean {
 const RAIL: { id: FullSurface; label: string; icon: IconName }[] = [
   { id: "plan", label: "Plan", icon: "plan" },
   { id: "changes", label: "Changes", icon: "diff" },
-  { id: "coverage", label: "Coverage", icon: "eye" },
-  { id: "ship", label: "Ship", icon: "merge" },
   { id: "files", label: "Files", icon: "folder" },
   { id: "sub-agents", label: "Sub-agents", icon: "users" },
 ];
@@ -576,9 +571,9 @@ export function Dashboard() {
   const setActiveTab = mobileNav?.setActiveTab ?? (() => {});
 
   // Bottom pane (plan/changes/sub-agents) split with terminal
-  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "coverage" | "ship" | "sub-agents" | "files" | null>(null);
-  // Desktop uses the accordion; the design opens Plan and Coverage by default.
-  const [openPanels, setOpenPanels] = useState<Set<string>>(() => new Set(["plan", "coverage"]));
+  const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | "files" | null>(null);
+  // Desktop uses the accordion; the design opens Plan and Changes by default.
+  const [openPanels, setOpenPanels] = useState<Set<string>>(() => new Set(["plan", "changes"]));
   // Review is a full-window mode in the design, not a panel — review quality
   // falls off when it is cramped, which is the whole reason it takes over.
   /**
@@ -589,9 +584,8 @@ export function Dashboard() {
   const [sharedWith, setSharedWith] = useState<{ session: string; files: number } | null>(null);
   const [mobileApproveDismissed, setMobileApproveDismissed] = useState(false);
   const [panelSummary, setPanelSummary] = useState<{
-    planDone: number; planTotal: number; unplanned: number; plus: number; minus: number; fileCount: number;
+    planDone: number; planTotal: number; plus: number; minus: number; fileCount: number;
   } | null>(null);
-  const [orphanPaths, setOrphanPaths] = useState<string[]>([]);
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
   const [bottomMaximized, setBottomMaximized] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
@@ -774,11 +768,9 @@ export function Dashboard() {
    */
   useEffect(() => {
     if (!isMobile || !fullSurface) return;
-    if (fullSurface !== "ship") {
-      setBottomTab(fullSurface as typeof bottomTab);
-      setBottomMaximized(true);
-      setMobileShowTerminal(true);
-    }
+    setBottomTab(fullSurface as typeof bottomTab);
+    setBottomMaximized(true);
+    setMobileShowTerminal(true);
     setFullSurface(null);
   }, [isMobile, fullSurface, setFullSurface]);
 
@@ -1465,21 +1457,18 @@ export function Dashboard() {
     /* Cleared first: this effect only re-runs when the session or its paths
        change, so anything still on screen belongs to the session you just left. */
     setPanelSummary(null);
-    setOrphanPaths([]);
-    fetchCoverage(activeSession, activeSessionPaths)
+    fetchPanelSummary(activeSession, activeSessionPaths)
       .then((t) => {
         if (!alive) return;
         setPanelSummary({
-          planDone: t.steps.filter((x) => x.done).length,
-          planTotal: t.steps.length,
-          unplanned: t.stats.filesUnplanned,
-          plus: t.files.reduce((a, f) => a + f.plus, 0),
-          minus: t.files.reduce((a, f) => a + f.minus, 0),
-          fileCount: t.stats.filesTotal,
+          planDone: t.plan.done,
+          planTotal: t.plan.total,
+          plus: t.diff.plus,
+          minus: t.diff.minus,
+          fileCount: t.diff.files,
         });
-        setOrphanPaths(t.files.filter((f) => f.step === null).slice(0, 3).map((f) => f.path));
       })
-      .catch(() => { if (alive) { setPanelSummary(null); setOrphanPaths([]); } });
+      .catch(() => { if (alive) setPanelSummary(null); });
     return () => { alive = false; };
   }, [activeSession, activeSessionPaths.join("|")]);
 
@@ -1623,7 +1612,6 @@ export function Dashboard() {
       return kids > 0 ? String(kids) : "";
     }
     if (!panelSummary) return "";
-    if (id === "coverage") return panelSummary.unplanned > 0 ? String(panelSummary.unplanned) : "";
     if (id === "changes") return panelSummary.fileCount > 0 ? String(panelSummary.fileCount) : "";
     if (id === "plan") {
       const left = panelSummary.planTotal - panelSummary.planDone;
@@ -1649,11 +1637,6 @@ export function Dashboard() {
       const left = panelSummary.planTotal - panelSummary.planDone;
       return `${panelSummary.planDone} of ${panelSummary.planTotal} steps done, ${left} still open.`;
     }
-    if (id === "coverage") {
-      return panelSummary.unplanned === 0
-        ? "Every changed file maps to a step in the plan."
-        : `${panelSummary.unplanned} changed file${panelSummary.unplanned === 1 ? "" : "s"} map to no step in the plan the agent wrote.`;
-    }
     if (id === "changes") {
       if (panelSummary.fileCount === 0) return "Nothing has changed in this worktree yet.";
       return `${panelSummary.fileCount} file${panelSummary.fileCount === 1 ? "" : "s"} changed, +${panelSummary.plus} \u2212${panelSummary.minus}.`;
@@ -1671,7 +1654,6 @@ export function Dashboard() {
     if (id === "sub-agents") return kids > 0 ? String(kids) : "";
     if (!panelSummary) return "";
     if (id === "plan") return panelSummary.planTotal > 0 ? `${panelSummary.planDone} / ${panelSummary.planTotal}` : "";
-    if (id === "coverage") return panelSummary.unplanned > 0 ? `${panelSummary.unplanned} unplanned` : "";
     if (id === "changes") return panelSummary.plus + panelSummary.minus > 0 ? `+${panelSummary.plus} \u2212${panelSummary.minus}` : "";
     return "";
   }, [panelSummary, activeSessionInfo]);
@@ -2037,8 +2019,12 @@ export function Dashboard() {
                 >
                   <Icon name="diff" size={14} />
                   review
-                  {panelSummary && panelSummary.unplanned > 0 && (
-                    <span className="review-enter-badge">{panelSummary.unplanned}</span>
+                  {/* Was the count of files no plan step accounted for. That was
+                      the Coverage tab's number and it went with it; how many
+                      files there are to read is the honest one for a button
+                      that opens the diff. */}
+                  {panelSummary && panelSummary.fileCount > 0 && (
+                    <span className="review-enter-badge">{panelSummary.fileCount}</span>
                   )}
                 </button>
               )}
@@ -2065,15 +2051,13 @@ export function Dashboard() {
                     <span className="surface-head-spacer" />
                     <span className="surface-head-path">{activeSessionPaths[0] ?? ""}</span>
                   </div>
-                  {fullSurface === "coverage" ? (
-                    <CoverageView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} />
-                  ) : fullSurface === "changes" ? (
+                  {fullSurface === "changes" ? (
                     <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setFullSurface(null)} />
                   ) : fullSurface === "plan" ? (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
                   ) : fullSurface === "files" ? (
                     <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setFullSurface(null)} />
-                  ) : fullSurface === "sub-agents" ? (
+                  ) : (
                     <SubAgentsView
                       key={activeSession}
                       parentSession={activeSession}
@@ -2081,8 +2065,6 @@ export function Dashboard() {
                       onSelectChild={(c) => { setActiveSession(c); setFullSurface(null); }}
                       onRefresh={refresh}
                     />
-                  ) : (
-                    <ShipView activeSession={activeSession} />
                   )}
                 </div>
               ) : (
@@ -2144,9 +2126,7 @@ export function Dashboard() {
                     <div className="split-bottom-pane" style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
                       {bottomTab === "changes" ? (
                         <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setBottomTab(null)} />
-                      ) : bottomTab === "coverage" ? (
-                        <CoverageView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} />
-                                            ) : bottomTab === "sub-agents" && hasChildren ? (
+                      ) : bottomTab === "sub-agents" && hasChildren ? (
                         <SubAgentsView key={activeSession} parentSession={activeSession} sessions={sessions} onSelectChild={(c) => { setActiveSession(c); setBottomTab(null); setMobileShowTerminal(true); }} onRefresh={refresh} />
                       ) : bottomTab === "files" ? (
                         <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setBottomTab(null)} />

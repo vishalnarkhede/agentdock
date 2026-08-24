@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { existsSync, statSync } from "fs";
 import { getPlan, getAllSessionMetas } from "../services/config";
-import { buildCoverage, parseNumstat } from "../services/coverage";
-import { findConflicts, unionPaths, planMergeOrder, type MergeStrategy } from "../services/triage";
+import { parsePlanSteps, parseNumstat } from "../services/review-stats";
+import { findConflicts, unionPaths } from "../services/conflicts";
 
 const app = new Hono();
 
@@ -105,24 +105,13 @@ async function branchPaths(cwd: string): Promise<string[]> {
   );
 }
 
-/** The ref this branch would merge into, by name rather than by sha. */
-async function defaultTarget(cwd: string): Promise<string> {
-  const head = await runGit(cwd, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
-  if (head.exitCode === 0 && head.stdout.trim()) {
-    return head.stdout.trim().replace(/^origin\//, "");
-  }
-  for (const ref of ["origin/main", "origin/master"]) {
-    const r = await runGit(cwd, ["rev-parse", "--verify", "--quiet", ref]);
-    if (r.exitCode === 0) return ref.replace("origin/", "");
-  }
-  return "main";
-}
-
-// GET /api/review/coverage?session=<name>&path=<repo>&path=<repo>
+// GET /api/review/summary?session=<name>&path=<repo>&path=<repo>
 //
-// Answers the question neither the compiler nor the tests can: which changed
-// files does the plan account for, and which plan steps produced no code.
-app.get("/coverage", async (c) => {
+// The counts the Plan and Changes surfaces put in their headers: how much of
+// the plan is ticked off, and how big the diff is. This replaced /coverage,
+// which also guessed which plan step each changed file belonged to — that guess
+// was the Coverage tab, and the tab is gone.
+app.get("/summary", async (c) => {
   const session = c.req.query("session");
   const paths = c.req.queries("path")?.filter(Boolean) ?? [];
   if (paths.length === 0) return c.json({ error: "at least one path is required" }, 400);
@@ -132,10 +121,18 @@ app.get("/coverage", async (c) => {
       Promise.resolve(session ? getPlan(session) : null),
       changedFiles(paths),
     ]);
-    const coverage = buildCoverage(plan, files);
-    return c.json({ ...coverage, hasPlan: plan !== null });
+    const steps = plan ? parsePlanSteps(plan) : [];
+    return c.json({
+      plan: { total: steps.length, done: steps.filter((s) => s.done).length },
+      diff: {
+        files: files.length,
+        plus: files.reduce((n, f) => n + f.plus, 0),
+        minus: files.reduce((n, f) => n + f.minus, 0),
+      },
+      hasPlan: plan !== null,
+    });
   } catch (err: any) {
-    return c.json({ error: err?.message || "coverage failed" }, 500);
+    return c.json({ error: err?.message || "summary failed" }, 500);
   }
 });
 
@@ -172,61 +169,6 @@ app.get("/conflicts", async (c) => {
     });
   } catch (err: any) {
     return c.json({ error: err?.message || "conflict scan failed" }, 500);
-  }
-});
-
-// GET /api/review/ship?strategy=serial|integration
-//
-// The merge queue. Plans the order and states the reasoning; it does not run
-// git. Executing merges across live worktrees is deliberately not exposed here.
-app.get("/ship", async (c) => {
-  const strategy: MergeStrategy = c.req.query("strategy") === "integration" ? "integration" : "serial";
-  try {
-    const metas = getAllSessionMetas();
-    const entries = await Promise.all(
-      Object.entries(metas)
-        .map(([session, wts]) => [session, wts.filter((wt) => worktreeExists(wt.wtDir))] as const)
-        .filter(([, wts]) => wts.length > 0)
-        .map(async ([session, wts]) => {
-          const primary = wts[0];
-          const [paths, branch, target] = await Promise.all([
-            Promise.all(wts.map((wt) => branchPaths(wt.wtDir))).then((all) =>
-              all.flatMap((ps, i) => {
-                const repo = wts[i].repoPath.split("/").filter(Boolean).pop() || "repo";
-                return ps.map((p) => `${repo}/${p}`);
-              }),
-            ),
-            runGit(primary.wtDir, ["branch", "--show-current"]),
-            defaultTarget(primary.wtDir),
-          ]);
-          return {
-            session: session.replace(/^claude-/, ""),
-            branch: branch.stdout.trim() || "(detached)",
-            target,
-            repos: wts.length,
-            files: paths,
-          };
-        }),
-    );
-    const items = entries.filter((e) => e.files.length > 0);
-    const conflicts = findConflicts(items.map((i) => ({ session: i.session, files: i.files })));
-    const steps = planMergeOrder(items, strategy, conflicts);
-    return c.json({
-      strategy,
-      items: items.map((i) => ({
-        session: i.session,
-        branch: i.branch,
-        target: i.target,
-        repos: i.repos,
-        fileCount: i.files.length,
-      })),
-      conflicts,
-      steps,
-      // Stated rather than implied: nothing here merges anything.
-      executable: false,
-    });
-  } catch (err: any) {
-    return c.json({ error: err?.message || "ship plan failed" }, 500);
   }
 });
 

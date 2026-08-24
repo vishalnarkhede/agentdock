@@ -713,53 +713,26 @@ export async function deleteNgrokBasicAuth(): Promise<void> {
 }
 
 
-// ─── Review coverage ───
+// ─── Review summary ───
 
-export type CoverageStepState = "covered" | "gap" | "investigated";
-
-export interface CoverageStep {
-  index: number;
-  text: string;
-  done: boolean;
-  files: string[];
-  state: CoverageStepState;
-}
-
-export interface CoverageFile {
-  path: string;
-  plus: number;
-  minus: number;
-  /** Index of the plan step this file is attributable to, or null. */
-  step: number | null;
-}
-
-export interface CoverageResult {
-  steps: CoverageStep[];
-  files: CoverageFile[];
-  stats: {
-    filesTotal: number;
-    filesMapped: number;
-    filesUnplanned: number;
-    stepsTotal: number;
-    stepsCovered: number;
-    stepsGap: number;
-    linesChanged: number;
-  };
-  oversized: boolean;
+/** The counts the Plan and Changes headers show. */
+export interface PanelSummary {
+  plan: { total: number; done: number };
+  diff: { files: number; plus: number; minus: number };
   hasPlan: boolean;
 }
 
-export async function fetchCoverage(
+export async function fetchPanelSummary(
   session: string,
   paths: string[],
-): Promise<CoverageResult> {
+): Promise<PanelSummary> {
   const qs = new URLSearchParams();
   qs.set("session", session);
   for (const p of paths) qs.append("path", p);
-  const res = await fetch(`${BASE}/api/review/coverage?${qs.toString()}`);
+  const res = await fetch(`${BASE}/api/review/summary?${qs.toString()}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error((data as any).error || "Failed to load coverage");
+    throw new Error((data as any).error || "Failed to load summary");
   }
   return res.json();
 }
@@ -802,36 +775,3 @@ export async function fetchConflicts(): Promise<ConflictResult> {
   return res.json();
 }
 
-// ─── Ship: the merge queue ───
-
-export interface ShipItem {
-  session: string;
-  branch: string;
-  target: string;
-  repos: number;
-  fileCount: number;
-}
-
-export interface MergeStep {
-  kind: "merge" | "test" | "resolve" | "branch" | "cleanup";
-  text: string;
-  note?: string;
-}
-
-export interface ShipPlan {
-  strategy: "serial" | "integration";
-  items: ShipItem[];
-  conflicts: ConflictPair[];
-  steps: MergeStep[];
-  /** False: this endpoint plans a merge, it never performs one. */
-  executable: boolean;
-}
-
-export async function fetchShipPlan(strategy: "serial" | "integration"): Promise<ShipPlan> {
-  const res = await fetch(`${BASE}/api/review/ship?strategy=${strategy}`);
-  if (!res.ok) {
-    const d = await res.json().catch(() => ({}));
-    throw new Error((d as any).error || "Failed to plan the merge");
-  }
-  return res.json();
-}
