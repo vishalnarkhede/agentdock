@@ -1424,9 +1424,15 @@ h1 {
   border-radius: var(--radius);
   box-shadow: 0 8px 32px rgba(0,0,0,0.8);
   overflow: hidden;
+  /* A column so the options list can absorb whatever height is left when the
+     dropdown is capped to the space above or below the trigger. Without this
+     the capped height clipped options instead of scrolling them. */
+  display: flex;
+  flex-direction: column;
 }
 
 .meta-select-search {
+  flex: 0 0 auto;
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -1445,6 +1451,8 @@ h1 {
 }
 
 .meta-select-options {
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: 200px;
   overflow-y: auto;
   background: var(--bg-modal, var(--bg-input));
