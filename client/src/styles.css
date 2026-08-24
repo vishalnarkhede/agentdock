@@ -4377,6 +4377,9 @@ mark.fe-match-active {
 .terminal-fullscreen {
   position: fixed !important;
   inset: 0 !important;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
   z-index: 1000;
   width: 100vw !important;
   height: 100vh !important;
@@ -7174,7 +7177,9 @@ mark.fe-match-active {
     background: var(--bg);
     border-top: 1px solid var(--border);
     z-index: 100;
-    padding-bottom: 4px;
+    /* This bar is the element at the physical bottom edge, so the home
+       indicator inset belongs here and nowhere else. */
+    padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
   }
 
   .mobile-nav-item {
@@ -8601,14 +8606,7 @@ mark.fe-match-active {
    Pressing a rail icon opens that surface over the whole window. The design
    draws every one of them standalone — no queue column, no terminal — because
    they are what you are doing, not a sidebar onto it. */
-.review-mode {
-  position: fixed;
-  inset: 0;
-  z-index: 400;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-0);
-}
+
 
 .review-bar {
   display: flex;
@@ -8619,93 +8617,6 @@ mark.fe-match-active {
   flex-shrink: 0;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border-subtle);
-}
-
-.review-back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  border: none;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--text-3);
-  cursor: pointer;
-}
-.review-back:hover { background: var(--hover); color: var(--text-1); }
-.review-back:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-
-.review-title {
-  font-size: calc(var(--fs-base) + 2px);
-  font-weight: 600;
-  color: var(--text-1);
-  letter-spacing: -0.01em;
-  text-transform: capitalize;
-  flex-shrink: 0;
-}
-.review-sep { color: var(--text-4); flex-shrink: 0; }
-.review-session {
-  font-size: calc(var(--fs-base) + 1px);
-  color: var(--text-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.review-tabs {
-  display: flex;
-  gap: 3px;
-  margin-left: 14px;
-  padding-left: 14px;
-  border-left: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-
-.review-tab {
-  height: 28px;
-  padding: 0 13px;
-  border: none;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--text-3);
-  font-family: inherit;
-  font-size: calc(var(--fs-base) - 1px);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.review-tab:hover { background: var(--hover); color: var(--text-1); }
-.review-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.review-tab-active { background: var(--surface-3); color: var(--text-1); }
-
-.review-ship {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 14px;
-  flex-shrink: 0;
-  border: none;
-  border-radius: var(--radius);
-  background: var(--surface-3);
-  color: var(--text-1);
-  font-family: inherit;
-  font-size: calc(var(--fs-base) - 1px);
-  font-weight: 600;
-  cursor: pointer;
-}
-.review-ship-active { background: var(--status-ready); color: var(--surface-0); }
-.review-ship:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-
-.review-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  container-type: inline-size;
 }
 
 .review-enter {
@@ -8725,7 +8636,6 @@ mark.fe-match-active {
 
 @media (max-width: 768px) {
   .review-tab, .review-ship, .review-back { min-height: 44px; }
-  .review-tabs { overflow-x: auto; }
 }
 
 /* ═══ Terminal status strip ═══════════════════════════════════════════════ */
@@ -8781,8 +8691,15 @@ mark.fe-match-active {
    above the fixed bottom nav, and the nav's own height is the padding. */
 .mobile-queue-host {
   position: fixed;
-  inset: 0;
-  bottom: 52px;
+  /* A fixed element is placed against the viewport, so body's
+     padding-top: env(safe-area-inset-top) never reached it — the headline sat
+     under the iPhone status bar. And at z-index 60 against the header's 100,
+     the bar painted over the subline and the whole filter row. Start below
+     both. */
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-header-h, 48px));
+  left: 0;
+  right: 0;
+  bottom: calc(52px + env(safe-area-inset-bottom, 0px));
   z-index: 60;
   overflow-y: auto;
   background: var(--surface-0);

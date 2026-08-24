@@ -350,6 +350,10 @@
    The queue's cost is the session list's job on mobile. */
 
 @media (max-width: 768px) {
+  /* Published so fixed overlays can start below the bar instead of guessing.
+     Keep in step with min-height below. */
+  :root { --app-header-h: 48px; }
+
   .header.header-attn {
     height: auto;
     min-height: 48px;
