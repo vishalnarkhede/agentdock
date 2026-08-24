@@ -32,13 +32,6 @@
   color: var(--text-1);
 }
 
-.cs-bar-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
 .cs-icon-btn {
   display: flex;
   align-items: center;
@@ -818,4 +811,44 @@
   .cs-composer-foot {
     row-gap: 0;
   }
+}
+
+/* Action bar at the end of the form. Fixed height, outside the scrolling
+   region, so it is on screen no matter how far down you are. */
+.cs-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-height: 56px;
+  padding: 10px 26px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+
+.cs-footer-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one thing the page exists to do — sized so it reads as the destination. */
+.cs-btn-launch {
+  min-height: 36px;
+  padding: 0 20px;
+  font-size: var(--fs-base);
+}
+
+@media (max-width: 780px) {
+  .cs-footer {
+    padding: 10px 14px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  .cs-footer-hint { display: none; }
+  .cs-btn-launch { flex: 1 1 auto; min-height: 44px; justify-content: center; }
 }

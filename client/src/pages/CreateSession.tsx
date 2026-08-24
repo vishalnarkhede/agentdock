@@ -386,26 +386,6 @@ export function CreateSession() {
           <Icon name="close" size={16} />
         </button>
         <span className="cs-bar-title">New session</span>
-        <div className="cs-bar-actions">
-          <button
-            type="button"
-            className="cs-btn"
-            onClick={() => setNamingTemplate((v) => !v)}
-            aria-expanded={namingTemplate}
-          >
-            <Icon name="layers" size={14} />
-            {namingTemplate ? "Cancel template" : "Save as template"}
-          </button>
-          <button
-            type="submit"
-            className="cs-btn cs-btn-primary"
-            disabled={submitting || !ready}
-            title={ready ? undefined : "Pick a repo, or choose Just talk"}
-          >
-            <Icon name="sparkle" size={15} />
-            {submitting ? "Launching…" : ready ? "Launch" : "Pick a repo"}
-          </button>
-        </div>
       </div>
 
       <div className="cs-body">
@@ -859,6 +839,35 @@ export function CreateSession() {
             <span className="cs-aside-foot-text">{footNote.text}</span>
           </div>
         </aside>
+      </div>
+
+      {/* The action belongs where the form ends. It used to sit in the top bar,
+          which scrolls out of reach on a form 439px taller than the viewport —
+          you finished filling it in with nothing to press. */}
+      <div className="cs-footer">
+        <span className="cs-footer-hint">
+          {ready
+            ? `${targets.length > 0 ? `${targets.length} repo${targets.length === 1 ? "" : "s"}` : "Chat only"}${isolated ? " · isolated worktrees" : ""}`
+            : "Pick a repo, or choose Just talk"}
+        </span>
+        <button
+          type="button"
+          className="cs-btn"
+          onClick={() => setNamingTemplate((v) => !v)}
+          aria-expanded={namingTemplate}
+        >
+          <Icon name="layers" size={14} />
+          {namingTemplate ? "Cancel template" : "Save as template"}
+        </button>
+        <button
+          type="submit"
+          className="cs-btn cs-btn-primary cs-btn-launch"
+          disabled={submitting || !ready}
+          title={ready ? undefined : "Pick a repo, or choose Just talk"}
+        >
+          <Icon name="sparkle" size={15} />
+          {submitting ? "Launching…" : "Launch"}
+        </button>
       </div>
     </form>
   );
