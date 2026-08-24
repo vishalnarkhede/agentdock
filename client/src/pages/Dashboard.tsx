@@ -1511,6 +1511,33 @@ export function Dashboard() {
   /** A count only where it means something you would act on. */
   // What is waiting on you, so the Sessions button carries the same kind of
   // badge the surface buttons do.
+  /**
+   * Collapse or expand every group in the current grouping.
+   *
+   * Both the label and the action key off *this* grouping's keys.
+   * collapsedGroups is shared across groupings, so leftovers from another one —
+   * queue buckets while you are grouped by status, say — used to make the label
+   * read "Expand all groups" over groups that were plainly expanded, and the
+   * click then did the opposite of what it said.
+   */
+  const groupCollapseAction = useMemo(() => {
+    if (!groupBy || !groupedSessions) return undefined;
+    const keys = Object.keys(groupedSessions.groups);
+    if (groupedSessions.ungrouped.length > 0) keys.push("__ungrouped__");
+    if (keys.length === 0) return undefined;
+    const allCollapsed = keys.every((k) => collapsedGroups.has(k));
+    return {
+      label: allCollapsed ? "Expand all groups" : "Collapse all groups",
+      run: () => {
+        const next = allCollapsed
+          ? new Set([...collapsedGroups].filter((k) => !keys.includes(k)))
+          : new Set([...collapsedGroups, ...keys]);
+        setCollapsedGroups(next);
+        updatePreferences({ collapsedGroups: [...next] });
+      },
+    };
+  }, [groupBy, groupedSessions, collapsedGroups]);
+
   const sessionsBadge = useMemo(
     () => sessions.filter((x) => !x.parentSession && queueBucket(x) === "blocked").length,
     [sessions],
@@ -1683,21 +1710,7 @@ export function Dashboard() {
                 canKillAll={sessions.length > 0}
                 onSelect={() => setSelectionMode(true)}
                 onKillAll={handleStopAll}
-                groupAction={
-                  groupBy && groupedSessions
-                    ? {
-                        label: collapsedGroups.size > 0 ? "Expand all groups" : "Collapse all groups",
-                        run: () => {
-                          const allKeys = [...Object.keys(groupedSessions.groups)];
-                          if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
-                          const allCollapsed = allKeys.every((k) => collapsedGroups.has(k));
-                          const next = allCollapsed ? new Set<string>() : new Set(allKeys);
-                          setCollapsedGroups(next);
-                          updatePreferences({ collapsedGroups: [...next] });
-                        },
-                      }
-                    : undefined
-                }
+                groupAction={groupCollapseAction}
               />
             </>
           )}
