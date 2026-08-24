@@ -7027,7 +7027,11 @@ mark.fe-match-active {
 
   /* ─── Bottom navigation bar ─── */
   body {
-    padding-bottom: 52px;
+    /* Measured by Dashboard, because the bar is its content height *plus* the
+       home indicator inset — the flat 52px this used to be left the terminal's
+       toolbar buried under it. The fallback is that same sum, for the frame
+       before the measurement lands. */
+    padding-bottom: var(--mobile-nav-h, calc(52px + env(safe-area-inset-bottom, 0px)));
   }
 
   /* ─── Session card left-border status indicator ─── */
@@ -8700,15 +8704,15 @@ mark.fe-match-active {
   /* A fixed element is placed against the viewport, so body's
      padding-top: env(safe-area-inset-top) never reached it — the headline sat
      under the iPhone status bar. And at z-index 60 against the header's 100,
-     the bar painted over the subline and the whole filter row. Start below
-     both. */
-  top: calc(env(safe-area-inset-top, 0px) + var(--app-header-h, 48px));
+     the bar painted over the subline and the whole filter row. So this starts
+     at the header's measured bottom edge rather than guessing at 48px. */
+  top: var(--app-header-b, calc(env(safe-area-inset-top, 0px) + 48px));
   left: 0;
   right: 0;
   /* The bottom nav is not rendered on this screen (its only item was the
-     screen you are already on), so the queue owns the space down to the home
-     indicator instead of leaving a band of nothing there. */
-  bottom: env(safe-area-inset-bottom, 0px);
+     screen you are already on), so this measures 0 and the queue owns the
+     space down to the bottom edge. */
+  bottom: var(--mobile-nav-h, 0px);
   z-index: 60;
   overflow-y: auto;
   background: var(--surface-0);

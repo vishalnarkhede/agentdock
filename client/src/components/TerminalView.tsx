@@ -303,10 +303,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     const container = containerRef.current;
     const handleViewportResize = () => {
       if (vv && container) {
-        // Set parent layout height to visual viewport (accounts for keyboard)
         const layout = container.closest(".split-layout") as HTMLElement;
         if (layout) {
-          layout.style.height = `${vv.height}px`;
+          /* The layout starts below the header and ends above the bottom nav,
+             so its height is the visible viewport minus both. Setting it to the
+             whole viewport pushed the terminal's toolbar under the nav. */
+          const top = layout.getBoundingClientRect().top - (vv.offsetTop || 0);
+          const nav = document.querySelector(".mobile-bottom-nav");
+          const navH = nav ? nav.getBoundingClientRect().height : 0;
+          layout.style.height = `${Math.max(160, Math.round(vv.height - top - navH))}px`;
         }
       }
       fitAddon.fit();

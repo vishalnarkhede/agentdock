@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>viewport probe</title>
+<style>
+  html, body { margin: 0; height: 100dvh; overflow: hidden; background: #0d0d12; color: #e6e6ef;
+               font: 15px/1.55 ui-monospace, Menlo, monospace; }
+  .pad { padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 12px; }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  table { border-collapse: collapse; font-size: 14px; }
+  td { padding: 3px 8px 3px 0; vertical-align: top; }
+  td:first-child { color: #8b8ba0; }
+  b { color: #7ee787; }
+  .bar-fixed { position: fixed; left: 0; right: 0; bottom: 0; height: 10px; background: #f7768e; }
+  .bar-safe  { position: fixed; left: 0; right: 0; bottom: env(safe-area-inset-bottom, 0px);
+               height: 10px; background: #7aa2f7; }
+  .bar-dvh   { position: fixed; left: 0; right: 0; top: calc(100dvh - 30px); height: 10px; background: #e0af68; }
+  .key { position: fixed; left: 12px; right: 12px; bottom: 52px; font-size: 13px; color: #8b8ba0; }
+</style>
+</head>
+<body>
+<div class="pad">
+  <h1>viewport probe</h1>
+  <table id="t"></table>
+</div>
+<div class="key">
+  <span style="color:#f7768e">pink</span> = fixed bottom:0 ·
+  <span style="color:#7aa2f7">blue</span> = +safe-area ·
+  <span style="color:#e0af68">amber</span> = 100dvh
+</div>
+<div class="bar-fixed"></div>
+<div class="bar-safe"></div>
+<div class="bar-dvh"></div>
+<script>
+  function probe(css) {
+    var d = document.createElement("div");
+    d.style.cssText = "position:absolute;visibility:hidden;height:" + css;
+    document.body.appendChild(d);
+    var h = Math.round(d.getBoundingClientRect().height * 100) / 100;
+    d.remove();
+    return h;
+  }
+  function render() {
+    var vv = window.visualViewport;
+    var rows = [
+      ["screen", screen.width + " x " + screen.height + "   dpr " + devicePixelRatio],
+      ["window.inner", innerWidth + " x " + innerHeight],
+      ["visualViewport", vv ? Math.round(vv.width) + " x " + Math.round(vv.height) +
+        "  offTop " + Math.round(vv.offsetTop) + "  scale " + vv.scale.toFixed(2) : "n/a"],
+      ["vh / dvh", probe("100vh") + " / " + probe("100dvh")],
+      ["svh / lvh", probe("100svh") + " / " + probe("100lvh")],
+      ["safe top / bottom", probe("env(safe-area-inset-top,0px)") + " / " +
+        probe("env(safe-area-inset-bottom,0px)")],
+      ["html / body client", document.documentElement.clientHeight + " / " + document.body.clientHeight],
+      ["fixed bottom:0 ends at", Math.round(document.querySelector(".bar-fixed").getBoundingClientRect().bottom)],
+      ["standalone", navigator.standalone + "   display-mode: " +
+        (matchMedia("(display-mode: standalone)").matches ? "standalone"
+          : matchMedia("(display-mode: fullscreen)").matches ? "fullscreen" : "browser")],
+    ];
+    document.getElementById("t").innerHTML = rows.map(function (r) {
+      return "<tr><td>" + r[0] + "</td><td><b>" + r[1] + "</b></td></tr>";
+    }).join("");
+  }
+  render();
+  addEventListener("resize", render);
+  addEventListener("scroll", render);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", render);
+    window.visualViewport.addEventListener("scroll", render);
+  }
+</script>
+</body>
+</html>

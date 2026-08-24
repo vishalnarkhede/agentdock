@@ -1692,6 +1692,34 @@ export function Dashboard() {
     return () => { document.body.classList.remove("mobile-kb-open"); };
   }, [kbOpen]);
 
+  /* The header's height and the nav's height were both hard-coded guesses —
+     48px and 52px — and both were wrong on a phone: the nav carries the home
+     indicator inset on top of its content, so the 52px body padding left the
+     terminal's toolbar buried under it. Measure them and publish the real
+     numbers instead. */
+  useEffect(() => {
+    const root = document.documentElement;
+    const measure = () => {
+      const header = document.querySelector(".header") as HTMLElement | null;
+      const nav = document.querySelector(".mobile-bottom-nav") as HTMLElement | null;
+      root.style.setProperty("--app-header-b", `${Math.round(header?.getBoundingClientRect().bottom ?? 48)}px`);
+      root.style.setProperty("--mobile-nav-h", `${Math.round(nav?.getBoundingClientRect().height ?? 0)}px`);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    const header = document.querySelector(".header");
+    const nav = document.querySelector(".mobile-bottom-nav");
+    if (header) ro.observe(header);
+    if (nav) ro.observe(nav);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, [isMobile, mobileInSession, kbOpen]);
+
   return (
     <>
     <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>

@@ -6,7 +6,12 @@
     <title>agentdock // terminal</title>
     <link rel="manifest" href="/manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Not black-translucent: in that mode iOS puts the web view under the
+         status bar but sizes it to the screen *minus* the status bar, so the
+         missing 59px turn up as a dead band below the fixed bottom nav. With
+         "black" the view starts below the status bar and reaches the bottom.
+         (Re-add the home-screen icon for a change here to take effect.) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="AgentDock" />
   </head>
   <body>
