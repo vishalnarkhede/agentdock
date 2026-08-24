@@ -1529,6 +1529,45 @@ export function Dashboard() {
    * read "Expand all groups" over groups that were plainly expanded, and the
    * click then did the opposite of what it said.
    */
+  /**
+   * The same control in two places. On a phone the sidebar sits behind the
+   * queue overlay, so the sidebar copy is unreachable — grouping could not be
+   * changed there at all. Defined once so the option list cannot drift.
+   */
+  const modeSelect = (className: string) => (
+    <select
+      className={className}
+      data-tutorial="group-by-select"
+      title="Sort or group sessions"
+      value={sortBy || groupBy}
+      onChange={(e) => {
+        const v = e.target.value;
+        if (v === "recent" || v === "frequent") {
+          setSortBy(v);
+          setGroupBy("");
+          updatePreferences({ sortBy: v, groupBy: "" });
+        } else {
+          setGroupBy(v);
+          setSortBy("");
+          updatePreferences({ groupBy: v, sortBy: "" });
+        }
+      }}
+    >
+      <option value="__queue__">Queue</option>
+      <option value="">Flat list</option>
+      <optgroup label="Sort by">
+        <option value="recent">Recently used</option>
+        <option value="frequent">Most used</option>
+      </optgroup>
+      <optgroup label="Group by">
+        <option value="__status__">Status</option>
+        {metaPresets.map((p) => (
+          <option key={p.key} value={p.key}>{p.label}</option>
+        ))}
+      </optgroup>
+    </select>
+  );
+
   const groupCollapseAction = useMemo(() => {
     if (!groupBy || !groupedSessions) return undefined;
     const keys = Object.keys(groupedSessions.groups);
@@ -1678,37 +1717,7 @@ export function Dashboard() {
             </>
           ) : (
             <>
-              <select
-                className="sidebar-mode"
-                data-tutorial="group-by-select"
-                title="Sort or group sessions"
-                value={sortBy || groupBy}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "recent" || v === "frequent") {
-                    setSortBy(v);
-                    setGroupBy("");
-                    updatePreferences({ sortBy: v, groupBy: "" });
-                  } else {
-                    setGroupBy(v);
-                    setSortBy("");
-                    updatePreferences({ groupBy: v, sortBy: "" });
-                  }
-                }}
-              >
-                <option value="__queue__">Queue</option>
-                <option value="">Flat list</option>
-                <optgroup label="Sort by">
-                  <option value="recent">Recently used</option>
-                  <option value="frequent">Most used</option>
-                </optgroup>
-                <optgroup label="Group by">
-                  <option value="__status__">Status</option>
-                  {metaPresets.map((p) => (
-                    <option key={p.key} value={p.key}>{p.label}</option>
-                  ))}
-                </optgroup>
-              </select>
+              {modeSelect("sidebar-mode")}
 
               <span className="sidebar-controls-spacer" />
               <span className="sidebar-count">
@@ -2402,6 +2411,7 @@ export function Dashboard() {
     {isMobile && !mobileInSession && !loading && sessions.length > 0 && (
       <div className="mobile-queue-host">
         <MobileQueue
+          modeControl={modeSelect("mq-mode")}
           rows={sessions
             .filter((x) => !x.parentSession)
             .map((x) => ({

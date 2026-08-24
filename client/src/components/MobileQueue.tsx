@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import "../styles/mobile.css";
 
 /** Buckets the queue can show. Wider than the four the phone filters on:
@@ -26,6 +26,9 @@ export interface MobileQueueProps {
   rows: MobileQueueRow[];
   onOpen: (name: string) => void;
   onAction: (name: string, cta: string) => void;
+  /** Sort/group control. The sidebar copy sits behind this overlay on a phone,
+      so without it grouping cannot be changed there at all. */
+  modeControl?: ReactNode;
 }
 
 type FilterId = "all" | "blocked" | "review" | "working";
@@ -100,7 +103,7 @@ function situation(counts: Record<FilterId, number>, total: number) {
  *
  * Takes rows in; fetches nothing.
  */
-export function MobileQueue({ rows, onOpen, onAction }: MobileQueueProps) {
+export function MobileQueue({ rows, onOpen, onAction, modeControl }: MobileQueueProps) {
   const [filter, setFilter] = useState<FilterId>("all");
 
   const counts = useMemo(() => {
@@ -131,6 +134,8 @@ export function MobileQueue({ rows, onOpen, onAction }: MobileQueueProps) {
         <h1 className="mq-headline">{headline}</h1>
         <p className="mq-subline">{subline}</p>
       </div>
+
+      {modeControl && <div className="mq-mode-row">{modeControl}</div>}
 
       <div className="mq-filters" role="group" aria-label="Filter the queue">
         {FILTERS.map((f) => (

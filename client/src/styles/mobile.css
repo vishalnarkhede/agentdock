@@ -601,3 +601,24 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+
+/* Sort/group control. The sidebar copy of this sits behind the queue overlay,
+   so on a phone this is the only way to reach it. */
+.mq-mode-row {
+  flex-shrink: 0;
+  padding: 0 16px 10px;
+}
+
+.mq-mode {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--mq-r-ctl, 8px);
+  /* Native select: the OS draws the popup, so it is opaque on every theme and
+     usable with one thumb. */
+  background: var(--surface-float);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: max(12px, calc(var(--fs-base) - 1px));
+}
