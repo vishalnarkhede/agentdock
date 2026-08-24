@@ -3,8 +3,10 @@ import { wsUrl } from "../api";
 import { isDemo, getDemoSnapshot } from "../demo";
 
 interface WsMessage {
-  type: "snapshot" | "update" | "closed" | "error" | "pong";
+  type: "snapshot" | "update" | "closed" | "error" | "pong" | "mode";
   data: unknown;
+  /** Present on "mode": which path the server took for this session. */
+  mode?: "stream" | "snapshot";
 }
 
 // Send a ping every 30s to keep the server heartbeat alive
@@ -20,6 +22,10 @@ export function useWebSocket(
   sessionName: string,
   onData: (data: unknown) => void,
   onClosed?: () => void,
+  /** Raw pane bytes, when the server is streaming rather than snapshotting. */
+  onBytes?: (bytes: Uint8Array) => void,
+  /** Which path the server took, sent once before the first paint. */
+  onMode?: (mode: "stream" | "snapshot") => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -27,8 +33,12 @@ export function useWebSocket(
   const pingInterval = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const onDataRef = useRef(onData);
   const onClosedRef = useRef(onClosed);
+  const onBytesRef = useRef(onBytes);
+  const onModeRef = useRef(onMode);
   onDataRef.current = onData;
   onClosedRef.current = onClosed;
+  onBytesRef.current = onBytes;
+  onModeRef.current = onMode;
 
   useEffect(() => {
     if (isDemo()) {
@@ -44,6 +54,9 @@ export function useWebSocket(
       if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
       const ws = new WebSocket(wsUrl(sessionName));
+      /* Pane bytes arrive as binary frames; without this they land as Blobs and
+         every chunk would need an async read before it could be written. */
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -57,10 +70,16 @@ export function useWebSocket(
       };
 
       ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          onBytesRef.current?.(new Uint8Array(event.data));
+          return;
+        }
         try {
           const msg: WsMessage = JSON.parse(event.data);
           if (msg.type === "snapshot" || msg.type === "update") {
             onDataRef.current(msg.data);
+          } else if (msg.type === "mode") {
+            onModeRef.current?.(msg.mode === "stream" ? "stream" : "snapshot");
           } else if (msg.type === "closed") {
             onClosedRef.current?.();
           }

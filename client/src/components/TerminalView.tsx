@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -149,6 +150,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const touchOriginYRef = useRef<number>(0);
   const touchScrollingRef = useRef<boolean>(false);
   const scrollPausedRef = useRef(false);
+  /* Which path the server took for this session. Streaming means the pane's
+     bytes arrive as they are produced and xterm owns the screen; snapshot means
+     the whole pane is re-sent and repainted on every change. */
+  const streamingRef = useRef(false);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
@@ -267,6 +272,60 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
+
+    /* GPU glyph atlas instead of the DOM renderer, loaded on the next frame
+       rather than inline.
+       
+       Loading it inline threw on session switch: React (in dev, twice on every
+       mount) opens the terminal and disposes it in quick succession, and the
+       addon's own teardown ran against a renderer that was already gone —
+       "Cannot read properties of undefined (reading '_isDisposed')" out of
+       WebglAddon.dispose(), which took the whole component down with it. So it
+       is only attached once the container has a size and the effect is still
+       alive, it is disposed explicitly before the terminal rather than through
+       the terminal's addon manager, and every one of those steps tolerates
+       having already happened. */
+    let webgl: WebglAddon | null = null;
+    let torndown = false;
+    /* A pane that is switched to starts at zero width, and attaching to a
+       zero-width container silently leaves the atlas empty, so wait for a real
+       size — bounded, because a pane that never gets one should just keep the
+       DOM renderer.
+
+       On a timer rather than requestAnimationFrame: Chrome stops serving frames
+       to an occluded window, and a terminal that only gets its renderer when
+       the window happens to be visible is not a renderer you can reason about.
+       A macrotask is all this needs — it exists to leave the synchronous
+       mount-then-dispose window, not to line up with a paint. */
+    let attempts = 0;
+    let attachTimer: ReturnType<typeof setTimeout> | null = null;
+    const attachWebgl = () => {
+      attachTimer = null;
+      if (torndown || webgl) return;
+      if (!containerRef.current?.clientWidth) {
+        if (attempts++ < 40) attachTimer = setTimeout(attachWebgl, 50);
+        return;
+      }
+      try {
+        const addon = new WebglAddon();
+        /* A lost context renders nothing at all, so fall back rather than leave
+           the reader with a blank terminal. */
+        addon.onContextLoss(() => {
+          try {
+            addon.dispose();
+          } catch {
+            /* already gone */
+          }
+          if (webgl === addon) webgl = null;
+        });
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        /* No WebGL here (old browser, blocklisted driver) — the DOM renderer is
+           still correct, only slower. */
+      }
+    };
+    attachTimer = setTimeout(attachWebgl, 0);
     fitAddon.fit();
 
     // Intercept Shift+Enter before xterm processes it
@@ -421,7 +480,22 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         textarea.removeEventListener("focus", onFocus);
         textarea.removeEventListener("blur", onBlur);
       }
-      term.dispose();
+      torndown = true;
+      if (attachTimer) clearTimeout(attachTimer);
+      try {
+        webgl?.dispose();
+      } catch {
+        /* Already disposed, or never finished initialising. */
+      }
+      webgl = null;
+      try {
+        term.dispose();
+      } catch {
+        /* xterm schedules a scroll sync from open() on a timer; when a switch
+           disposes the terminal before it fires, that timer reads a renderer
+           that is gone. Nothing here can be done about it and nothing depends
+           on it, so it must not reach React. */
+      }
     };
   }, [settings.cursorBlink, settings.scrollback, settings.terminalFontSize]);
 
@@ -465,6 +539,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       `\x1b[${row};${col}H` +
       "\x1b[?25h"       // show cursor at final position
     );
+    /* Streaming paints this once and then appends, so the reader has to end up
+       at the bottom of it: absolute cursor addressing above moves the cursor,
+       and xterm follows the cursor, not the last line written. */
+    if (streamingRef.current) term.scrollToBottom();
     setLastContent(snapshot.content);
 
     // Update scrollbar thumb after render
@@ -497,7 +575,77 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [handleData]);
 
-  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(sessionName, handleWsData, onClosed);
+  /**
+   * Streaming: the server sends the pane's bytes as tmux produces them, so the
+   * work here is to hand them to xterm and stay out of the way. No React state
+   * per chunk — a keystroke's echo would otherwise re-render the tree — and no
+   * skipping writes while the reader has scrolled up, because xterm already
+   * keeps the viewport still and appends to the buffer underneath.
+   */
+  const scrollbarFrame = useRef<number | null>(null);
+  const syncScrollbar = useCallback(() => {
+    if (scrollbarFrame.current !== null) return;
+    scrollbarFrame.current = requestAnimationFrame(() => {
+      scrollbarFrame.current = null;
+      const viewport = containerRef.current?.querySelector(".xterm-viewport");
+      if (!viewport) return;
+      const { scrollTop, scrollHeight, clientHeight } = viewport as HTMLElement;
+      if (scrollHeight <= clientHeight) {
+        setScrollThumb({ top: 0, size: 1 });
+        return;
+      }
+      const size = clientHeight / scrollHeight;
+      const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
+      setScrollThumb({ top, size });
+    });
+  }, []);
+
+  const handleBytes = useCallback((bytes: Uint8Array) => {
+    const term = termRef.current;
+    if (!term) return;
+    term.write(bytes);
+    syncScrollbar();
+  }, [syncScrollbar]);
+
+  /** The visible pane plus a little scrollback, read back out of xterm. */
+  const readTerminalText = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return "";
+    const buf = term.buffer.active;
+    const first = Math.max(0, buf.length - term.rows - 200);
+    const lines: string[] = [];
+    for (let i = first; i < buf.length; i++) {
+      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+    }
+    return lines.join("\n").replace(/\n+$/, "");
+  }, []);
+
+  /* In streaming mode nothing re-sends the pane as text, but two things still
+     want it: the copy button, and the Cursor status scan (Cursor has no
+     lifecycle hooks, so its state is read off the screen). Once a second, and
+     only when it actually changed — against five re-renders a second on the
+     snapshot path. */
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!streamingRef.current || !termRef.current) return;
+      const text = readTerminalText();
+      setLastContent((prev) => (prev === text ? prev : text));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [readTerminalText]);
+
+  const handleMode = useCallback((mode: "stream" | "snapshot") => {
+    streamingRef.current = mode === "stream";
+    console.log(`[terminal] ${sessionName}: ${mode} mode`);
+  }, [sessionName]);
+
+  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(
+    sessionName,
+    handleWsData,
+    onClosed,
+    handleBytes,
+    handleMode,
+  );
   sendInputRef.current = sendInput;
   sendShiftEnterRef.current = sendShiftEnter;
   const sendResizeRef = useRef<(cols: number, rows: number) => void>(() => {});
@@ -625,7 +773,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           <button
             className="terminal-copy-btn"
             onClick={() => {
-              const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+              const source = streamingRef.current ? readTerminalText() : lastContent || "";
+              const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
               navigator.clipboard.writeText(clean.trim());
               setCopied(true);
               setTimeout(() => setCopied(false), 1500);
@@ -871,7 +1020,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
               <button
                 onClick={() => {
                   setContextMenu(null);
-                  const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+                  const source = streamingRef.current ? readTerminalText() : lastContent || "";
+              const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
                   navigator.clipboard.writeText(clean.trim());
                 }}
               >
@@ -975,7 +1125,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         {lastContent && (
           <button className="mobile-term-btn" onClick={() => {
-            const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+            const source = streamingRef.current ? readTerminalText() : lastContent || "";
+            const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
             navigator.clipboard.writeText(clean.trim());
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);

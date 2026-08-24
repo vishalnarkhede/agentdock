@@ -1,4 +1,5 @@
 import { capturePaneSnapshot, hasSession, sendKeysRaw, sendSpecialKey, resizePane } from "../services/tmux";
+import { attachControl, type ControlClient } from "../services/tmux-control";
 
 export function handleWebSocket(server: any) {
   // WebSocket upgrade and handling is done in the Bun.serve config
@@ -12,11 +13,16 @@ const INPUT_POLL_MS = 50;
 // If no message received from client in 60s, consider connection dead
 const HEARTBEAT_TIMEOUT_MS = 60_000;
 
+/* Streaming is the default path; AGENTDOCK_STREAM=0 forces the polling one,
+   which is also the automatic fallback when tmux cannot be attached. */
+const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
+
 export async function handleWsOpen(ws: any, sessionName: string) {
   console.log(`[ws] open: session="${sessionName}"`);
 
-  // Send initial snapshot
-  const result = await capturePaneSnapshot(sessionName);
+  /* The streaming path paints this capture once and then appends, so it wants
+     the visible pane and nothing above it — see capturePaneSnapshot. */
+  const result = await capturePaneSnapshot(sessionName, STREAM_ENABLED ? 0 : 200);
   if (!result.ok) {
     console.error(`[ws] snapshot failed: ${result.error}`);
     ws.send(JSON.stringify({ type: "error", data: result.error }));
@@ -24,10 +30,31 @@ export async function handleWsOpen(ws: any, sessionName: string) {
     return;
   }
 
-  ws.send(JSON.stringify({ type: "snapshot", data: result.data }));
+  /* Control mode: one long-lived tmux client streaming this pane's bytes, in
+     place of ten process spawns a second and a full-pane repaint per frame.
+     The initial screen still comes from a capture — attaching does not replay
+     what is already on the pane — and anything the stream buffered while that
+     capture was in flight is dropped, because the capture already shows it. */
+  let initial = result.data;
+
+  if (STREAM_ENABLED) {
+    const control = await attachControl(sessionName);
+    if (control) {
+      streamPane(ws, sessionName, control, initial);
+      return;
+    }
+    console.warn(`[ws] control mode unavailable, polling: session="${sessionName}"`);
+    /* Polling repaints from scratch, so it does want the scrollback that the
+       capture above deliberately left out. */
+    const withHistory = await capturePaneSnapshot(sessionName, 200);
+    if (withHistory.ok) initial = withHistory.data;
+  }
+
+  ws.send(JSON.stringify({ type: "mode", mode: "snapshot" }));
+  ws.send(JSON.stringify({ type: "snapshot", data: initial }));
 
   // Adaptive polling state
-  let lastSnapshot = JSON.stringify(result.data);
+  let lastSnapshot = JSON.stringify(initial);
   let pollMs = MIN_POLL_MS;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let lastClientActivity = Date.now();
@@ -99,6 +126,78 @@ export async function handleWsOpen(ws: any, sessionName: string) {
 
   // Store cleanup handles
   ws.data = { cleanup, heartbeatInterval, sessionName, nudgePoll, touchActivity: () => { lastClientActivity = Date.now(); } };
+}
+
+/**
+ * The streaming path: paint once from a capture, then forward bytes.
+ *
+ * Nothing polls here. The heartbeat stays, because a client that goes away
+ * without closing the socket is still the common case on a phone.
+ */
+function streamPane(ws: any, sessionName: string, control: ControlClient, initial: unknown) {
+  let stopped = false;
+  let lastClientActivity = Date.now();
+
+  ws.send(JSON.stringify({ type: "mode", mode: "stream" }));
+  ws.send(JSON.stringify({ type: "snapshot", data: initial }));
+  /* Everything up to here is on the captured screen already. */
+  control.dropBuffered();
+
+  control.onOutput((bytes) => {
+    if (stopped) return;
+    try {
+      ws.send(bytes);
+    } catch {
+      /* Socket went away between the check and the send. */
+    }
+  });
+
+  function cleanup() {
+    if (stopped) return;
+    stopped = true;
+    control.close();
+    if (ws.data?.heartbeatInterval) clearInterval(ws.data.heartbeatInterval);
+  }
+
+  control.onExit((reason) => {
+    if (stopped) return;
+    try {
+      ws.send(JSON.stringify({ type: "closed", data: reason || "Session ended" }));
+    } catch {
+      /* already gone */
+    }
+    cleanup();
+    try {
+      ws.close();
+    } catch {
+      /* already closed */
+    }
+  });
+
+  const heartbeatInterval = setInterval(() => {
+    if (Date.now() - lastClientActivity > HEARTBEAT_TIMEOUT_MS) {
+      console.log(`[ws] heartbeat timeout: session="${sessionName}"`);
+      cleanup();
+      clearInterval(heartbeatInterval);
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+    }
+  }, 15_000);
+
+  ws.data = {
+    cleanup,
+    heartbeatInterval,
+    sessionName,
+    streaming: true,
+    /* Polling concepts the message handler still asks for. */
+    nudgePoll: () => {},
+    touchActivity: () => {
+      lastClientActivity = Date.now();
+    },
+  };
 }
 
 const SPECIAL_KEYS: Record<string, string> = {

@@ -171,6 +171,17 @@ export interface PaneSnapshot {
 
 export async function capturePaneSnapshot(
   name: string,
+  /**
+   * Lines of scrollback to include above the visible pane.
+   *
+   * The polling path wants some, because it repaints from scratch every time and
+   * the reader would otherwise have nothing to scroll back through. The
+   * streaming path wants none: it paints this once and then appends, and the
+   * cursor it places afterwards is addressed against the viewport, which only
+   * lines up with the pane when the capture *is* the pane. Scrollback there
+   * shifted the cursor by however many history lines came back.
+   */
+  scrollbackLines = 200,
 ): Promise<{ ok: true; data: PaneSnapshot } | { ok: false; error: string }> {
   // Get cursor position and pane info
   const info = await run([
@@ -189,15 +200,15 @@ export async function capturePaneSnapshot(
   const [cursorX, cursorY, paneHeight, historySize] = parts.slice(0, 4).map(Number);
   const command = parts.slice(4).join(",");
 
-  // -S -200: capture visible pane + 200 lines of scrollback (not full history)
-  // Full history (-S -) grows unbounded and causes massive memory usage over time
+  // Full history (-S -) grows unbounded and causes massive memory usage over time,
+  // so the caller says how far back it wants; 0 is the visible pane alone.
   const { stdout, stderr, exitCode } = await run([
     "capture-pane",
     "-p",
     "-e",
     "-J",
     "-S",
-    "-200",
+    scrollbackLines > 0 ? `-${scrollbackLines}` : "0",
     "-t",
     name,
   ]);
