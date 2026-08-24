@@ -519,3 +519,50 @@ describe("resolveAlias with a directory path", () => {
     expect(config.resolveAlias("no-such-alias")).toBeUndefined();
   });
 });
+
+// ─── Plans ───
+
+describe("getPlan", () => {
+  const PLANS_DIR = join(CONFIG_DIR, "plans");
+
+  function writePlan(name: string, body: string) {
+    mkdirSync(PLANS_DIR, { recursive: true });
+    writeFileSync(join(PLANS_DIR, `${name}.md`), body);
+  }
+
+  test("returns the session's own plan", () => {
+    writePlan("claude-alpha", "# alpha");
+    expect(config.getPlan("claude-alpha")).toBe("# alpha");
+  });
+
+  test("returns null rather than another session's plan", () => {
+    writePlan("claude-alpha", "# alpha");
+    writePlan("claude-beta", "# beta");
+    expect(config.getPlan("claude-gamma")).toBeNull();
+  });
+
+  test("returns null when the plans directory is empty", () => {
+    mkdirSync(PLANS_DIR, { recursive: true });
+    expect(config.getPlan("claude-alpha")).toBeNull();
+  });
+
+  test("returns null when there is no plans directory at all", () => {
+    expect(config.getPlan("claude-alpha")).toBeNull();
+  });
+
+  test("finds a plan filed without the claude- prefix", () => {
+    writePlan("alpha", "# alpha");
+    expect(config.getPlan("claude-alpha")).toBe("# alpha");
+  });
+
+  test("prefers the exact name over the bare one", () => {
+    writePlan("claude-alpha", "# prefixed");
+    writePlan("alpha", "# bare");
+    expect(config.getPlan("claude-alpha")).toBe("# prefixed");
+  });
+
+  test("planFileNames covers both spellings", () => {
+    expect(config.planFileNames("claude-alpha")).toEqual(["claude-alpha", "alpha"]);
+    expect(config.planFileNames("alpha")).toEqual(["alpha", "claude-alpha"]);
+  });
+});

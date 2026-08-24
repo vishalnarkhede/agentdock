@@ -448,25 +448,34 @@ export function saveSessionOrder(order: string[]): void {
 
 // ─── Plans ───
 
+/**
+ * The plan for one session, or null.
+ *
+ * This used to fall back to the most recently modified plan in the directory
+ * when the session had none of its own, on the theory that Claude Code's plan
+ * mode might have written a different filename. With 100+ plans in there that
+ * fallback served *another session's* plan to every session without one — which
+ * the Coverage tab then joined against this session's diff, so the numbers were
+ * about two different pieces of work. No plan is the honest answer.
+ *
+ * The only fallbacks kept are spellings of this same session's name: older
+ * sessions wrote the display name without the "claude-" prefix.
+ */
 export function getPlan(sessionName: string): string | null {
-  // Primary: exact match by session name
-  const planFile = join(PLANS_DIR, `${sessionName}.md`);
-  if (existsSync(planFile)) return readFileSync(planFile, "utf-8");
-
-  // Fallback: find the most recently modified .md in plans dir.
-  // Handles cases where Claude Code's plan mode writes to a different filename.
-  if (!existsSync(PLANS_DIR)) return null;
-  try {
-    const { statSync } = require("fs") as typeof import("fs");
-    const files = readdirSync(PLANS_DIR).filter((f) => f.endsWith(".md"));
-    if (files.length === 0) return null;
-    const sorted = files
-      .map((f) => ({ f, mtime: statSync(join(PLANS_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    return readFileSync(join(PLANS_DIR, sorted[0].f), "utf-8");
-  } catch {
-    return null;
+  for (const name of planFileNames(sessionName)) {
+    const file = join(PLANS_DIR, `${name}.md`);
+    if (existsSync(file)) return readFileSync(file, "utf-8");
   }
+  return null;
+}
+
+/** The names one session's plan may be filed under, most exact first. */
+export function planFileNames(sessionName: string): string[] {
+  const names = [sessionName];
+  const bare = sessionName.startsWith(`${PREFIX}-`) ? sessionName.slice(PREFIX.length + 1) : null;
+  if (bare) names.push(bare);
+  else names.push(`${PREFIX}-${sessionName}`);
+  return names;
 }
 
 // ─── Custom quick actions ───

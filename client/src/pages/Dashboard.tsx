@@ -1462,6 +1462,10 @@ export function Dashboard() {
   useEffect(() => {
     if (!activeSession || activeSessionPaths.length === 0) { setPanelSummary(null); return; }
     let alive = true;
+    /* Cleared first: this effect only re-runs when the session or its paths
+       change, so anything still on screen belongs to the session you just left. */
+    setPanelSummary(null);
+    setOrphanPaths([]);
     fetchCoverage(activeSession, activeSessionPaths)
       .then((t) => {
         if (!alive) return;
