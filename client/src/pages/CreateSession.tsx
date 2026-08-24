@@ -11,7 +11,7 @@ import {
   updatePreferences,
   fetchBasePath,
   fetchRepos,
-  fetchMcpServers,
+  fetchAgentMcpNames,
   fetchHookState,
   uploadFile,
   type SessionTemplate,
@@ -105,8 +105,11 @@ export function CreateSession() {
     }).catch(() => {});
     fetchBasePath().then(setBasePath).catch(() => {});
     fetchRepos().then(setRepos).catch(() => {});
-    fetchMcpServers()
-      .then((servers) => setLinearMcp(servers.some((s) => /linear/i.test(s.name) || s.args.some((a) => /linear/i.test(a)))))
+    /* Read from the agent CLIs' own MCP config rather than a list AgentDock
+       keeps: it sees servers added with `claude mcp add` too, and AgentDock no
+       longer writes that file. */
+    fetchAgentMcpNames()
+      .then((names) => setLinearMcp(names.some((n) => /linear/i.test(n))))
       .catch(() => setLinearMcp(null));
     fetchHookState().then(setHookState).catch(() => setHookState(null));
   }, []);

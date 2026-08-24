@@ -566,3 +566,51 @@ describe("getPlan", () => {
     expect(config.planFileNames("alpha")).toEqual(["alpha", "claude-alpha"]);
   });
 });
+
+// ─── Agent MCP config (read-only) ───
+
+describe("readMcpNames", () => {
+  const dir = join(CONFIG_DIR, "mcp-probe");
+  const file = join(dir, "claude.json");
+
+  function write(body: unknown) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, typeof body === "string" ? body : JSON.stringify(body));
+  }
+
+  test("returns nothing when the file is absent", () => {
+    expect(config.readMcpNames(join(dir, "nope.json"))).toEqual([]);
+  });
+
+  test("returns nothing for a corrupt file", () => {
+    write("{not json");
+    expect(config.readMcpNames(file)).toEqual([]);
+  });
+
+  test("returns nothing when there are no servers", () => {
+    write({ someOtherKey: 1 });
+    expect(config.readMcpNames(file)).toEqual([]);
+  });
+
+  test("reports the server name, its command and its args", () => {
+    write({
+      mcpServers: {
+        linear: { command: "npx", args: ["-y", "mcp-remote", "https://mcp.linear.app/mcp"] },
+      },
+    });
+    const names = config.readMcpNames(file);
+    expect(names).toContain("linear");
+    expect(names).toContain("npx");
+    expect(names).toContain("https://mcp.linear.app/mcp");
+  });
+
+  test("finds Linear when only the url mentions it", () => {
+    write({ mcpServers: { tickets: { command: "npx", args: ["mcp-remote", "https://mcp.linear.app/mcp"] } } });
+    expect(config.readMcpNames(file).some((n) => /linear/i.test(n))).toBe(true);
+  });
+
+  test("survives entries with no command or args", () => {
+    write({ mcpServers: { notion: {}, stitch: { args: "not-an-array" } } });
+    expect(config.readMcpNames(file).sort()).toEqual(["notion", "stitch"]);
+  });
+});

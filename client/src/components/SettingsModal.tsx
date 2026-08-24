@@ -13,18 +13,12 @@ import {
   addSettingsRepo,
   deleteSettingsRepo,
   setPassword as apiSetPassword,
-  fetchMcpServers,
-  addMcpServerApi,
-  deleteMcpServer,
   fetchMetaPropertyPresets,
   saveMetaPropertyPresets,
   fetchNgrokBasicAuthStatus,
   setNgrokBasicAuth as apiSetNgrokBasicAuth,
   deleteNgrokBasicAuth as apiDeleteNgrokBasicAuth,
-  fetchDbShards,
   type SettingsHealth,
-  type McpServerInfo,
-  type DbShardInfo,
 } from "../api";
 import type { RepoConfig, MetaPropertyPreset, AgentType } from "../types";
 import { Icon, type IconName } from "./Icon";
@@ -38,8 +32,6 @@ type Category =
   | "agents"
   | "worktrees"
   | "meta"
-  | "mcp"
-  | "integrations"
   | "security"
   | "health"
   | "shortcuts";
@@ -53,8 +45,6 @@ const CATEGORIES: { id: Category; label: string; icon: IconName }[] = [
   { id: "security", label: "Access", icon: "lock" },
   { id: "appearance", label: "Appearance", icon: "eye" },
   { id: "terminal", label: "Terminal", icon: "term" },
-  { id: "integrations", label: "Integrations", icon: "layers" },
-  { id: "mcp", label: "MCP Servers", icon: "globe" },
   { id: "health", label: "Health", icon: "alert" },
   { id: "shortcuts", label: "Shortcuts", icon: "keyboard" },
 ];
@@ -92,14 +82,6 @@ const PANE_META: Record<Category, { title: string; blurb: string }> = {
   terminal: {
     title: "Terminal",
     blurb: "Terminal font, scrollback and the on-screen keyboard.",
-  },
-  integrations: {
-    title: "Integrations",
-    blurb: "Linear, Slack, GitHub and the databases you query read-only.",
-  },
-  mcp: {
-    title: "MCP Servers",
-    blurb: "Tool servers every agent session is given access to.",
   },
   health: {
     title: "Health",
@@ -487,8 +469,6 @@ export function SettingsModal({ open, onClose }: Props) {
             {category === "agents" && <AgentsPanel health={health} />}
             {category === "worktrees" && <WorktreesPanel />}
             {category === "meta" && <MetaPropertiesPanel />}
-            {category === "mcp" && <McpServersPanel />}
-            {category === "integrations" && <IntegrationsPanel health={health} />}
             {category === "security" && <SecurityPanel />}
             {category === "health" && <><HookPanel /><HealthPanel health={health} /></>}
             {category === "shortcuts" && <ShortcutsPanel />}
@@ -812,114 +792,6 @@ function WorktreesPanel() {
   );
 }
 
-// ─── Integrations Panel ───
-
-function IntegrationsPanel({ health }: { health: SettingsHealth | null }) {
-  const [servers, setServers] = useState<McpServerInfo[] | null>(null);
-  const [shards, setShards] = useState<DbShardInfo[] | null>(null);
-
-  useEffect(() => {
-    fetchMcpServers().then(setServers).catch(() => setServers([]));
-    fetchDbShards().then(setShards).catch(() => setShards([]));
-  }, []);
-
-  const mcpMatch = (re: RegExp) => (servers || []).find((sv) => re.test(sv.name));
-  const linear = mcpMatch(/linear/i);
-  const slack = mcpMatch(/slack/i);
-  const gh = health?.gh;
-  const psql = health?.psql;
-
-  const rows: { icon: IconName; name: string; state: string; ok: boolean; detail: string }[] = [
-    {
-      icon: "plan",
-      name: "Linear",
-      ok: !!linear,
-      state: linear ? `MCP: ${linear.name}` : "not configured",
-      detail: linear
-        ? "Agents reach Linear through this MCP server. AgentDock itself holds no Linear credential."
-        : "AgentDock has no Linear client of its own. Add an MCP server under MCP Servers and every session gets it.",
-    },
-    {
-      icon: "send",
-      name: "Slack",
-      ok: !!slack,
-      state: slack ? `MCP: ${slack.name}` : "not configured",
-      detail: slack
-        ? "Agents reach Slack through this MCP server. AgentDock itself holds no Slack token."
-        : "AgentDock has no Slack client of its own. Add an MCP server under MCP Servers and every session gets it.",
-    },
-    {
-      icon: "pr",
-      name: "GitHub",
-      ok: !!gh?.installed,
-      state: gh?.installed ? `gh ${shortVersion(gh.version)}` : "gh not installed",
-      detail: gh?.installed
-        ? "Pushing and opening a PR shells out to gh, which carries its own auth. AgentDock stores no GitHub token."
-        : "Without the gh CLI, pushing a branch works but opening a PR from AgentDock does not.",
-    },
-    {
-      icon: "db",
-      name: "Databases",
-      ok: (shards?.length || 0) > 0 && !!psql?.installed,
-      state:
-        shards === null
-          ? "checking\u2026"
-          : shards.length === 0
-            ? "no shards configured"
-            : `${shards.length} shard${shards.length === 1 ? "" : "s"}`,
-      detail:
-        shards && shards.length > 0
-          ? `Read-only: SELECT, WITH, EXPLAIN and SHOW only, everything else is rejected before psql runs.${psql?.installed ? "" : " psql is not installed, so queries will fail."}`
-          : "Read-only Postgres connections agents can query. Nothing is configured, so no query can run.",
-    },
-  ];
-
-  return (
-    <div className="set-pane">
-      <div className="set-group">
-        {rows.map((r) => (
-          <div key={r.name} className="set-group-row set-group-row-top">
-            <Icon name={r.icon} size={15} style={{ marginTop: 2, color: "var(--text-3)" }} />
-            <div className="set-copy">
-              <span className="set-copy-title">{r.name}</span>
-              <span className="set-copy-hint">{r.detail}</span>
-            </div>
-            <span className={`set-tag ${r.ok ? "" : "set-tag-off"}`}>{r.state}</span>
-          </div>
-        ))}
-      </div>
-
-      {shards && shards.length > 0 && (
-        <div className="set-section">
-          <span className="set-section-title">Shards</span>
-          <div className="set-group">
-            {shards.map((sh) => (
-              <div key={sh.name} className="set-group-row">
-                <span className="set-dot set-dot-on" />
-                <div className="set-copy">
-                  <span className="set-copy-title">{sh.name}</span>
-                  <span className="set-copy-hint set-mono">
-                    {sh.user}@{sh.host}:{sh.port}/{sh.database}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="set-note">
-        <Icon name="alert" size={14} />
-        <span>
-          Only two of these are AgentDock&rsquo;s own: the <code>gh</code> CLI it shells out to, and
-          the database shards it queries. Linear and Slack reach agents through MCP, so what is
-          listed here is what is actually configured &mdash; not what could be.
-        </span>
-      </div>
-    </div>
-  );
-}
-
 // ─── Repos Panel ───
 
 function ReposPanel() {
@@ -1031,116 +903,6 @@ function ReposPanel() {
               {repo.remote && <span className="settings-repo-remote">{repo.remote}</span>}
             </div>
             <button className="btn btn-danger-sm" onClick={() => handleDelete(repo.alias)}>
-              Remove
-            </button>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-// ─── MCP Servers Panel ───
-
-function McpServersPanel() {
-  const [servers, setServers] = useState<McpServerInfo[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [name, setName] = useState("");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("");
-  const [envPairs, setEnvPairs] = useState<{ key: string; value: string }[]>([]);
-
-  const load = useCallback(() => {
-    fetchMcpServers().then(setServers);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const handleAdd = async () => {
-    if (!name || !command) return;
-    const parsedArgs = args.trim()
-      ? args.split(/[\s,]+/).map(a => a.replace(/^["']|["']$/g, "")).filter(Boolean)
-      : [];
-    const env: Record<string, string> = {};
-    for (const pair of envPairs) {
-      if (pair.key.trim()) env[pair.key.trim()] = pair.value;
-    }
-    await addMcpServerApi({
-      name,
-      command,
-      args: parsedArgs,
-      env: Object.keys(env).length > 0 ? env : undefined,
-    });
-    setName(""); setCommand(""); setArgs(""); setEnvPairs([]);
-    setShowAdd(false);
-    load();
-  };
-
-  const handleDelete = async (serverName: string) => {
-    await deleteMcpServer(serverName);
-    load();
-  };
-
-  const addEnvPair = () => setEnvPairs([...envPairs, { key: "", value: "" }]);
-  const updateEnvPair = (i: number, field: "key" | "value", val: string) => {
-    const updated = [...envPairs];
-    updated[i][field] = val;
-    setEnvPairs(updated);
-  };
-  const removeEnvPair = (i: number) => setEnvPairs(envPairs.filter((_, idx) => idx !== i));
-
-  return (
-    <>
-      <p className="settings-security-desc">
-        MCP servers are synced to all agent configs (Claude, Cursor) so every session has access.
-      </p>
-      <div className="settings-row">
-        <label className="settings-label">Servers</label>
-        <button className="btn btn-primary settings-add-btn" onClick={() => setShowAdd(!showAdd)}>
-          {showAdd ? "Cancel" : "+ Add"}
-        </button>
-      </div>
-
-      {showAdd && (
-        <div className="settings-add-form">
-          <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. linear)" />
-          <input className="form-input" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. npx)" />
-          <input className="form-input" value={args} onChange={(e) => setArgs(e.target.value)} placeholder="Args (space-separated, e.g. -y @mseep/linear-mcp)" />
-          <div style={{ marginTop: 4 }}>
-            <label className="settings-label" style={{ fontSize: 12 }}>Environment Variables</label>
-            {envPairs.map((pair, i) => (
-              <div key={i} className="settings-db-row" style={{ marginBottom: 4 }}>
-                <input className="form-input" value={pair.key} onChange={(e) => updateEnvPair(i, "key", e.target.value)} placeholder="KEY" style={{ flex: 1 }} />
-                <input className="form-input" value={pair.value} onChange={(e) => updateEnvPair(i, "value", e.target.value)} placeholder="value" style={{ flex: 2 }} />
-                <button className="btn btn-danger-sm" onClick={() => removeEnvPair(i)}>x</button>
-              </div>
-            ))}
-            <button className="btn btn-sm" onClick={addEnvPair} style={{ marginTop: 4 }}>+ Add env var</button>
-          </div>
-          <button className="btn btn-primary" onClick={handleAdd} disabled={!name || !command} style={{ marginTop: 8 }}>
-            Add Server
-          </button>
-        </div>
-      )}
-
-      <div className="settings-repo-list">
-        {servers.length === 0 && (
-          <div className="settings-empty">No MCP servers configured.</div>
-        )}
-        {servers.map((server) => (
-          <div key={server.name} className="settings-repo-row">
-            <div className="settings-repo-info">
-              <span className="settings-repo-alias">{server.name}</span>
-              <span className="settings-repo-path">
-                {server.command} {server.args.join(" ")}
-              </span>
-              {server.env && Object.keys(server.env).length > 0 && (
-                <span className="settings-repo-remote">
-                  env: {Object.keys(server.env).join(", ")}
-                </span>
-              )}
-            </div>
-            <button className="btn btn-danger-sm" onClick={() => handleDelete(server.name)}>
               Remove
             </button>
           </div>

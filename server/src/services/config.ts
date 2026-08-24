@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync, renameSync, statSync } from "fs";
 import { join, resolve } from "path";
-import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
+import type { RepoConfig, WorktreeMeta, DbShard } from "../types";
 
 import { homedir } from "os";
 
@@ -514,105 +514,44 @@ export function deleteCustomAction(id: string): void {
   writeFileSync(QUICK_ACTIONS_FILE, JSON.stringify(actions, null, 2));
 }
 
-// ─── MCP Servers ───
+// ─── What MCP servers the agents have ───
 
-const MCP_SERVERS_FILE = join(CONFIG_DIR, "mcp-servers.json");
-const MCP_SYNCED_NAMES_FILE = join(CONFIG_DIR, "mcp-synced-names.json");
-const CLAUDE_CONFIG_FILE = join(HOME, ".claude.json");
-const CURSOR_MCP_FILE = join(HOME, ".cursor", "mcp.json");
-
-export function getMcpServers(): McpServer[] {
-  if (!existsSync(MCP_SERVERS_FILE)) return [];
+/**
+ * Read-only. AgentDock used to keep its own list of MCP servers and write it
+ * into ~/.claude.json and ~/.cursor/mcp.json, which meant a settings panel here
+ * could silently rewrite the agent config for every session on the machine —
+ * including servers it had not put there. That is gone; this only reads.
+ *
+ * Reading the agents' own files rather than a list of our own is also more
+ * honest: it sees servers added with `claude mcp add`, which our list never did.
+ */
+export function readMcpNames(filePath: string): string[] {
+  if (!existsSync(filePath)) return [];
   try {
-    const data = JSON.parse(readFileSync(MCP_SERVERS_FILE, "utf-8"));
-    if (Array.isArray(data)) return data;
-  } catch { /* corrupt file */ }
-  return [];
-}
-
-function saveMcpServers(servers: McpServer[]): void {
-  ensureConfigDir();
-  writeFileSync(MCP_SERVERS_FILE, JSON.stringify(servers, null, 2));
-}
-
-function getSyncedNames(): string[] {
-  if (!existsSync(MCP_SYNCED_NAMES_FILE)) return [];
-  try {
-    const data = JSON.parse(readFileSync(MCP_SYNCED_NAMES_FILE, "utf-8"));
-    if (Array.isArray(data)) return data;
-  } catch { /* corrupt file */ }
-  return [];
-}
-
-function saveSyncedNames(names: string[]): void {
-  ensureConfigDir();
-  writeFileSync(MCP_SYNCED_NAMES_FILE, JSON.stringify(names));
-}
-
-function syncAgentConfigFile(filePath: string, servers: McpServer[], previousNames: string[]): void {
-  let config: Record<string, any> = {};
-  if (existsSync(filePath)) {
-    try {
-      config = JSON.parse(readFileSync(filePath, "utf-8"));
-    } catch { /* corrupt file, start fresh */ }
-  }
-
-  if (!config.mcpServers) config.mcpServers = {};
-
-  // Remove previously-synced servers that are no longer in the canonical list
-  const currentNames = new Set(servers.map((s) => s.name));
-  for (const name of previousNames) {
-    if (!currentNames.has(name)) {
-      delete config.mcpServers[name];
+    const config = JSON.parse(readFileSync(filePath, "utf-8"));
+    const servers = config?.mcpServers;
+    if (!servers || typeof servers !== "object") return [];
+    /* The name is what a reader recognises, but "linear" often appears only in
+       the command that fetches it, so both are worth reporting. */
+    const out: string[] = [];
+    for (const [name, entry] of Object.entries(servers as Record<string, any>)) {
+      out.push(name);
+      const args = Array.isArray(entry?.args) ? entry.args : [];
+      for (const arg of args) if (typeof arg === "string") out.push(arg);
+      if (typeof entry?.command === "string") out.push(entry.command);
     }
+    return out;
+  } catch {
+    return [];
   }
-
-  // Add/update current servers
-  for (const server of servers) {
-    const entry: Record<string, any> = {
-      type: "stdio",
-      command: server.command,
-      args: server.args,
-    };
-    if (server.env && Object.keys(server.env).length > 0) {
-      entry.env = server.env;
-    }
-    config.mcpServers[server.name] = entry;
-  }
-
-  // Ensure parent directory exists
-  const dir = filePath.substring(0, filePath.lastIndexOf("/"));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(filePath, JSON.stringify(config, null, 2));
 }
 
-export function syncMcpToAgents(): void {
-  const servers = getMcpServers();
-  const previousNames = getSyncedNames();
-
-  syncAgentConfigFile(CLAUDE_CONFIG_FILE, servers, previousNames);
-  syncAgentConfigFile(CURSOR_MCP_FILE, servers, previousNames);
-
-  // Update tracked names
-  saveSyncedNames(servers.map((s) => s.name));
-}
-
-export function addMcpServer(server: McpServer): void {
-  const servers = getMcpServers();
-  const existing = servers.findIndex((s) => s.name === server.name);
-  if (existing !== -1) {
-    servers[existing] = server;
-  } else {
-    servers.push(server);
-  }
-  saveMcpServers(servers);
-  syncMcpToAgents();
-}
-
-export function removeMcpServer(name: string): void {
-  const servers = getMcpServers().filter((s) => s.name !== name);
-  saveMcpServers(servers);
-  syncMcpToAgents();
+/** Every MCP server name (and command/args) either agent CLI is configured with. */
+export function getAgentMcpNames(): string[] {
+  return [
+    ...readMcpNames(join(HOME, ".claude.json")),
+    ...readMcpNames(join(HOME, ".cursor", "mcp.json")),
+  ];
 }
 
 // ─── Claude Code Hooks (status detection) ───

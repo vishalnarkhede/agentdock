@@ -587,39 +587,16 @@ export async function deleteCustomAction(id: string): Promise<void> {
   });
 }
 
-// ─── MCP Servers API ───
+// ─── What MCP servers the agents have (read-only) ───
 
-export interface McpServerInfo {
-  name: string;
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-}
-
-export async function fetchMcpServers(): Promise<McpServerInfo[]> {
+/** Names, commands and args of every MCP server the agent CLIs are configured
+ *  with. Read from their own config, so it sees servers added outside AgentDock. */
+export async function fetchAgentMcpNames(): Promise<string[]> {
   if (isDemo()) return [];
-  const res = await fetch(`${BASE}/api/settings/mcp-servers`);
-  return res.json();
-}
-
-export async function addMcpServerApi(server: McpServerInfo): Promise<void> {
-  if (isDemo()) return;
-  const res = await fetch(`${BASE}/api/settings/mcp-servers`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(server),
-  });
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Failed to add MCP server");
-  }
-}
-
-export async function deleteMcpServer(name: string): Promise<void> {
-  if (isDemo()) return;
-  await fetch(`${BASE}/api/settings/mcp-servers/${encodeURIComponent(name)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(`${BASE}/api/settings/agent-mcp`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data.names) ? data.names : [];
 }
 
 // ─── Preferences API ───

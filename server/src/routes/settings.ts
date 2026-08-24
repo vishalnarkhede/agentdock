@@ -12,9 +12,7 @@ import {
   saveCustomAction,
   deleteCustomAction,
   scanBasePath,
-  getMcpServers,
-  addMcpServer,
-  removeMcpServer,
+  getAgentMcpNames,
   getPreferences,
   savePreferences,
   getMetaPropertyPresets,
@@ -131,30 +129,10 @@ app.delete("/quick-actions/:id", (c) => {
   return c.json({ ok: true });
 });
 
-// ─── MCP Servers ───
+// ─── What MCP servers the agents have (read-only) ───
 
-app.get("/mcp-servers", (c) => {
-  return c.json(getMcpServers());
-});
-
-app.post("/mcp-servers", async (c) => {
-  const body = await c.req.json();
-  if (!body.name || !body.command) {
-    return c.json({ error: "name and command are required" }, 400);
-  }
-  addMcpServer({
-    name: body.name,
-    command: body.command,
-    args: body.args || [],
-    env: body.env || undefined,
-  });
-  return c.json({ ok: true }, 201);
-});
-
-app.delete("/mcp-servers/:name", (c) => {
-  const name = c.req.param("name");
-  removeMcpServer(name);
-  return c.json({ ok: true });
+app.get("/agent-mcp", (c) => {
+  return c.json({ names: getAgentMcpNames() });
 });
 
 // ─── Preferences ───
