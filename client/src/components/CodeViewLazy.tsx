@@ -18,6 +18,7 @@ interface Props {
   activeLine?: number | null;
   onCmdClick?: (word: string, line: number) => void;
   onMatchCount?: (n: number) => void;
+  onSelectionChange?: (sel: { text: string; startLine: number; endLine: number } | null) => void;
   viewRef?: Ref<CodeViewHandle>;
 }
 

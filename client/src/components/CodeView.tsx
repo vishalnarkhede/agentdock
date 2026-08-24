@@ -42,6 +42,9 @@ interface Props {
   activeLine?: number | null;
   onCmdClick?: (word: string, line: number) => void;
   onMatchCount?: (n: number) => void;
+  /** The current selection, or null when it is empty. Line numbers are 1-based
+   *  and inclusive, so they read the way the gutter does. */
+  onSelectionChange?: (sel: { text: string; startLine: number; endLine: number } | null) => void;
 }
 
 /* Colours come from the theme variables, so the editor follows all nine
@@ -155,7 +158,7 @@ const hitField = StateField.define<DecorationSet>({
 const WORD = /[A-Za-z0-9_$]/;
 
 export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
-  { path, content, editable, onChange, highlightTerm, activeLine, onCmdClick, onMatchCount },
+  { path, content, editable, onChange, highlightTerm, activeLine, onCmdClick, onMatchCount, onSelectionChange },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
@@ -164,8 +167,8 @@ export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
   const editC = useRef(new Compartment());
   // Handlers change every render; read them through a ref so the editor is
   // never torn down and rebuilt just because a callback identity moved.
-  const cb = useRef({ onChange, onCmdClick });
-  cb.current = { onChange, onCmdClick };
+  const cb = useRef({ onChange, onCmdClick, onSelectionChange });
+  cb.current = { onChange, onCmdClick, onSelectionChange };
 
   useImperativeHandle(ref, () => ({
     goToLine: (line: number) => {
@@ -206,6 +209,26 @@ export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
         editC.current.of([EditorState.readOnly.of(true), EditorView.editable.of(false)]),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) cb.current.onChange?.(u.state.doc.toString());
+          if (!u.selectionSet && !u.docChanged) return;
+          const report = cb.current.onSelectionChange;
+          if (!report) return;
+          const range = u.state.selection.main;
+          if (range.empty) {
+            report(null);
+            return;
+          }
+          const doc = u.state.doc;
+          /* Both ends get the same treatment: a drag that starts at the end of
+             one line and stops at the start of another highlights neither, so
+             reporting them would put lines the reader never marked into the
+             note. Trim to the lines actually covered. */
+          const startAt = doc.lineAt(range.from);
+          const endAt = doc.lineAt(range.to);
+          const startsAtLineEnd = startAt.to === range.from && endAt.number > startAt.number;
+          const endsAtLineStart = endAt.from === range.to && endAt.number > startAt.number;
+          const startLine = startsAtLineEnd ? startAt.number + 1 : startAt.number;
+          const endLine = endsAtLineStart ? endAt.number - 1 : endAt.number;
+          report({ text: u.state.sliceDoc(range.from, range.to), startLine, endLine });
         }),
         EditorView.domEventHandlers({
           mousedown(e, v) {

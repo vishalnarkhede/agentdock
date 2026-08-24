@@ -1,15 +1,18 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
-import { fetchFsDir, fetchFsFile, writeFsFile } from "../api";
+import { fetchFsDir, fetchFsFile, writeFsFile, sendSessionInput } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
 import { FileSearch, type FileSearchHandle } from "./FileSearch";
 import { CodeViewLazy, type CodeViewHandle } from "./CodeViewLazy";
 import "../styles/code-nav.css";
 import { findDefinition, fetchDocSymbols, type Candidate, type DocSymbol } from "../code-api";
+import { buildNoteMessage } from "../note-message";
 import "../styles/files.css";
 interface Props {
   roots: string[]; // absolute paths to repo root(s)
   onClose?: () => void;
+  /** The session a note goes to. Without one the note UI stays out of the way. */
+  sessionName?: string;
 }
 
 export interface FileExplorerHandle {
@@ -306,7 +309,7 @@ type PerRootsState = {
   dirContents: DirContents;
 };
 
-export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({ roots, onClose }, ref) {
+export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({ roots, onClose, sessionName }, ref) {
   const [dirContents, setDirContents] = useState<DirContents>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [openFile, setOpenFile] = useState<OpenFile | null>(null);
@@ -392,6 +395,18 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [picker, setPicker] = useState<{ name: string; candidates: Candidate[] } | null>(null);
   const [outline, setOutline] = useState<DocSymbol[] | null>(null);
   const [showOutline, setShowOutline] = useState(false);
+
+  /* ─── Note on a selection ───────────────────────────────────────────────
+     Point at code and say something about it, without retyping the path and
+     the line numbers into the terminal. One note at a time: it is sent as soon
+     as you press send, so there is nothing to collect. */
+  const [selection, setSelection] = useState<{ text: string; startLine: number; endLine: number } | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [noteSent, setNoteSent] = useState(false);
+  const noteInput = useRef<HTMLTextAreaElement>(null);
   const [modDown, setModDown] = useState(false);
   const [usagesFor, setUsagesFor] = useState<string | null>(null);
   const backStack = useRef<{ path: string; line: number }[]>([]);
@@ -765,6 +780,62 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   }, [openFile]);
 
   // Relative path from root for breadcrumb
+  /* A selection is per-file: keeping one across a navigation would attach a
+     note to lines the reader is no longer looking at. */
+  useEffect(() => {
+    setSelection(null);
+    setNoteOpen(false);
+    setNoteText("");
+    setNoteError(null);
+  }, [openFilePath]);
+
+  const openNote = useCallback(() => {
+    if (!selection || !sessionName) return;
+    setNoteOpen(true);
+    setNoteError(null);
+    requestAnimationFrame(() => noteInput.current?.focus());
+  }, [selection, sessionName]);
+
+  useEffect(() => {
+    if (!sessionName) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "m") {
+        if (!selection) return;
+        e.preventDefault();
+        openNote();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selection, sessionName, openNote]);
+
+  const sendNote = async () => {
+    if (!selection || !sessionName || !openFile) return;
+    const note = noteText.trim();
+    if (!note) return;
+    setNoteBusy(true);
+    setNoteError(null);
+    try {
+      const message = buildNoteMessage({
+        path: getBreadcrumb(openFile.path),
+        startLine: selection.startLine,
+        endLine: selection.endLine,
+        code: selection.text,
+        note,
+        language: openFile.language,
+      });
+      await sendSessionInput(sessionName, message);
+      setNoteOpen(false);
+      setNoteText("");
+      setNoteSent(true);
+      setTimeout(() => setNoteSent(false), 2200);
+    } catch (err: any) {
+      setNoteError(err?.message || "could not send");
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+
   function getBreadcrumb(filePath: string): string {
     for (const root of roots) {
       if (filePath.startsWith(root + "/")) {
@@ -932,7 +1003,68 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 activeLine={activeMatchLine}
                 onCmdClick={(word: string, line: number) => navigateToSymbol(word, line)}
                 onMatchCount={setFileSearchMatchCount}
+                onSelectionChange={sessionName ? setSelection : undefined}
               />
+
+              {sessionName && selection && !noteOpen && (
+                <div className="fe-note-bar">
+                  <span className="fe-note-range">
+                    {selection.startLine === selection.endLine
+                      ? `line ${selection.startLine}`
+                      : `lines ${selection.startLine}–${selection.endLine}`}
+                  </span>
+                  <button className="fe-note-btn" onClick={openNote}>
+                    <Icon name="send" size={12} /> note to agent<kbd>⌘⇧M</kbd>
+                  </button>
+                </div>
+              )}
+
+              {sessionName && selection && noteOpen && (
+                <div className="fe-note" role="dialog" aria-label="Note on the selection">
+                  <div className="fe-note-head">
+                    <span>
+                      {getBreadcrumb(openFile.path)}
+                      <span className="fe-note-lines">
+                        :{selection.startLine === selection.endLine
+                          ? selection.startLine
+                          : `${selection.startLine}-${selection.endLine}`}
+                      </span>
+                    </span>
+                    <button onClick={() => { setNoteOpen(false); setNoteError(null); }} aria-label="Close">×</button>
+                  </div>
+                  <pre className="fe-note-code">{selection.text.split("\n").slice(0, 6).join("\n")}
+                    {selection.text.split("\n").length > 6 ? "\n…" : ""}</pre>
+                  <textarea
+                    ref={noteInput}
+                    className="fe-note-input"
+                    value={noteText}
+                    onChange={(e) => setNoteText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") { e.preventDefault(); setNoteOpen(false); }
+                      /* Enter alone would be a newline in a note that often wants
+                         two sentences; the send key is the one the rest of the
+                         app uses to commit a composer. */
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendNote(); }
+                    }}
+                    placeholder="What should the agent do about this?"
+                    rows={3}
+                  />
+                  <div className="fe-note-foot">
+                    {noteError && <span className="fe-note-error">{noteError}</span>}
+                    <span className="fe-note-spacer" />
+                    <button className="fe-note-btn" onClick={() => setNoteOpen(false)}>cancel</button>
+                    <button
+                      className="fe-note-btn fe-note-btn-primary"
+                      onClick={sendNote}
+                      disabled={noteBusy || noteText.trim().length === 0}
+                    >
+                      {noteBusy ? "sending…" : "send"}<kbd>⌘↵</kbd>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {noteSent && <div className="fe-note-sent">note sent to {sessionName?.replace(/^claude-/, "")}</div>}
 
               {navBusy && <div className="fe-nav-busy">looking up…</div>}
 

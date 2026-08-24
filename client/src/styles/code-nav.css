@@ -308,3 +308,165 @@
 .fe-code-editing .fe-file-content {
   pointer-events: none;
 }
+
+/* ═══ Note on a selection ═══════════════════════════════════════════════════
+   Select code, say what you want done with it, and it lands in the agent's
+   terminal with the path and line range attached. The bar appears only while
+   something is selected, so it costs nothing when you are just reading. */
+
+.fe-note-bar {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: calc(var(--radius) + 4px);
+  /* Floating: --surface-card is translucent on the glass theme. */
+  background: var(--surface-float);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.fe-note-range {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.fe-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fe-note-btn:hover { background: var(--hover); }
+.fe-note-btn:disabled { opacity: 0.45; cursor: default; }
+.fe-note-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.fe-note-btn-primary {
+  border-color: transparent;
+  background: var(--intent-primary);
+  color: var(--intent-primary-ink);
+}
+
+.fe-note-btn kbd {
+  font-family: var(--font-mono);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  color: var(--text-3);
+  border: none;
+  background: none;
+}
+.fe-note-btn-primary kbd { color: var(--intent-primary-ink); opacity: 0.7; }
+
+.fe-note {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, calc(100% - 24px));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.fe-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+}
+.fe-note-head button {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.fe-note-lines { color: var(--text-3); }
+
+/* Enough of the selection to confirm you grabbed the right thing, not enough
+   to re-read it here. */
+.fe-note-code {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 116px;
+  overflow: auto;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre;
+}
+
+.fe-note-input {
+  margin: 0;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-base);
+  resize: vertical;
+}
+.fe-note-input:focus { outline: none; }
+.fe-note-input::placeholder { color: var(--text-4); }
+
+.fe-note-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+.fe-note-spacer { flex: 1; }
+.fe-note-error { color: var(--intent-danger); font-size: max(11px, calc(var(--fs-base) - 2px)); }
+
+.fe-note-sent {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 22;
+  padding: 7px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  color: var(--text-2);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 768px) {
+  .fe-note,
+  .fe-note-bar {
+    left: 10px;
+    right: 10px;
+    width: auto;
+  }
+  .fe-note-bar { justify-content: space-between; }
+}

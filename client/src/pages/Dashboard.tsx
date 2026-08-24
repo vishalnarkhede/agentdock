@@ -2056,7 +2056,7 @@ export function Dashboard() {
                   ) : fullSurface === "plan" ? (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
                   ) : fullSurface === "files" ? (
-                    <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setFullSurface(null)} />
+                    <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setFullSurface(null)} />
                   ) : (
                     <SubAgentsView
                       key={activeSession}
@@ -2129,7 +2129,7 @@ export function Dashboard() {
                       ) : bottomTab === "sub-agents" && hasChildren ? (
                         <SubAgentsView key={activeSession} parentSession={activeSession} sessions={sessions} onSelectChild={(c) => { setActiveSession(c); setBottomTab(null); setMobileShowTerminal(true); }} onRefresh={refresh} />
                       ) : bottomTab === "files" ? (
-                        <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} onClose={() => setBottomTab(null)} />
+                        <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setBottomTab(null)} />
                       ) : (
                         <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
                       )}
