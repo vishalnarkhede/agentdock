@@ -7232,7 +7232,7 @@ mark.fe-match-active {
     align-items: center;
     justify-content: center;
     position: fixed;
-    bottom: calc(64px + env(safe-area-inset-bottom));
+    bottom: calc(18px + env(safe-area-inset-bottom));
     right: 18px;
     width: 56px;
     height: 56px;
@@ -8705,7 +8705,10 @@ mark.fe-match-active {
   top: calc(env(safe-area-inset-top, 0px) + var(--app-header-h, 48px));
   left: 0;
   right: 0;
-  bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  /* The bottom nav is not rendered on this screen (its only item was the
+     screen you are already on), so the queue owns the space down to the home
+     indicator instead of leaving a band of nothing there. */
+  bottom: env(safe-area-inset-bottom, 0px);
   z-index: 60;
   overflow-y: auto;
   background: var(--surface-0);

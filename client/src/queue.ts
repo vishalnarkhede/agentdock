@@ -38,3 +38,32 @@ export function queueBucket(session: SessionInfo): QueueBucket {
 export function bucketMeta(id: QueueBucket) {
   return QUEUE_BUCKETS.find((b) => b.id === id);
 }
+
+/**
+ * Splits queue rows into the sections a grouping asks for, keeping the order
+ * the grouping put them in and the caller's order inside each section.
+ *
+ * Returns null when there is no grouping to apply, so the caller can render a
+ * flat list. A row whose section is not in `order` gets a section of its own at
+ * the end rather than disappearing.
+ */
+export function queueSections<T extends { section?: string }>(
+  rows: T[],
+  order: string[] | undefined,
+): { label: string; rows: T[] }[] | null {
+  if (!order || order.length === 0) return null;
+  const byLabel = new Map<string, T[]>();
+  for (const r of rows) {
+    if (!r.section) continue;
+    const list = byLabel.get(r.section);
+    if (list) list.push(r);
+    else byLabel.set(r.section, [r]);
+  }
+  const out = order
+    .filter((label) => byLabel.has(label))
+    .map((label) => ({ label, rows: byLabel.get(label) as T[] }));
+  for (const [label, list] of byLabel) {
+    if (!out.some((s) => s.label === label)) out.push({ label, rows: list });
+  }
+  return out.length > 0 ? out : null;
+}

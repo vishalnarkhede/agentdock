@@ -65,12 +65,12 @@
 /* The situation, stated in a sentence, before any list of things. */
 .mq-head {
   flex-shrink: 0;
-  padding: 14px 16px 12px 16px;
+  padding: 12px 16px 10px 16px;
 }
 
 .mq-headline {
   margin: 0;
-  font-size: calc(var(--fs-base) + 8px);
+  font-size: calc(var(--fs-base) + 6px);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.3;
@@ -78,18 +78,29 @@
 }
 
 .mq-subline {
-  margin: 4px 0 0 0;
-  font-size: var(--fs-base);
-  line-height: 1.45;
+  margin: 3px 0 0 0;
+  font-size: max(12px, calc(var(--fs-base) - 1px));
+  line-height: 1.4;
   color: var(--text-3);
+}
+
+/* One control row: the filters take what is left and scroll, the grouping pill
+   is pinned at the end so it never scrolls out of reach. */
+.mq-controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 10px 12px;
 }
 
 /* Filters scroll sideways rather than shrinking to unreadable. */
 .mq-filters {
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: 6px;
-  padding: 0 16px 12px 16px;
+  padding: 2px 4px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -97,14 +108,20 @@
 }
 .mq-filters::-webkit-scrollbar { display: none; }
 
+/* Only while something is still off to the right: the last chip fades rather
+   than being cut off, so it reads as more to scroll and not a broken control. */
+.mq-filters[data-more="true"] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+}
+
 .mq-chip {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 14px;
+  min-height: 38px;
+  padding: 0 12px;
   border-radius: var(--mq-r-ctl);
   border: 1px solid var(--border-subtle);
   background: transparent;
@@ -145,13 +162,63 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   margin: 0;
-  padding: 0 12px 16px 12px;
+  /* Clears the floating + button, so the last card is never trapped under it. */
+  padding: 0 12px 88px 12px;
+  list-style: none;
+}
+
+/* ─── Sections, when the reader has picked a grouping ─── */
+.mq-sec-block {
+  list-style: none;
+}
+
+.mq-sec {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 3px 6px;
+  /* Sticky over the cards, so this has to be opaque on every theme. */
+  background: var(--surface-0);
+}
+
+.mq-sec-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.mq-sec-count {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-4);
+}
+
+/* A hairline carries the section break without another band of colour. */
+.mq-sec::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.mq-sec-rows {
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
 .mq-row {
   position: relative;
-  margin-bottom: 8px;
+  margin-bottom: 7px;
   border-radius: var(--mq-r-card);
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
@@ -185,19 +252,19 @@
 .mq-row-body {
   position: relative;
   pointer-events: none;
-  padding: 14px 15px;
+  padding: 10px 12px;
 }
 
 .mq-row-top {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 7px;
+  gap: 9px;
+  margin-bottom: 4px;
 }
 
 .mq-row-name {
   min-width: 0;
-  font-size: calc(var(--fs-base) + 2px);
+  font-size: calc(var(--fs-base) + 1px);
   font-weight: 600;
   color: var(--text-1);
   letter-spacing: -0.01em;
@@ -215,8 +282,12 @@
 }
 
 .mq-row-line {
-  font-size: var(--fs-base);
-  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: max(12px, calc(var(--fs-base) - 0.5px));
+  line-height: 1.4;
   color: var(--text-2);
 }
 
@@ -226,13 +297,12 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 22px;
-  margin-top: 9px;
+  min-height: 16px;
+  margin-top: 6px;
 }
 .mq-row[data-cta="true"] .mq-row-foot {
-  min-height: 44px;
-  margin-top: 5px;
-  margin-bottom: -6px;
+  min-height: 30px;
+  margin-top: 7px;
 }
 
 .mq-row-repo {
@@ -252,18 +322,23 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 18px;
+  position: relative;
+  min-height: 30px;
+  padding: 0 14px;
   border: 1px solid transparent;
   border-radius: var(--mq-r-ctl);
   font: inherit;
-  font-size: calc(var(--fs-base) + 0.5px);
+  font-size: max(12px, calc(var(--fs-base) - 0.5px));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
   background: var(--status-working);
   color: var(--intent-primary-ink);
+}
+.mq-row-cta::after {
+  content: "";
+  position: absolute;
+  inset: -7px -6px;
 }
 .mq-row-cta:hover { filter: brightness(1.08); }
 .mq-row-cta:focus-visible {
@@ -603,22 +678,53 @@
 }
 
 /* Sort/group control. The sidebar copy of this sits behind the queue overlay,
-   so on a phone this is the only way to reach it. */
-.mq-mode-row {
+   so on a phone this is the only way to reach it.
+
+   It stays a native select — the OS draws the popup, so it is opaque on every
+   theme and usable with one thumb — but it is laid over an icon button at
+   opacity 0 rather than shown as a bare dropdown. Two reasons: the chosen
+   grouping is already visible in the section headers below, and a select wide
+   enough to show its value pushed half the filter chips off the row. */
+.mq-mode-wrap {
+  position: relative;
   flex-shrink: 0;
-  padding: 0 16px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--mq-r-ctl);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.mq-mode-wrap[data-active="true"] {
+  border-color: var(--border-strong);
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+.mq-mode-wrap:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
-.mq-mode {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--mq-r-ctl, 8px);
-  /* Native select: the OS draws the popup, so it is opaque on every theme and
-     usable with one thumb. */
-  background: var(--surface-float);
-  color: var(--text-1);
-  font-family: inherit;
-  font-size: max(12px, calc(var(--fs-base) - 1px));
+.mq-mode-icon {
+  pointer-events: none;
 }
+
+/* The select itself is the tap target; the icon under it is the chrome. */
+.mq-mode {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  opacity: 0;
+  font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.mq-mode:focus { outline: none; }

@@ -1189,6 +1189,28 @@ export function Dashboard() {
     return { groups, ungrouped };
   }, [filteredSessions, groupBy]);
 
+  /* The phone's queue orders by what needs you, which is exactly what
+     __queue__ grouping means — so only a different grouping has anything to
+     add there. Without this the grouping control on the phone changed the
+     desktop's list and nothing the reader could see. */
+  const mobileGrouping = useMemo(() => {
+    if (!groupBy || groupBy === "__queue__" || !groupedSessions) return null;
+    const byName = new Map<string, string>();
+    const order: string[] = [];
+    for (const [value, entries] of Object.entries(groupedSessions.groups)) {
+      const label = groupBy === "__status__"
+        ? value.charAt(0).toUpperCase() + value.slice(1)
+        : value;
+      if (!order.includes(label)) order.push(label);
+      for (const e of entries) byName.set(e.session.name, label);
+    }
+    if (groupedSessions.ungrouped.length > 0) {
+      order.push("No value");
+      for (const e of groupedSessions.ungrouped) byName.set(e.session.name, "No value");
+    }
+    return order.length > 0 ? { byName, order } : null;
+  }, [groupBy, groupedSessions]);
+
   // Check if active session has children or is a child (for sub-agents tab & breadcrumb)
   const activeSessionInfo = sessions.find((s) => s.name === activeSession);
   const hasChildren = (activeSessionInfo?.children?.length ?? 0) > 0;
@@ -2412,6 +2434,7 @@ export function Dashboard() {
       <div className="mobile-queue-host">
         <MobileQueue
           modeControl={modeSelect("mq-mode")}
+          sectionOrder={mobileGrouping?.order}
           rows={sessions
             .filter((x) => !x.parentSession)
             .map((x) => ({
@@ -2422,6 +2445,7 @@ export function Dashboard() {
               repo: (x.path || "").split("/").filter(Boolean).pop() || "—",
               line: x.statusLine?.message || "",
               cta: queueBucket(x) === "blocked" ? "Answer" : queueBucket(x) === "review" ? "Review" : undefined,
+              section: mobileGrouping?.byName.get(x.name),
             }))}
           onOpen={(name) => { setActiveSession(name); setMobileShowTerminal(true); }}
           onAction={(name, cta) => {
@@ -2451,48 +2475,48 @@ export function Dashboard() {
       />
     )}
 
-    {/* Bottom navigation bar */}
-    <nav className="mobile-bottom-nav">
-      <button
-        className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
-        onClick={() => setMobileShowTerminal(false)}
-      >
-        <span className="mobile-nav-icon"><Icon name="layers" size={20} /></span>
-        <span className="mobile-nav-label">Sessions</span>
-      </button>
-      {mobileInSession && (
-        <>
-          <button
-            className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
-          >
-            <span className="mobile-nav-icon"><Icon name="term" size={20} /></span>
-            <span className="mobile-nav-label">Terminal</span>
-          </button>
-          <button
-            className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
-          >
-            <span className="mobile-nav-icon"><Icon name="plan" size={20} /></span>
-            <span className="mobile-nav-label">Plan</span>
-          </button>
-          <button
-            className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
-          >
-            <span className="mobile-nav-icon"><Icon name="diff" size={20} /></span>
-            <span className="mobile-nav-label">Changes</span>
-          </button>
-          <button
-            className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
-          >
-            <span className="mobile-nav-icon"><Icon name="folder" size={20} /></span>
-            <span className="mobile-nav-label">Files</span>
-          </button>
-        </>
-      )}
-    </nav>
+    {/* Bottom navigation bar. Only while a session is open: on the queue screen
+        its one item was "Sessions", the screen you are already on, so the bar
+        was 90px of nothing above the home indicator. */}
+    {mobileInSession && (
+      <nav className="mobile-bottom-nav">
+        <button
+          className="mobile-nav-item"
+          onClick={() => setMobileShowTerminal(false)}
+        >
+          <span className="mobile-nav-icon"><Icon name="layers" size={20} /></span>
+          <span className="mobile-nav-label">Sessions</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="term" size={20} /></span>
+          <span className="mobile-nav-label">Terminal</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="plan" size={20} /></span>
+          <span className="mobile-nav-label">Plan</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="diff" size={20} /></span>
+          <span className="mobile-nav-label">Changes</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="folder" size={20} /></span>
+          <span className="mobile-nav-label">Files</span>
+        </button>
+      </nav>
+    )}
     {mruSwitcherVisible && createPortal(
       <div className="mru-switcher">
         {mruList.current

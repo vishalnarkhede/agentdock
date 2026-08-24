@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { queueSections } from "../queue";
 import "../styles/mobile.css";
 
 /** Buckets the queue can show. Wider than the four the phone filters on:
@@ -20,6 +21,9 @@ export interface MobileQueueRow {
   /** Label for the row's action button — "Answer", "Approve", "Review".
    *  Omit it and the row has no button. */
   cta?: string;
+  /** Which section this row belongs to, when the reader has picked a grouping.
+   *  Omitted for the ungrouped queue. */
+  section?: string;
 }
 
 export interface MobileQueueProps {
@@ -27,8 +31,13 @@ export interface MobileQueueProps {
   onOpen: (name: string) => void;
   onAction: (name: string, cta: string) => void;
   /** Sort/group control. The sidebar copy sits behind this overlay on a phone,
-      so without it grouping cannot be changed there at all. */
+      so without it grouping cannot be changed there at all. Rendered as a pill
+      at the end of the filter row. */
   modeControl?: ReactNode;
+  /** Section labels in the order the grouping puts them. Given one, the queue
+      renders section headers instead of a single flat list, so the grouping
+      control changes what the phone shows rather than only the desktop. */
+  sectionOrder?: string[];
 }
 
 type FilterId = "all" | "blocked" | "review" | "working";
@@ -103,7 +112,7 @@ function situation(counts: Record<FilterId, number>, total: number) {
  *
  * Takes rows in; fetches nothing.
  */
-export function MobileQueue({ rows, onOpen, onAction, modeControl }: MobileQueueProps) {
+export function MobileQueue({ rows, onOpen, onAction, modeControl, sectionOrder }: MobileQueueProps) {
   const [filter, setFilter] = useState<FilterId>("all");
 
   const counts = useMemo(() => {
@@ -126,6 +135,26 @@ export function MobileQueue({ rows, onOpen, onAction, modeControl }: MobileQueue
       .map((x) => x.r);
   }, [rows, filter]);
 
+  /* Sections keep the grouping the reader picked, and inside each one the
+     bucket order still applies — so what needs you leads within its group. */
+  const sections = useMemo(() => queueSections(shown, sectionOrder), [shown, sectionOrder]);
+
+  /* The chip strip is wider than a phone, so the last chip fades to say there
+     is more — but only while there actually is, or the fade lies about the
+     chip you just scrolled to. */
+  const filterStrip = useRef<HTMLDivElement | null>(null);
+  const [moreChips, setMoreChips] = useState(false);
+  const measureChips = useCallback(() => {
+    const el = filterStrip.current;
+    if (!el) return;
+    setMoreChips(el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+  }, []);
+  useEffect(() => {
+    measureChips();
+    window.addEventListener("resize", measureChips);
+    return () => window.removeEventListener("resize", measureChips);
+  }, [measureChips]);
+
   const { headline, subline } = situation(counts, rows.length);
 
   return (
@@ -135,22 +164,46 @@ export function MobileQueue({ rows, onOpen, onAction, modeControl }: MobileQueue
         <p className="mq-subline">{subline}</p>
       </div>
 
-      {modeControl && <div className="mq-mode-row">{modeControl}</div>}
+      <div className="mq-controls">
+        <div
+          className="mq-filters"
+          role="group"
+          aria-label="Filter the queue"
+          ref={filterStrip}
+          data-more={moreChips}
+          onScroll={measureChips}
+        >
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className="mq-chip"
+              aria-pressed={filter === f.id}
+              onClick={() => setFilter(f.id)}
+            >
+              {f.dot && <span className="mq-chip-dot" style={{ background: f.dot }} aria-hidden="true" />}
+              {f.label}
+              <span className="mq-chip-count">{counts[f.id]}</span>
+            </button>
+          ))}
+        </div>
 
-      <div className="mq-filters" role="group" aria-label="Filter the queue">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            className="mq-chip"
-            aria-pressed={filter === f.id}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.dot && <span className="mq-chip-dot" style={{ background: f.dot }} aria-hidden="true" />}
-            {f.label}
-            <span className="mq-chip-count">{counts[f.id]}</span>
-          </button>
-        ))}
+        {modeControl && (
+          <div className="mq-mode-wrap" data-active={Boolean(sections)}>
+            <svg className="mq-mode-icon" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true">
+              <path
+                d="M2 3.5h11M2 7.5h11M2 11.5h11"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                fill="none"
+              />
+              <circle cx="4.6" cy="3.5" r="1.9" fill="currentColor" />
+              <circle cx="9.4" cy="11.5" r="1.9" fill="currentColor" />
+            </svg>
+            {modeControl}
+          </div>
+        )}
       </div>
 
       {shown.length === 0 ? (
@@ -161,7 +214,24 @@ export function MobileQueue({ rows, onOpen, onAction, modeControl }: MobileQueue
         </p>
       ) : (
         <ul className="mq-list">
-          {shown.map((r) => (
+          {sections
+            ? sections.map((sec) => (
+                <li key={`sec:${sec.label}`} className="mq-sec-block">
+                  <div className="mq-sec">
+                    <span className="mq-sec-label">{sec.label}</span>
+                    <span className="mq-sec-count">{sec.rows.length}</span>
+                  </div>
+                  <ul className="mq-sec-rows">{sec.rows.map(renderRow)}</ul>
+                </li>
+              ))
+            : shown.map(renderRow)}
+        </ul>
+      )}
+    </div>
+  );
+
+  function renderRow(r: MobileQueueRow) {
+    return (
             <li key={r.name} className="mq-row" data-bucket={r.bucket} data-cta={Boolean(r.cta)}>
               <button
                 type="button"
@@ -191,9 +261,6 @@ export function MobileQueue({ rows, onOpen, onAction, modeControl }: MobileQueue
                 </div>
               </div>
             </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+    );
+  }
 }
