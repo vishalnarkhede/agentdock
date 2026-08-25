@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { fetchGitChanges, fetchPRDiff, createPR, pushChanges, sendSessionInput } from "../api";
+import { copyText } from "../clipboard";
 import { isDemo } from "../demo";
 
 interface Props {
@@ -353,6 +354,7 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
   const [pushSuccess, setPushSuccess] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [viewMode, setViewMode] = useState<"local" | "pr">("local");
+  const [prCopied, setPrCopied] = useState<"" | "ok" | "fail">("");
   const [prDiff, setPrDiff] = useState("");
   const [prDiffLoading, setPrDiffLoading] = useState(false);
   const [prDiffError, setPrDiffError] = useState("");
@@ -640,10 +642,28 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
       </div>
 
       {existingPrUrl && (
-        <a className="changes-pr-chip" href={existingPrUrl} target="_blank" rel="noopener noreferrer">
-          <span className="changes-pr-chip-text">{existingPrUrl.replace("https://github.com/", "")}</span>
-          <span className="changes-pr-chip-icon">↗</span>
-        </a>
+        <div className="changes-pr-chip">
+          <a
+            className="changes-pr-chip-link"
+            href={existingPrUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span className="changes-pr-chip-text">{existingPrUrl.replace("https://github.com/", "")}</span>
+            <span className="changes-pr-chip-icon">↗</span>
+          </a>
+          <button
+            type="button"
+            className="changes-pr-copy"
+            title="Copy the PR link"
+            onClick={async () => {
+              setPrCopied((await copyText(existingPrUrl)) ? "ok" : "fail");
+              setTimeout(() => setPrCopied(""), 1600);
+            }}
+          >
+            {prCopied === "ok" ? "copied" : prCopied === "fail" ? "couldn't copy" : "copy link"}
+          </button>
+        </div>
       )}
 
       {pushSuccess && <div className="changes-pr-success">pushed successfully</div>}
@@ -652,6 +672,17 @@ function RepoChanges({ sessionPath, sessionName, showRepoLabel, onCommentsSent }
       {createdPrUrl && !existingPrUrl && (
         <div className="changes-pr-success">
           PR created: <a href={createdPrUrl} target="_blank" rel="noopener noreferrer">{createdPrUrl}</a>
+          {/* The moment the link is most wanted is the moment it appears. */}
+          <button
+            type="button"
+            className="changes-pr-copy"
+            onClick={async () => {
+              setPrCopied((await copyText(createdPrUrl)) ? "ok" : "fail");
+              setTimeout(() => setPrCopied(""), 1600);
+            }}
+          >
+            {prCopied === "ok" ? "copied" : prCopied === "fail" ? "couldn't copy" : "copy link"}
+          </button>
         </div>
       )}
 

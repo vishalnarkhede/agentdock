@@ -3314,15 +3314,18 @@ h1 {
 }
 
 .changes-pr-chip {
-  display: flex;
+  /* Sized to the link, not the pane: full width put the copy button a screen
+     away from the thing it copies. */
+  display: inline-flex;
+  align-self: flex-start;
+  max-width: 100%;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
   margin-bottom: 12px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  text-decoration: none;
   transition: border-color 0.15s;
   min-width: 0;
 }
@@ -3330,6 +3333,39 @@ h1 {
 .changes-pr-chip:hover {
   border-color: var(--accent);
 }
+
+/* The link is the whole row bar the copy button, so the easy target is still
+   "open the PR". */
+.changes-pr-chip-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.changes-pr-copy {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 2px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.changes-pr-copy:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.changes-pr-copy:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
+}
+
+.changes-pr-success .changes-pr-copy { margin-left: 8px; }
 
 .changes-pr-chip-text {
   font-family: var(--font-mono);
