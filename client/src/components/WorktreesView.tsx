@@ -40,6 +40,15 @@ export function WorktreesView({
   const [failed, setFailed] = useState<{ path: string; message: string } | null>(null);
   /* Selected by path, so a selection survives filtering and re-fetching. */
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /* Non-null while a delete is running, and after it finishes if anything
+     refused — the refusals are the part worth reading. */
+  const [progress, setProgress] = useState<{
+    total: number;
+    done: number;
+    current: string;
+    failures: { path: string; error: string }[];
+    finished: boolean;
+  } | null>(null);
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -65,6 +74,9 @@ export function WorktreesView({
   }, [all, query]);
 
   const orphans = shown.filter((w) => !w.sessionName).length;
+
+  /** What to call a worktree in a progress line. */
+  const label = (w: WorktreeInfo) => w.branch ?? w.head;
 
   const deletable = useMemo(() => shown.filter((w) => !w.sessionName), [shown]);
   const chosen = useMemo(
@@ -135,25 +147,40 @@ export function WorktreesView({
 
     setBusy(targets.length === 1 ? targets[0].path : "batch");
     setFailed(null);
-    const res = await deleteWorktrees(
-      targets.map((w) => w.path),
-      dirtyFiles > 0,
-    );
-    setBusy(null);
+    setProgress({ total: targets.length, done: 0, current: label(targets[0]), failures: [], finished: false });
 
-    if (res.worktrees) {
-      setAll(res.worktrees);
-      const gone = new Set(res.worktrees.map((w) => w.path));
-      setSelected((prev) => new Set([...prev].filter((p) => gone.has(p))));
+    /* One request per worktree rather than one for the batch: each is a git
+       command that can take a moment, and a count that moves is the difference
+       between "working" and "hung". The server still does the removal and the
+       re-read; this only decides how much the reader gets to see. */
+    const failures: { path: string; error: string }[] = [];
+    let latest: WorktreeInfo[] | undefined;
+
+    for (let i = 0; i < targets.length; i++) {
+      const w = targets[i];
+      setProgress((p) => (p ? { ...p, done: i, current: label(w) } : p));
+      const res = await deleteWorktrees([w.path], (w.dirty ?? 0) > 0);
+      if (res.worktrees) latest = res.worktrees;
+      const failed = (res.results ?? []).find((r) => !r.ok);
+      if (failed) failures.push({ path: w.path, error: failed.error || "could not remove it" });
+      else if (!res.worktrees) failures.push({ path: w.path, error: res.error || "could not remove it" });
     }
-    const failures = (res.results ?? []).filter((r) => !r.ok);
-    if (failures.length === 1) {
-      setFailed({ path: failures[0].path, message: failures[0].error || "could not remove it" });
-    } else if (failures.length > 1) {
-      setFailed({ path: "batch", message: `${failures.length} could not be removed` });
-    } else if (!res.worktrees) {
-      setFailed({ path: "batch", message: res.error || "could not remove them" });
+
+    setBusy(null);
+    if (latest) {
+      setAll(latest);
+      const stillThere = new Set(latest.map((w) => w.path));
+      setSelected((prev) => new Set([...prev].filter((p) => stillThere.has(p))));
     }
+
+    if (failures.length === 0) {
+      setProgress(null);
+      return;
+    }
+    /* Left on screen: a refusal the reader never sees is a delete they think
+       happened. */
+    setProgress({ total: targets.length, done: targets.length, current: "", failures, finished: true });
+    if (failures.length === 1) setFailed({ path: failures[0].path, message: failures[0].error });
   };
 
   if (error) return <div className="wt-empty">{error}</div>;
@@ -161,6 +188,45 @@ export function WorktreesView({
 
   return (
     <div className="wt">
+      {progress && (
+        <div className="wt-modal-scrim" role="dialog" aria-modal="true" aria-label="Deleting worktrees">
+          <div className="wt-modal">
+            {progress.finished ? (
+              <>
+                <div className="wt-modal-title">
+                  {progress.failures.length} of {progress.total} could not be removed
+                </div>
+                <ul className="wt-modal-failures">
+                  {progress.failures.map((f) => (
+                    <li key={f.path}>
+                      <code>{pathTail(f.path, 2)}</code>
+                      <span>{f.error}</span>
+                    </li>
+                  ))}
+                </ul>
+                <button className="wt-modal-close" onClick={() => setProgress(null)}>
+                  close
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="wt-modal-title">
+                  <span className="wt-spinner" aria-hidden="true" />
+                  {progress.total === 1
+                    ? "Deleting worktree…"
+                    : `Deleting worktree ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`}
+                </div>
+                <div className="wt-modal-current">{progress.current}</div>
+                {progress.total > 1 && (
+                  <div className="wt-modal-bar">
+                    <span style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <div className="wt-head">
         <span className="wt-search">
           <Icon name="search" size={13} />

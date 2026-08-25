@@ -2,6 +2,7 @@
    without are the clean-up list, so an orphan is marked rather than hidden. */
 
 .wt {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -251,4 +252,109 @@
 .wt-failed-batch {
   padding: 6px 14px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+/* ─── Deleting ──────────────────────────────────────────────────────────────
+   A git command per worktree, and a batch of twenty is long enough that a
+   count which moves is the difference between "working" and "hung". */
+.wt-modal-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface-0) 68%, transparent);
+}
+
+.wt-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, calc(100% - 48px));
+  padding: 18px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: calc(var(--radius) + 4px);
+  /* Floating: --surface-card is translucent on the glass theme. */
+  background: var(--surface-float);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+
+.wt-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: calc(var(--fs-base) + 1px);
+  color: var(--text-1);
+}
+
+.wt-modal-current {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-modal-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.wt-modal-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--intent-primary);
+  transition: width 0.2s ease;
+}
+
+.wt-modal-failures {
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  list-style: none;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+.wt-modal-failures li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.wt-modal-failures code { color: var(--text-2); font-family: var(--font-mono); }
+.wt-modal-failures span { color: var(--intent-danger); }
+
+.wt-modal-close {
+  align-self: flex-end;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  cursor: pointer;
+}
+.wt-modal-close:hover { background: var(--hover); }
+
+.wt-spinner {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--intent-primary) 25%, transparent);
+  border-top-color: var(--intent-primary);
+  border-radius: 50%;
+  animation: wt-spin 0.7s linear infinite;
+}
+
+@keyframes wt-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wt-spinner { animation: none; border-color: var(--intent-primary); }
 }
