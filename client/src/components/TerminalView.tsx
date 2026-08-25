@@ -10,6 +10,21 @@ import "@xterm/xterm/css/xterm.css";
 import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { paneDiffers, repaintSequence } from "../terminal-sync";
+
+/**
+ * How long the screen has to have been still before a repaint is allowed.
+ *
+ * Three seconds, not a few hundred milliseconds, because repainting a screen
+ * something else is still drawing is worse than the cell it fixes. An agent's
+ * TUI redraws its own frame constantly — banner, rule, input box — from where
+ * *it* believes the cursor to be. Move that cursor underneath it and the next
+ * frame's decorations land on content rows: a rule drawn through a sentence,
+ * the session banner stamped five times down the screen.
+ *
+ * A screen still for three seconds is one nothing is redrawing, which is
+ * exactly the case where a wrong cell would otherwise sit there until a reload.
+ */
+const REPAINT_QUIET_MS = 3000;
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
@@ -616,6 +631,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const handleBytes = useCallback((bytes: Uint8Array) => {
     const term = termRef.current;
     if (!term) return;
+    lastOutputAt.current = Date.now();
     term.write(bytes);
     syncScrollbar();
   }, [syncScrollbar]);
@@ -624,9 +640,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
      to stitch a UTF-8 character across a frame boundary it cannot see — which is
      where single box-drawing characters were turning into replacement
      characters under a flood. */
+  /* When output last arrived. A capture taken during a lull can still be stale
+     by the time it is applied, and painting it over newer output is how a
+     repair becomes the corruption. */
+  const lastOutputAt = useRef(0);
+
   const handleText = useCallback((text: string) => {
     const term = termRef.current;
     if (!term) return;
+    lastOutputAt.current = Date.now();
     term.write(text);
     syncScrollbar();
   }, [syncScrollbar]);
@@ -667,6 +689,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
    * used to fix by reloading the page.
    */
   const resyncCount = useRef(0);
+  /* Consecutive repaints that did not settle it. */
+  const repaintTries = useRef(0);
   const handleResync = useCallback((raw: unknown) => {
     const term = termRef.current;
     if (!term || !raw || typeof raw !== "object" || !("content" in raw)) return;
@@ -681,8 +705,29 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     for (let i = first; i < buf.length; i++) {
       rows.push(buf.getLine(i)?.translateToString(true) ?? "");
     }
-    if (!paneDiffers(snap.content, rows)) return;
+    if (!paneDiffers(snap.content, rows)) {
+      repaintTries.current = 0;
+      return;
+    }
 
+    /* Three reasons to leave a wrong cell alone rather than repaint it. Each of
+       them, done anyway, produces worse corruption than the one being fixed —
+       the app keeps drawing from where *it* thinks the cursor is, so a repaint
+       that lands wrong scatters the next frame's characters across the rows
+       around it. That is what "flickering" looked like.
+
+       1. Output arrived after the capture was taken: the capture is already
+          behind, and painting it back would undo what just came in.
+       2. tmux's pane and xterm disagree about how many rows there are, which
+          happens mid-resize. Writing paneHeight lines into a shorter screen
+          scrolls it and leaves a duplicate of everything above.
+       3. Repainting twice already failed to fix it, so a third is not a repair,
+          it is a loop. */
+    if (Date.now() - lastOutputAt.current < REPAINT_QUIET_MS) return;
+    if (snap.paneHeight && snap.paneHeight !== term.rows) return;
+    if (repaintTries.current >= 2) return;
+
+    repaintTries.current += 1;
     resyncCount.current += 1;
     console.log(`[terminal] ${sessionName}: repainted a drifted screen (${resyncCount.current})`);
     term.write(

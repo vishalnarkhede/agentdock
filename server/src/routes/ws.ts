@@ -26,8 +26,11 @@ const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
    frame or a sequence read differently leaves a wrong cell there until
    something repaints. This is the check that catches it, at one capture per
    lull instead of the five a second the polling path did. */
-const RESYNC_MS = 1500;
-const RESYNC_QUIET_MS = 350;
+const RESYNC_MS = 2000;
+/* Longer than the client's own guard against painting a stale capture over
+   newer output: if the server captured sooner than that, every resync would
+   arrive already disqualified and the check would never repair anything. */
+const RESYNC_QUIET_MS = 3200;
 
 /* Pane output goes to the client as text, not bytes.
    
