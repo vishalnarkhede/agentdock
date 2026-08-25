@@ -69,6 +69,9 @@ export async function hasSession(name: string): Promise<boolean> {
   return exitCode === 0;
 }
 
+/** Lines of scrollback tmux keeps per pane for sessions AgentDock creates. */
+export const HISTORY_LIMIT = 20000;
+
 export async function createSession(
   name: string,
   cwd: string,
@@ -88,11 +91,31 @@ export async function createSession(
   await run(["set-environment", "-g", "-r", "NO_COLOR"]);
   // Enable 24-bit true color passthrough
   await run(["set-option", "-g", "-a", "terminal-overrides", ",*:Tc"]);
-  await run(args);
+  /* tmux keeps the pane's history, so its limit is the ceiling on anything the
+     terminal can ever scroll back to — and the default is 2000 lines, which an
+     agent reading files blows through in a minute.
+     
+     A pane's limit is fixed when the pane is created and reads the *global*
+     option: setting it on the session afterwards does nothing, and neither does
+     respawning the window (both verified). So raise the global, create, and put
+     it back — the new session keeps the larger limit, and the user's own tmux
+     sessions are left exactly as they were. */
+  const previous = (await run(["show-options", "-gv", "history-limit"])).stdout.trim();
+  const raised = /^\d+$/.test(previous) && Number(previous) < HISTORY_LIMIT;
+  if (raised) await run(["set-option", "-g", "history-limit", String(HISTORY_LIMIT)]);
+  try {
+    await run(args);
+  } finally {
+    if (raised) await run(["set-option", "-g", "history-limit", previous]);
+  }
 }
 
 export async function killSession(name: string): Promise<void> {
   await run(["kill-session", "-t", `=${name}`]);
+}
+
+export async function renameSession(name: string, newName: string): Promise<void> {
+  await run(["rename-session", "-t", `=${name}`, newName]);
 }
 
 export async function setOption(
@@ -167,6 +190,12 @@ export interface PaneSnapshot {
 
 export async function capturePaneSnapshot(
   name: string,
+  /**
+   * Lines of scrollback to include above the visible pane. tmux owns the
+   * pane's history, so this is the only history a viewer ever gets: what the
+   * capture leaves out, the reader cannot scroll back to.
+   */
+  scrollbackLines = 200,
 ): Promise<{ ok: true; data: PaneSnapshot } | { ok: false; error: string }> {
   // Get cursor position and pane info
   const info = await run([
@@ -185,15 +214,15 @@ export async function capturePaneSnapshot(
   const [cursorX, cursorY, paneHeight, historySize] = parts.slice(0, 4).map(Number);
   const command = parts.slice(4).join(",");
 
-  // -S -200: capture visible pane + 200 lines of scrollback (not full history)
-  // Full history (-S -) grows unbounded and causes massive memory usage over time
+  // Full history (-S -) grows unbounded and causes massive memory usage over time,
+  // so the caller says how far back it wants; 0 is the visible pane alone.
   const { stdout, stderr, exitCode } = await run([
     "capture-pane",
     "-p",
     "-e",
     "-J",
     "-S",
-    "-200",
+    scrollbackLines > 0 ? `-${scrollbackLines}` : "0",
     "-t",
     name,
   ]);

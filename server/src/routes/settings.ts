@@ -1,3 +1,4 @@
+import { syncHooksToClaudeSettings, getHookInstallState, REQUIRED_HOOK_EVENTS } from "../services/config";
 import { Hono } from "hono";
 import {
   getRepos,
@@ -11,9 +12,7 @@ import {
   saveCustomAction,
   deleteCustomAction,
   scanBasePath,
-  getMcpServers,
-  addMcpServer,
-  removeMcpServer,
+  getAgentMcpNames,
   getPreferences,
   savePreferences,
   getMetaPropertyPresets,
@@ -130,30 +129,10 @@ app.delete("/quick-actions/:id", (c) => {
   return c.json({ ok: true });
 });
 
-// ─── MCP Servers ───
+// ─── What MCP servers the agents have (read-only) ───
 
-app.get("/mcp-servers", (c) => {
-  return c.json(getMcpServers());
-});
-
-app.post("/mcp-servers", async (c) => {
-  const body = await c.req.json();
-  if (!body.name || !body.command) {
-    return c.json({ error: "name and command are required" }, 400);
-  }
-  addMcpServer({
-    name: body.name,
-    command: body.command,
-    args: body.args || [],
-    env: body.env || undefined,
-  });
-  return c.json({ ok: true }, 201);
-});
-
-app.delete("/mcp-servers/:name", (c) => {
-  const name = c.req.param("name");
-  removeMcpServer(name);
-  return c.json({ ok: true });
+app.get("/agent-mcp", (c) => {
+  return c.json({ names: getAgentMcpNames() });
 });
 
 // ─── Preferences ───
@@ -204,6 +183,31 @@ app.put("/ngrok-basic-auth", async (c) => {
 app.delete("/ngrok-basic-auth", (c) => {
   deleteNgrokBasicAuth();
   return c.json({ ok: true });
+});
+
+// GET /api/settings/hooks — is status detection actually wired up?
+//
+// Without these five hooks AgentDock has to guess an agent's state by reading
+// its terminal, which is the difference between knowing an agent is blocked
+// and finding out ninety seconds later.
+app.get("/hooks", (c) => {
+  return c.json({ ...getHookInstallState(), events: REQUIRED_HOOK_EVENTS });
+});
+
+// POST /api/settings/hooks — install the missing ones. Idempotent.
+// Deliberately user-initiated: it writes to ~/.claude/settings.json, which is
+// outside AgentDock's own config directory.
+app.post("/hooks", (c) => {
+  try {
+    syncHooksToClaudeSettings();
+    /* The state's own `ok` means "every hook is installed", which is not the
+       same claim as "the request worked" — and the spread was silently winning
+       over a literal `ok: true` that TypeScript flagged as dead. The status
+       code says whether the request worked; the body says what the state is. */
+    return c.json(getHookInstallState());
+  } catch (err: any) {
+    return c.json({ ok: false, error: err?.message || "install failed" }, 500);
+  }
 });
 
 export default app;

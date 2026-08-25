@@ -7,6 +7,10 @@ import templateRoutes from "./routes/templates";
 import uploadRoutes from "./routes/upload";
 import settingsRoutes from "./routes/settings";
 import dbRoutes from "./routes/db";
+import reviewRoutes from "./routes/review";
+import planRoutes from "./routes/plan";
+import codeRoutes from "./routes/code";
+import housekeepingRoutes from "./routes/housekeeping";
 import ngrokRoutes from "./routes/ngrok";
 import fsRoutes from "./routes/fs";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
@@ -29,6 +33,10 @@ app.route("/api/templates", templateRoutes);
 app.route("/api/upload", uploadRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/db", dbRoutes);
+app.route("/api/review", reviewRoutes);
+app.route("/api/plan", planRoutes);
+app.route("/api/code", codeRoutes);
+app.route("/api/housekeeping", housekeepingRoutes);
 app.route("/api/ngrok", ngrokRoutes);
 app.route("/api/fs", fsRoutes);
 
@@ -48,8 +56,12 @@ const server = Bun.serve({
         return new Response("Unauthorized", { status: 401 });
       }
       const sessionName = url.pathname.replace("/ws/sessions/", "");
+      /* How much scrollback the viewer wants painted at connect. The terminal's
+         own setting is the reader's, so it travels with the connection rather
+         than being guessed at here. */
+      const scrollback = Number(url.searchParams.get("scrollback")) || undefined;
       if (sessionName) {
-        const upgraded = server.upgrade(req, { data: { sessionName } as any });
+        const upgraded = server.upgrade(req, { data: { sessionName, scrollback } as any });
         if (upgraded) return undefined;
         return new Response("WebSocket upgrade failed", { status: 500 });
       }
@@ -61,7 +73,7 @@ const server = Bun.serve({
     open(ws) {
       const sessionName = (ws.data as any)?.sessionName;
       if (sessionName) {
-        handleWsOpen(ws, sessionName);
+        handleWsOpen(ws, sessionName, (ws.data as any)?.scrollback);
       }
     },
     message(ws, message) {

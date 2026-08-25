@@ -1,0 +1,377 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Header — attention bar
+
+   The 48px top bar from the cockpit artboard. It answers one question on
+   every page: what does the queue currently cost you?
+
+   Every rule is written as `.header.header-attn` rather than relying on
+   this file loading after styles.css — the base `.header` sets
+   `justify-content: space-between` and `padding: 14px 32px`, and bundled
+   CSS order is not something a layout should depend on.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.header.header-attn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 13px;
+  height: 48px;
+  padding: 0 16px;
+  /* --surface-1 is translucent on some themes and this bar is sticky, so the
+     chrome colour is layered over an opaque ground instead of letting the
+     page scroll through it. */
+  background-color: var(--surface-0);
+  background-image: linear-gradient(var(--surface-1), var(--surface-1));
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* The terminal theme paints a box-drawing rule across the top of .header.
+   At 48px with no vertical padding it lands on the content. */
+[data-theme="terminal"] .header.header-attn::before {
+  display: none;
+}
+
+/* ─── Wordmark ─── */
+
+/* `display` is deliberately left to the base stylesheet, which uses it to pick
+   the desktop wordmark or the mobile one. Setting it here would show both. */
+.header.header-attn .header-title {
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+  font-size: calc(var(--fs-base) + 1px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  text-shadow: none;
+  color: var(--text-1);
+}
+
+.header.header-attn .header-title-desktop {
+  display: flex;
+}
+
+.header.header-attn .header-logo {
+  margin-right: 0;
+  filter: none;
+  color: var(--intent-primary);
+}
+
+/* ─── Attention region ───────────────────────────────────────────────────
+   Divided from the wordmark by a rule. This is the flex child that gives
+   way first: min-width 0 so it can shrink below its content, and the
+   chips ellipsis rather than pushing the gear off the right edge. */
+
+.hdr-attn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  /* Shrinks ahead of the right cluster: a truncated chip still tells you a
+     session is blocked, a missing gear tells you nothing. */
+  flex: 0 3 auto;
+  overflow: hidden;
+  padding-left: 13px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+/* Never gives way — the count is the whole point of the bar. The chips
+   absorb the shrink, and below 900px the region hides rather than clip. */
+.hdr-attn-summary {
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.hdr-attn-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 3 auto;
+  overflow: hidden;
+}
+
+.hdr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 130px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--status-blocked) 40%, transparent);
+  background: color-mix(in srgb, var(--status-blocked) 12%, transparent);
+  color: var(--status-blocked);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.hdr-chip:hover {
+  background: color-mix(in srgb, var(--status-blocked) 22%, transparent);
+}
+
+.hdr-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.hdr-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdr-chip-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--status-blocked);
+  animation: hdr-breathe 2s ease-in-out infinite;
+}
+
+.hdr-chip-more {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+@keyframes hdr-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hdr-chip-dot { animation: none; }
+}
+
+/* ─── Next ─── */
+
+.hdr-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  height: 27px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text-1);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  cursor: pointer;
+}
+
+.hdr-next:hover {
+  background: var(--hover);
+  border-color: var(--intent-primary);
+}
+
+.hdr-next:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.hdr-keycap {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  line-height: 1.35;
+  color: var(--text-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+/* ─── Right cluster ─────────────────────────────────────────────────────
+   Five fixed controls, ~260px in total: search, launch actions, New, the
+   gear and logout. Nothing here shrinks — the attention region gives way
+   first — and nothing here can be pushed off the edge. */
+
+.header.header-attn .header-nav-desktop {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.header.header-attn .settings-gear-btn,
+.header.header-attn .header-logout-btn,
+.hdr-new {
+  flex-shrink: 0;
+}
+
+/* Scoped to the bar: the same class is reused inside the mobile menu, where
+   it is a full-width row and must not be squared off. */
+.header.header-attn .header-nav-desktop .settings-gear-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+}
+
+/* ─── Launch actions overflow ─── */
+
+.hdr-more-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.hdr-more {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.hdr-more:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.hdr-more:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* A live tunnel is worth showing without opening the menu. */
+.hdr-more-live::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-ready);
+}
+
+/* Floats above page content, so the background must be opaque on every
+   theme — --surface-1 and --surface-2 are translucent on some. */
+.hdr-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 190px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.hdr-more-menu .header-fix-me-btn,
+.hdr-more-menu .header-tour-btn,
+.hdr-more-menu .header-ngrok-btn {
+  width: 100%;
+  text-align: left;
+}
+
+.hdr-more-menu .header-quick-launch {
+  display: flex;
+  width: 100%;
+}
+
+.hdr-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--intent-primary);
+  color: var(--intent-primary-ink);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hdr-new:hover {
+  filter: brightness(1.08);
+}
+
+.hdr-new:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ─── Narrow desktop ────────────────────────────────────────────────────
+   Below ~1240px the search box drops its label and keycap and becomes an
+   icon, which buys back ~150px before the attention chips have to
+   truncate. Verified against a 1100px viewport. */
+
+@media (max-width: 1240px) {
+  /* Squeezed to ~40px each the chips are unreadable stubs. Dropped whole:
+     the count still names the cost, and the list is one click away. */
+  .hdr-attn-chips {
+    display: none;
+  }
+}
+
+/* Below this the summary and Next no longer fit beside the right cluster
+   without clipping the count, so the whole region stands down. */
+@media (max-width: 900px) {
+  .hdr-attn {
+    display: none;
+  }
+}
+
+/* ─── Mobile ────────────────────────────────────────────────────────────
+   The base stylesheet's mobile block sets `.header { padding: 6px 12px }`,
+   which a media query alone cannot beat once `.header.header-attn` exists —
+   so it is restated here.
+
+   Below 768px the hamburger owns the right side and the attention region is
+   already down (900px), so nothing here competes with a 44px touch target.
+   The queue's cost is the session list's job on mobile. */
+
+@media (max-width: 768px) {
+  /* Published so fixed overlays can start below the bar instead of guessing.
+     Keep in step with min-height below. */
+  :root { --app-header-h: 48px; }
+
+  .header.header-attn {
+    height: auto;
+    min-height: 48px;
+    padding: 6px 12px;
+  }
+
+  /* The base mobile block hides the desktop wordmark and the desktop nav
+     with one-class selectors, which no longer win against the rules above. */
+  .header.header-attn .header-title-desktop,
+  .header.header-attn .header-nav-desktop {
+    display: none;
+  }
+
+  /* Holds if the bar's own controls are ever shown at this width. */
+  .hdr-new,
+  .hdr-next,
+  .hdr-more {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

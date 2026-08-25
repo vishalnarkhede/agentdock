@@ -1,0 +1,58 @@
+/* CodeMirror surface. Token colours are theme variables so the editor follows
+   all nine AgentDock themes rather than shipping its own palette. */
+
+:root,
+[data-theme] {
+  --cm-font-size: max(11px, calc(var(--fs-base) - 1px));
+  --cm-text: var(--text-2);
+  --cm-keyword: var(--accent);
+  --cm-string: var(--green);
+  --cm-comment: var(--text-4);
+  --cm-number: var(--amber, var(--yellow));
+  --cm-function: var(--cyan);
+  --cm-type: var(--status-ready);
+  --cm-property: var(--text-1);
+  --cm-punct: var(--text-3);
+  --cm-invalid: var(--red);
+  --cm-selection: color-mix(in oklab, var(--accent) 30%, transparent);
+  --cm-selection-match: color-mix(in oklab, var(--accent) 16%, transparent);
+  --cm-find: color-mix(in oklab, var(--amber, var(--yellow)) 30%, transparent);
+  --cm-find-active: color-mix(in oklab, var(--amber, var(--yellow)) 60%, transparent);
+  --cm-find-border: var(--amber, var(--yellow));
+}
+
+.cm-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cm-host .cm-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* The gutter is decoration, not content — never let it be selected or dragged
+   into a copied snippet. */
+.cm-host .cm-gutters {
+  user-select: none;
+}
+
+@media (max-width: 780px) {
+  :root, [data-theme] { --cm-font-size: max(12px, calc(var(--fs-base) - 1px)); }
+}
+
+.cm-loading {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-4);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}

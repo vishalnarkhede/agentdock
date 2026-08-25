@@ -15,9 +15,11 @@ interface Props {
   selected: string[];
   onChange: (selected: string[]) => void;
   recentRepos?: string[];
+  primaryRepo?: string;
+  onSetPrimary?: (alias: string) => void;
 }
 
-export function RepoSelector({ selected, onChange, recentRepos = [] }: Props) {
+export function RepoSelector({ selected, onChange, recentRepos = [], primaryRepo, onSetPrimary }: Props) {
   const [repos, setRepos] = useState<RepoConfig[]>([]);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -112,10 +114,26 @@ export function RepoSelector({ selected, onChange, recentRepos = [] }: Props) {
                 <span className="repo-alias">
                   {repo.alias}
                   {isRecent && <span className="repo-recent-badge">recent</span>}
+                  {primaryRepo === repo.alias && <span className="repo-primary-badge">primary</span>}
                 </span>
                 <span className="repo-path">
                   {repo.path.replace(/^\/Users\/[^/]+\//, "~/")}
                 </span>
+                {onSetPrimary && (
+                  <button
+                    type="button"
+                    className={`repo-primary-star ${primaryRepo === repo.alias ? "is-primary" : ""}`}
+                    title={primaryRepo === repo.alias ? "Primary repo (working directory). Click to unset." : "Set as primary repo (working directory for isolated multi-repo sessions)"}
+                    aria-pressed={primaryRepo === repo.alias}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onSetPrimary(primaryRepo === repo.alias ? "" : repo.alias);
+                    }}
+                  >
+                    {primaryRepo === repo.alias ? "★" : "☆"}
+                  </button>
+                )}
               </label>
               {isLastRecent && <div className="repo-recent-divider" />}
             </div>

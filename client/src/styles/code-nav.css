@@ -1,0 +1,472 @@
+/* Go-to-definition affordances in the file viewer. Floating panels use
+   --surface-float: --surface-1 resolves to 5% white on the glass theme. */
+
+.fe-code-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fe-code-navmode code span:hover,
+.fe-code-navmode code:hover {
+  cursor: pointer;
+}
+
+.fe-code-navmode {
+  cursor: pointer;
+}
+
+.fe-nav-busy {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  pointer-events: none;
+}
+
+.fe-picker,
+.fe-outline {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.fe-picker {
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(620px, calc(100% - 32px));
+  max-height: min(60%, 420px);
+}
+
+.fe-outline {
+  top: 8px;
+  right: 8px;
+  width: min(320px, calc(100% - 32px));
+  max-height: calc(100% - 24px);
+}
+
+.fe-picker-head,
+.fe-outline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-2);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}
+
+.fe-picker-head button,
+.fe-outline-head button {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.fe-picker-head button:hover,
+.fe-outline-head button:hover { color: var(--text-1); }
+
+.fe-picker-name {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+}
+
+.fe-outline-count {
+  margin-left: 6px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.fe-picker-list,
+.fe-outline-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.fe-picker-row,
+.fe-outline-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+}
+
+.fe-picker-row + .fe-picker-row,
+.fe-outline-row + .fe-outline-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.fe-picker-row:hover,
+.fe-outline-row:hover { background: var(--hover); }
+
+.fe-kind {
+  flex: 0 0 auto;
+  min-width: 62px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  text-align: center;
+}
+
+.fe-kind-func, .fe-kind-function, .fe-kind-method, .fe-kind-def { color: var(--status-working); }
+.fe-kind-type, .fe-kind-interface, .fe-kind-struct, .fe-kind-class, .fe-kind-enum { color: var(--status-ready); }
+
+.fe-picker-sym,
+.fe-outline-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-picker-recv { color: var(--text-3); }
+
+.fe-picker-loc,
+.fe-outline-line {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+  font-variant-numeric: tabular-nums;
+}
+
+.fe-picker-loc {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+.fe-picker-foot {
+  padding: 5px 10px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-4);
+  font-size: max(11px, calc(var(--fs-base) - 3px));
+}
+
+@media (max-width: 780px) {
+  .fe-picker-row,
+  .fe-outline-row { padding: 10px; min-height: 44px; align-items: center; }
+  .fe-outline { width: calc(100% - 16px); }
+}
+
+/* ── Editing ───────────────────────────────────────────────────────────── */
+
+.fe-editbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  flex: 0 0 auto;
+}
+
+.fe-editbar-spacer { flex: 1 1 auto; }
+
+.fe-editbar-state {
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fe-editbar-dirty { color: var(--status-blocked); }
+
+.fe-editbar-error {
+  color: var(--intent-danger);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fe-editbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  min-height: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fe-editbtn:hover:not(:disabled) { background: var(--hover); color: var(--text-1); }
+.fe-editbtn:disabled { opacity: 0.5; cursor: default; }
+
+.fe-editbtn-primary {
+  background: var(--intent-primary);
+  border-color: var(--intent-primary);
+  color: var(--intent-primary-ink);
+}
+
+.fe-editbtn kbd {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 4px));
+  opacity: 0.75;
+}
+
+.fe-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: var(--status-blocked);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  flex: 0 0 auto;
+}
+
+.fe-conflict-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.fe-conflict-actions button {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  color: var(--text-2);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.fe-conflict-actions button:hover { color: var(--text-1); border-color: var(--border-strong); }
+
+/* Own positioning context: inset:0 on the wrapper put the overlay on top of
+   the toolbar, which swallowed every click on save and done. */
+.fe-code-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The textarea sits exactly on top of the highlighted code: invisible text,
+   visible caret. Every metric below must match .fe-file-content or the caret
+   drifts away from the glyphs underneath it. */
+.fe-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  margin: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-1);
+  -webkit-text-fill-color: transparent;
+  white-space: pre;
+  word-wrap: normal;
+  tab-size: 2;
+}
+
+.fe-editor::selection {
+  background: var(--surface-4, rgba(120, 160, 255, 0.35));
+  -webkit-text-fill-color: transparent;
+}
+
+.fe-code-editing .fe-file-content {
+  pointer-events: none;
+}
+
+/* ═══ Note on a selection ═══════════════════════════════════════════════════
+   Select code, say what you want done with it, and it lands in the agent's
+   terminal with the path and line range attached. The bar appears only while
+   something is selected, so it costs nothing when you are just reading. */
+
+.fe-note-bar {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: calc(var(--radius) + 4px);
+  /* Floating: --surface-card is translucent on the glass theme. */
+  background: var(--surface-float);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.fe-note-range {
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.fe-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fe-note-btn:hover { background: var(--hover); }
+.fe-note-btn:disabled { opacity: 0.45; cursor: default; }
+.fe-note-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.fe-note-btn-primary {
+  border-color: transparent;
+  background: var(--intent-primary);
+  color: var(--intent-primary-ink);
+}
+
+.fe-note-btn kbd {
+  font-family: var(--font-mono);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  color: var(--text-3);
+  border: none;
+  background: none;
+}
+.fe-note-btn-primary kbd { color: var(--intent-primary-ink); opacity: 0.7; }
+
+.fe-note {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, calc(100% - 24px));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.fe-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-2);
+}
+.fe-note-head button {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.fe-note-lines { color: var(--text-3); }
+
+/* Enough of the selection to confirm you grabbed the right thing, not enough
+   to re-read it here. */
+.fe-note-code {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 116px;
+  overflow: auto;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre;
+}
+
+.fe-note-input {
+  margin: 0;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-base);
+  resize: vertical;
+}
+.fe-note-input:focus { outline: none; }
+.fe-note-input::placeholder { color: var(--text-4); }
+
+.fe-note-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+.fe-note-spacer { flex: 1; }
+.fe-note-error { color: var(--intent-danger); font-size: max(11px, calc(var(--fs-base) - 2px)); }
+
+.fe-note-sent {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 22;
+  padding: 7px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-float);
+  color: var(--text-2);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 768px) {
+  .fe-note,
+  .fe-note-bar {
+    left: 10px;
+    right: 10px;
+    width: auto;
+  }
+  .fe-note-bar { justify-content: space-between; }
+}

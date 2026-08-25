@@ -1,6 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, appendFileSync, chmodSync, renameSync, statSync } from "fs";
 import { join, resolve } from "path";
-import type { RepoConfig, WorktreeMeta, DbShard, McpServer } from "../types";
+import type { RepoConfig, WorktreeMeta, DbShard } from "../types";
 
 import { homedir } from "os";
 
@@ -153,7 +153,22 @@ export function resolveAlias(alias: string): RepoConfig | undefined {
   if (alias === "__agentdock__") {
     return { alias: "agentdock", path: AGENTDOCK_REPO_DIR };
   }
-  return getRepos().find((r) => r.alias === alias);
+  const known = getRepos().find((r) => r.alias === alias);
+  if (known) return known;
+
+  // An absolute directory is a valid target too. "Fork this session here" sends
+  // the worktree path, which is never a configured alias — it used to fail with
+  // "Unknown alias: /Users/…/.worktrees/wt-abc123/chat". Confined to the base
+  // path so a request cannot start an agent anywhere on disk.
+  if (alias.startsWith("/")) {
+    const resolved = resolve(alias);
+    const base = resolve(getBasePath());
+    const inside = resolved === base || resolved.startsWith(base + "/");
+    if (inside && existsSync(resolved) && statSync(resolved).isDirectory()) {
+      return { alias: resolved.split("/").filter(Boolean).pop() || resolved, path: resolved };
+    }
+  }
+  return undefined;
 }
 
 
@@ -433,25 +448,34 @@ export function saveSessionOrder(order: string[]): void {
 
 // ─── Plans ───
 
+/**
+ * The plan for one session, or null.
+ *
+ * This used to fall back to the most recently modified plan in the directory
+ * when the session had none of its own, on the theory that Claude Code's plan
+ * mode might have written a different filename. With 100+ plans in there that
+ * fallback served *another session's* plan to every session without one — which
+ * the Coverage tab then joined against this session's diff, so the numbers were
+ * about two different pieces of work. No plan is the honest answer.
+ *
+ * The only fallbacks kept are spellings of this same session's name: older
+ * sessions wrote the display name without the "claude-" prefix.
+ */
 export function getPlan(sessionName: string): string | null {
-  // Primary: exact match by session name
-  const planFile = join(PLANS_DIR, `${sessionName}.md`);
-  if (existsSync(planFile)) return readFileSync(planFile, "utf-8");
-
-  // Fallback: find the most recently modified .md in plans dir.
-  // Handles cases where Claude Code's plan mode writes to a different filename.
-  if (!existsSync(PLANS_DIR)) return null;
-  try {
-    const { statSync } = require("fs") as typeof import("fs");
-    const files = readdirSync(PLANS_DIR).filter((f) => f.endsWith(".md"));
-    if (files.length === 0) return null;
-    const sorted = files
-      .map((f) => ({ f, mtime: statSync(join(PLANS_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    return readFileSync(join(PLANS_DIR, sorted[0].f), "utf-8");
-  } catch {
-    return null;
+  for (const name of planFileNames(sessionName)) {
+    const file = join(PLANS_DIR, `${name}.md`);
+    if (existsSync(file)) return readFileSync(file, "utf-8");
   }
+  return null;
+}
+
+/** The names one session's plan may be filed under, most exact first. */
+export function planFileNames(sessionName: string): string[] {
+  const names = [sessionName];
+  const bare = sessionName.startsWith(`${PREFIX}-`) ? sessionName.slice(PREFIX.length + 1) : null;
+  if (bare) names.push(bare);
+  else names.push(`${PREFIX}-${sessionName}`);
+  return names;
 }
 
 // ─── Custom quick actions ───
@@ -490,105 +514,44 @@ export function deleteCustomAction(id: string): void {
   writeFileSync(QUICK_ACTIONS_FILE, JSON.stringify(actions, null, 2));
 }
 
-// ─── MCP Servers ───
+// ─── What MCP servers the agents have ───
 
-const MCP_SERVERS_FILE = join(CONFIG_DIR, "mcp-servers.json");
-const MCP_SYNCED_NAMES_FILE = join(CONFIG_DIR, "mcp-synced-names.json");
-const CLAUDE_CONFIG_FILE = join(HOME, ".claude.json");
-const CURSOR_MCP_FILE = join(HOME, ".cursor", "mcp.json");
-
-export function getMcpServers(): McpServer[] {
-  if (!existsSync(MCP_SERVERS_FILE)) return [];
+/**
+ * Read-only. AgentDock used to keep its own list of MCP servers and write it
+ * into ~/.claude.json and ~/.cursor/mcp.json, which meant a settings panel here
+ * could silently rewrite the agent config for every session on the machine —
+ * including servers it had not put there. That is gone; this only reads.
+ *
+ * Reading the agents' own files rather than a list of our own is also more
+ * honest: it sees servers added with `claude mcp add`, which our list never did.
+ */
+export function readMcpNames(filePath: string): string[] {
+  if (!existsSync(filePath)) return [];
   try {
-    const data = JSON.parse(readFileSync(MCP_SERVERS_FILE, "utf-8"));
-    if (Array.isArray(data)) return data;
-  } catch { /* corrupt file */ }
-  return [];
-}
-
-function saveMcpServers(servers: McpServer[]): void {
-  ensureConfigDir();
-  writeFileSync(MCP_SERVERS_FILE, JSON.stringify(servers, null, 2));
-}
-
-function getSyncedNames(): string[] {
-  if (!existsSync(MCP_SYNCED_NAMES_FILE)) return [];
-  try {
-    const data = JSON.parse(readFileSync(MCP_SYNCED_NAMES_FILE, "utf-8"));
-    if (Array.isArray(data)) return data;
-  } catch { /* corrupt file */ }
-  return [];
-}
-
-function saveSyncedNames(names: string[]): void {
-  ensureConfigDir();
-  writeFileSync(MCP_SYNCED_NAMES_FILE, JSON.stringify(names));
-}
-
-function syncAgentConfigFile(filePath: string, servers: McpServer[], previousNames: string[]): void {
-  let config: Record<string, any> = {};
-  if (existsSync(filePath)) {
-    try {
-      config = JSON.parse(readFileSync(filePath, "utf-8"));
-    } catch { /* corrupt file, start fresh */ }
-  }
-
-  if (!config.mcpServers) config.mcpServers = {};
-
-  // Remove previously-synced servers that are no longer in the canonical list
-  const currentNames = new Set(servers.map((s) => s.name));
-  for (const name of previousNames) {
-    if (!currentNames.has(name)) {
-      delete config.mcpServers[name];
+    const config = JSON.parse(readFileSync(filePath, "utf-8"));
+    const servers = config?.mcpServers;
+    if (!servers || typeof servers !== "object") return [];
+    /* The name is what a reader recognises, but "linear" often appears only in
+       the command that fetches it, so both are worth reporting. */
+    const out: string[] = [];
+    for (const [name, entry] of Object.entries(servers as Record<string, any>)) {
+      out.push(name);
+      const args = Array.isArray(entry?.args) ? entry.args : [];
+      for (const arg of args) if (typeof arg === "string") out.push(arg);
+      if (typeof entry?.command === "string") out.push(entry.command);
     }
+    return out;
+  } catch {
+    return [];
   }
-
-  // Add/update current servers
-  for (const server of servers) {
-    const entry: Record<string, any> = {
-      type: "stdio",
-      command: server.command,
-      args: server.args,
-    };
-    if (server.env && Object.keys(server.env).length > 0) {
-      entry.env = server.env;
-    }
-    config.mcpServers[server.name] = entry;
-  }
-
-  // Ensure parent directory exists
-  const dir = filePath.substring(0, filePath.lastIndexOf("/"));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(filePath, JSON.stringify(config, null, 2));
 }
 
-export function syncMcpToAgents(): void {
-  const servers = getMcpServers();
-  const previousNames = getSyncedNames();
-
-  syncAgentConfigFile(CLAUDE_CONFIG_FILE, servers, previousNames);
-  syncAgentConfigFile(CURSOR_MCP_FILE, servers, previousNames);
-
-  // Update tracked names
-  saveSyncedNames(servers.map((s) => s.name));
-}
-
-export function addMcpServer(server: McpServer): void {
-  const servers = getMcpServers();
-  const existing = servers.findIndex((s) => s.name === server.name);
-  if (existing !== -1) {
-    servers[existing] = server;
-  } else {
-    servers.push(server);
-  }
-  saveMcpServers(servers);
-  syncMcpToAgents();
-}
-
-export function removeMcpServer(name: string): void {
-  const servers = getMcpServers().filter((s) => s.name !== name);
-  saveMcpServers(servers);
-  syncMcpToAgents();
+/** Every MCP server name (and command/args) either agent CLI is configured with. */
+export function getAgentMcpNames(): string[] {
+  return [
+    ...readMcpNames(join(HOME, ".claude.json")),
+    ...readMcpNames(join(HOME, ".cursor", "mcp.json")),
+  ];
 }
 
 // ─── Claude Code Hooks (status detection) ───
@@ -611,6 +574,62 @@ const HOOK_SCRIPT_DEST = join(CONFIG_DIR, "hooks", "status-hook.sh");
  * PreToolUse is the key addition — it fires frequently during active work (even by sub-agents),
  * so the "working" status stays fresh. The Stop hook resets to "waiting" when done.
  */
+/** The five lifecycle events status detection depends on, and what each means. */
+export const REQUIRED_HOOK_EVENTS: { event: string; status: string; means: string }[] = [
+  { event: "PreToolUse", status: "working", means: "fires on every tool call, so status stays fresh through a long run" },
+  { event: "UserPromptSubmit", status: "working", means: "you just sent something" },
+  { event: "SubagentStop", status: "working", means: "a sub-agent finished, the parent has not" },
+  { event: "Stop", status: "waiting", means: "it finished its turn" },
+  { event: "Notification", status: "waiting", means: "idle at the prompt, or asking permission" },
+];
+
+/**
+ * Which of our status hooks are present in a parsed Claude settings object.
+ *
+ * Pure so it can be tested without touching ~/.claude. Without these hooks,
+ * status detection falls back to reading the terminal, which is wrong often
+ * enough to matter — a blocked agent can look like a working one.
+ */
+export function readInstalledHooks(settings: Record<string, any>): {
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+} {
+  const hooks = (settings && settings.hooks) || {};
+  const installed: string[] = [];
+  for (const { event } of REQUIRED_HOOK_EVENTS) {
+    const arr = hooks[event];
+    const present =
+      Array.isArray(arr) &&
+      arr.some((entry: any) =>
+        Array.isArray(entry?.hooks) &&
+        entry.hooks.some((h: any) => typeof h?.command === "string" && h.command.includes("status-hook.sh")),
+      );
+    if (present) installed.push(event);
+  }
+  const missing = REQUIRED_HOOK_EVENTS.map((h) => h.event).filter((e) => !installed.includes(e));
+  return { installed, missing, ok: missing.length === 0 };
+}
+
+/** Current on-disk hook state, for the Health panel. */
+export function getHookInstallState(): {
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+  settingsPath: string;
+  scriptPath: string;
+} {
+  let settings: Record<string, any> = {};
+  if (existsSync(CLAUDE_SETTINGS_FILE)) {
+    try { settings = JSON.parse(readFileSync(CLAUDE_SETTINGS_FILE, "utf-8")); } catch { /* corrupt */ }
+  }
+  return {
+    ...readInstalledHooks(settings),
+    settingsPath: CLAUDE_SETTINGS_FILE,
+    scriptPath: HOOK_SCRIPT_DEST,
+  };
+}
+
 export function syncHooksToClaudeSettings(): void {
   // 1. Copy hook script to a stable location
   const hooksDir = join(CONFIG_DIR, "hooks");
@@ -692,12 +711,64 @@ export function deleteHookStatus(sessionName: string): void {
   }
 }
 
+/**
+ * Move all persisted config for a session from `oldName` to `newName`:
+ * worktree meta, per-session flag files, plan, hook status, session order,
+ * pinned preference, and any children's parent pointers. Does NOT touch tmux —
+ * the caller renames the tmux session separately.
+ */
+export function renameSessionConfig(oldName: string, newName: string): void {
+  if (oldName === newName) return;
+
+  const move = (from: string, to: string) => {
+    if (existsSync(from)) {
+      try { renameSync(from, to); } catch { /* best effort */ }
+    }
+  };
+
+  // Base worktree-meta file + every known per-session extension file.
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+  move(join(SESSIONS_DIR, oldName), join(SESSIONS_DIR, newName));
+  for (const ext of ["agent", "meta", "skip-perms", "type", "parent", "sub-agents", "claude-named"]) {
+    move(join(SESSIONS_DIR, `${oldName}.${ext}`), join(SESSIONS_DIR, `${newName}.${ext}`));
+  }
+
+  // Repoint any children whose .parent file references the old name.
+  if (existsSync(SESSIONS_DIR)) {
+    for (const file of readdirSync(SESSIONS_DIR)) {
+      if (!file.endsWith(".parent")) continue;
+      const path = join(SESSIONS_DIR, file);
+      try {
+        if (readFileSync(path, "utf-8").trim() === oldName) writeFileSync(path, newName);
+      } catch { /* best effort */ }
+    }
+  }
+
+  // Preserve position in the manual session order.
+  const order = getSessionOrder();
+  if (order.includes(oldName)) {
+    saveSessionOrder(order.map((n) => (n === oldName ? newName : n)));
+  }
+
+  // Update pinned sessions preference.
+  const prefs = getPreferences();
+  if (prefs.pinnedSessions?.includes(oldName)) {
+    prefs.pinnedSessions = prefs.pinnedSessions.map((n) => (n === oldName ? newName : n));
+    savePreferences(prefs);
+  }
+
+  // Move the plan file and hook status file.
+  move(join(PLANS_DIR, `${oldName}.md`), join(PLANS_DIR, `${newName}.md`));
+  move(join(HOOK_STATUS_DIR, oldName), join(HOOK_STATUS_DIR, newName));
+}
+
 // ─── Preferences ───
 
 const PREFERENCES_FILE = join(CONFIG_DIR, "preferences.json");
 
 export interface Preferences {
   recentRepos?: string[];
+  primaryRepo?: string;
   pinnedSessions?: string[];
   theme?: string;
   fontSize?: string;
@@ -705,8 +776,24 @@ export interface Preferences {
   scrollback?: number;
   terminalFontSize?: number;
   notificationsEnabled?: boolean;
+  notifyBlocked?: boolean;
+  notifyReview?: boolean;
+  notifyQuietEnabled?: boolean;
+  notifyQuietStart?: number;
+  notifyQuietEnd?: number;
+  notifyBatchEnabled?: boolean;
+  notifyRemindEnabled?: boolean;
+  defaultAgent?: string;
+  defaultSkipPermissions?: boolean;
+  worktreePostCreate?: string;
+  worktreeBranchPrefix?: string;
+  worktreeAutoRemove?: boolean;
+  customKeyboard?: boolean;
   groupBy?: string;
   collapsedGroups?: string[];
+  sortBy?: string;
+  mruSessions?: string[];
+  sessionStats?: Record<string, { count: number; last: number }>;
 }
 
 export function getPreferences(): Preferences {

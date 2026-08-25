@@ -152,7 +152,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "open-settings",
     title: "Configure everything",
-    body: "Click the ⚙ gear to open Settings — repos, MCP servers, appearance, and more.",
+    body: "Click the ⚙ gear to open Settings — repos, agents, appearance, and more.",
     target: "@settings-btn",
     position: "bottom",
     action: "click-target",
@@ -179,14 +179,6 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     onEnter: () => {
       window.dispatchEvent(new CustomEvent("agentdock-settings-tab", { detail: "repos" }));
     },
-  },
-  {
-    id: "settings-mcp",
-    title: "MCP Servers",
-    body: "Click MCP Servers to connect tools like Linear, Notion, Slack, or any custom MCP — giving your agents access to external context.",
-    target: "@settings-tab-mcp",
-    position: "right",
-    action: "click-target",
   },
   {
     id: "settings-health",

@@ -1,0 +1,173 @@
+/* Login / first-run password setup. Own namespace: the global .login-* rules in
+   styles.css load after this file and would win on equal specificity. */
+
+.auth-shell {
+  flex: 1 1 auto;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  overflow-y: auto;
+  background: var(--surface-0);
+  font-family: var(--font-ui);
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.auth-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.auth-mark {
+  color: var(--intent-primary);
+}
+
+.auth-title {
+  margin: 0;
+  font-size: calc(var(--fs-base) + 6px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+
+.auth-sub {
+  margin: 0;
+  max-width: 320px;
+  font-size: calc(var(--fs-base) - 1px);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-label {
+  font-size: calc(var(--fs-base) - 2px);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.auth-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px 0 37px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  -webkit-appearance: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.auth-input::placeholder {
+  color: var(--text-4);
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--intent-primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--focus-ring) 25%, transparent);
+}
+
+.auth-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: color-mix(in oklab, var(--intent-danger) 10%, var(--surface-1));
+  border: 1px solid color-mix(in oklab, var(--intent-danger) 30%, transparent);
+  border-radius: var(--radius);
+  color: color-mix(in oklab, var(--intent-danger) 75%, var(--text-1));
+  font-size: calc(var(--fs-base) - 1px);
+  line-height: 1.45;
+}
+
+.auth-error svg {
+  margin-top: 2px;
+  color: var(--intent-danger);
+}
+
+.auth-submit {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  background: var(--intent-primary);
+  color: var(--intent-primary-ink);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: filter 120ms ease, opacity 120ms ease;
+}
+
+.auth-submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.auth-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.auth-hint {
+  margin: 0;
+  font-size: calc(var(--fs-base) - 2px);
+  line-height: 1.5;
+  color: var(--text-4);
+}
+
+.auth-hint code {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  color: var(--text-3);
+}

@@ -4,10 +4,10 @@
  * Uses a temp directory (set by test-preload.ts) to avoid touching real config files.
  */
 
-import { describe, test, expect, beforeEach, afterAll } from "bun:test";
-import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync, mkdtempSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import * as config from "../services/config";
 
 // AGENTDOCK_CONFIG_DIR was set to a temp dir by test-preload.ts before config.ts loaded
@@ -340,6 +340,66 @@ describe("SessionMeta", () => {
   });
 });
 
+// ─── Rename Session Config ───
+
+describe("renameSessionConfig", () => {
+  test("moves worktree meta and all per-session flag files", () => {
+    config.saveWorktreeMeta("claude-old", "/repo", "/wt");
+    config.saveSessionAgentType("claude-old", "claude");
+    config.saveSessionProperties("claude-old", { priority: "high" });
+    config.saveSessionType("claude-old", "ticket");
+    config.saveSessionSkipPerms("claude-old", true);
+
+    config.renameSessionConfig("claude-old", "claude-new");
+
+    expect(config.getSessionMeta("claude-old")).toEqual([]);
+    expect(config.getSessionMeta("claude-new")).toEqual([{ repoPath: "/repo", wtDir: "/wt" }]);
+    expect(config.getSessionAgentType("claude-new")).toBe("claude");
+    expect(config.getSessionProperties("claude-new")).toEqual({ priority: "high" });
+    expect(config.getSessionType("claude-new")).toBe("ticket");
+    expect(config.getSessionSkipPerms("claude-new")).toBe(true);
+    expect(config.getSessionAgentType("claude-old")).toBeNull();
+  });
+
+  test("repoints children whose parent references the old name", () => {
+    config.saveSessionParent("claude-old-sub-1", "claude-old");
+    config.saveSessionParent("claude-other-sub-1", "claude-other");
+
+    config.renameSessionConfig("claude-old", "claude-new");
+
+    expect(config.getSessionParent("claude-old-sub-1")).toBe("claude-new");
+    expect(config.getSessionParent("claude-other-sub-1")).toBe("claude-other");
+    expect(config.getSessionChildren("claude-new")).toContain("claude-old-sub-1");
+  });
+
+  test("preserves position in the session order", () => {
+    config.saveSessionOrder(["claude-a", "claude-old", "claude-b"]);
+    config.renameSessionConfig("claude-old", "claude-new");
+    expect(config.getSessionOrder()).toEqual(["claude-a", "claude-new", "claude-b"]);
+  });
+
+  test("updates pinned sessions preference", () => {
+    config.savePreferences({ pinnedSessions: ["claude-old", "claude-x"] });
+    config.renameSessionConfig("claude-old", "claude-new");
+    expect(config.getPreferences().pinnedSessions).toEqual(["claude-new", "claude-x"]);
+  });
+
+  test("moves the plan file", () => {
+    const plansDir = join(CONFIG_DIR, "plans");
+    mkdirSync(plansDir, { recursive: true });
+    writeFileSync(join(plansDir, "claude-old.md"), "# my plan");
+    config.renameSessionConfig("claude-old", "claude-new");
+    expect(existsSync(join(plansDir, "claude-old.md"))).toBe(false);
+    expect(readFileSync(join(plansDir, "claude-new.md"), "utf-8")).toBe("# my plan");
+  });
+
+  test("is a no-op when names are equal", () => {
+    config.saveSessionProperties("claude-same", { a: "b" });
+    config.renameSessionConfig("claude-same", "claude-same");
+    expect(config.getSessionProperties("claude-same")).toEqual({ a: "b" });
+  });
+});
+
 // ─── DB Shards ───
 
 describe("DbShards", () => {
@@ -383,5 +443,174 @@ describe("DbShards", () => {
     config.addDbShard({ name: "my-shard", host: "h", port: 1, database: "d", user: "u", password: "p" });
     expect(config.getDbShard("my-shard")).toBeDefined();
     expect(config.getDbShard("unknown")).toBeUndefined();
+  });
+});
+
+describe("resolveAlias with a directory path", () => {
+  // "Fork this session here" sends the worktree path, which is never a
+  // configured alias. It used to fail with
+  // "Unknown alias: /Users/…/.worktrees/wt-abc123/chat".
+  //
+  // Sandboxed under the test config dir. An earlier version of this block
+  // computed the base as ~/projects and created directories in the real one.
+  // Its own temp root, not under CONFIG_DIR — other suites wipe that between
+  // files, which made these pass alone and fail in the full run.
+  let base: string;
+
+  let prevEnv: string | undefined;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), "agentdock-alias-"));
+    // getBasePath() checks this env var before the config file, and another
+    // suite sets it at module scope, which leaks across files in one bun run.
+    prevEnv = process.env.AGENTDOCK_BASE_PATH;
+    process.env.AGENTDOCK_BASE_PATH = base;
+    config.setBasePath(base);
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.AGENTDOCK_BASE_PATH;
+    else process.env.AGENTDOCK_BASE_PATH = prevEnv;
+  });
+
+  afterAll(() => {
+    try { rmSync(base, { recursive: true, force: true }); } catch { /* already gone */ }
+  });
+
+  test("still resolves a configured alias", () => {
+    config.addRepo({ alias: "demo", path: join(base, "demo") });
+    expect(config.resolveAlias("demo")?.path).toBe(join(base, "demo"));
+  });
+
+  test("resolves an existing directory inside the base path", () => {
+    const dir = join(base, "forked-repo");
+    mkdirSync(dir, { recursive: true });
+    const r = config.resolveAlias(dir);
+    expect(r?.path).toBe(dir);
+    expect(r?.alias).toBe("forked-repo");
+  });
+
+  test("resolves a worktree path, the case that was broken", () => {
+    const wt = join(base, ".worktrees", "wt-abc123", "chat");
+    mkdirSync(wt, { recursive: true });
+    expect(config.resolveAlias(wt)?.path).toBe(wt);
+  });
+
+  test("refuses a directory outside the base path", () => {
+    expect(config.resolveAlias("/etc")).toBeUndefined();
+    expect(config.resolveAlias("/")).toBeUndefined();
+  });
+
+  test("refuses a traversal that escapes the base path", () => {
+    expect(config.resolveAlias(join(base, "..", "..", "etc"))).toBeUndefined();
+  });
+
+  test("refuses a path that does not exist", () => {
+    expect(config.resolveAlias(join(base, "definitely-not-here"))).toBeUndefined();
+  });
+
+  test("refuses a file, since an agent needs a directory", () => {
+    const f = join(base, "a-file.txt");
+    writeFileSync(f, "x");
+    expect(config.resolveAlias(f)).toBeUndefined();
+  });
+
+  test("an unknown bare name is still unknown", () => {
+    expect(config.resolveAlias("no-such-alias")).toBeUndefined();
+  });
+});
+
+// ─── Plans ───
+
+describe("getPlan", () => {
+  const PLANS_DIR = join(CONFIG_DIR, "plans");
+
+  function writePlan(name: string, body: string) {
+    mkdirSync(PLANS_DIR, { recursive: true });
+    writeFileSync(join(PLANS_DIR, `${name}.md`), body);
+  }
+
+  test("returns the session's own plan", () => {
+    writePlan("claude-alpha", "# alpha");
+    expect(config.getPlan("claude-alpha")).toBe("# alpha");
+  });
+
+  test("returns null rather than another session's plan", () => {
+    writePlan("claude-alpha", "# alpha");
+    writePlan("claude-beta", "# beta");
+    expect(config.getPlan("claude-gamma")).toBeNull();
+  });
+
+  test("returns null when the plans directory is empty", () => {
+    mkdirSync(PLANS_DIR, { recursive: true });
+    expect(config.getPlan("claude-alpha")).toBeNull();
+  });
+
+  test("returns null when there is no plans directory at all", () => {
+    expect(config.getPlan("claude-alpha")).toBeNull();
+  });
+
+  test("finds a plan filed without the claude- prefix", () => {
+    writePlan("alpha", "# alpha");
+    expect(config.getPlan("claude-alpha")).toBe("# alpha");
+  });
+
+  test("prefers the exact name over the bare one", () => {
+    writePlan("claude-alpha", "# prefixed");
+    writePlan("alpha", "# bare");
+    expect(config.getPlan("claude-alpha")).toBe("# prefixed");
+  });
+
+  test("planFileNames covers both spellings", () => {
+    expect(config.planFileNames("claude-alpha")).toEqual(["claude-alpha", "alpha"]);
+    expect(config.planFileNames("alpha")).toEqual(["alpha", "claude-alpha"]);
+  });
+});
+
+// ─── Agent MCP config (read-only) ───
+
+describe("readMcpNames", () => {
+  const dir = join(CONFIG_DIR, "mcp-probe");
+  const file = join(dir, "claude.json");
+
+  function write(body: unknown) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, typeof body === "string" ? body : JSON.stringify(body));
+  }
+
+  test("returns nothing when the file is absent", () => {
+    expect(config.readMcpNames(join(dir, "nope.json"))).toEqual([]);
+  });
+
+  test("returns nothing for a corrupt file", () => {
+    write("{not json");
+    expect(config.readMcpNames(file)).toEqual([]);
+  });
+
+  test("returns nothing when there are no servers", () => {
+    write({ someOtherKey: 1 });
+    expect(config.readMcpNames(file)).toEqual([]);
+  });
+
+  test("reports the server name, its command and its args", () => {
+    write({
+      mcpServers: {
+        linear: { command: "npx", args: ["-y", "mcp-remote", "https://mcp.linear.app/mcp"] },
+      },
+    });
+    const names = config.readMcpNames(file);
+    expect(names).toContain("linear");
+    expect(names).toContain("npx");
+    expect(names).toContain("https://mcp.linear.app/mcp");
+  });
+
+  test("finds Linear when only the url mentions it", () => {
+    write({ mcpServers: { tickets: { command: "npx", args: ["mcp-remote", "https://mcp.linear.app/mcp"] } } });
+    expect(config.readMcpNames(file).some((n) => /linear/i.test(n))).toBe(true);
+  });
+
+  test("survives entries with no command or args", () => {
+    write({ mcpServers: { notion: {}, stitch: { args: "not-an-array" } } });
+    expect(config.readMcpNames(file).sort()).toEqual(["notion", "stitch"]);
   });
 });

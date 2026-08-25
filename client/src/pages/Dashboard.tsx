@@ -2,12 +2,21 @@ import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } fr
 import { createPortal } from "react-dom";
 import { MetaSelect } from "../components/MetaSelect";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useSessions } from "../hooks/useSessions";
-import { deleteSession, deleteAllSessions, fetchPlan, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
+import { deleteSession, deleteAllSessions, openInIterm, reorderSessions, fetchSettingsStatus, updateBasePath, scanRepos, addSettingsRepo, sendSessionInput, fetchGitRepos, fetchPreferences, updatePreferences, fetchMetaPropertyPresets, saveMetaPropertyPresets, updateSessionMeta, renameSession, restoreSession, createSession, fetchSettingsHealth, setPassword } from "../api";
 import { isDemo } from "../demo";
 import { TutorialOverlay } from "../components/TutorialOverlay";
+import { Icon, type IconName } from "../components/Icon";
+import { fetchHookState, installHooks, type HookState } from "../api";
+import { PlanView } from "../components/PlanView";
+import "../styles/sidebar-header.css";
+import { QUEUE_BUCKETS, queueBucket } from "../queue";
+import { fetchConflicts, fetchPanelSummary, fetchShells, openShell, closeShell } from "../api";
+import { QuietView } from "../components/QuietView";
+import { MobileQueue } from "../components/MobileQueue";
+import { MobileApprove } from "../components/MobileApprove";
+import { useQueueNotifications } from "../hooks/useQueueNotifications";
+import { useSettings } from "../hooks/useSettings";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
@@ -49,6 +58,33 @@ function getDisplayStatus(session: SessionInfo): string {
   return session.statusLine?.type
     ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
 }
+
+const FULL_SURFACES = ["plan", "changes", "files", "sub-agents"] as const;
+type FullSurface = (typeof FULL_SURFACES)[number];
+
+/** Surfaces reachable from the full-window host's own tab bar. */
+const FULL_TABS: { id: FullSurface; label: string }[] = [
+  { id: "plan", label: "plan" },
+  { id: "changes", label: "changes" },
+  { id: "files", label: "files" },
+];
+
+/** Blocked means the agent cannot continue without a human. */
+function isBlocked(session: SessionInfo): boolean {
+  return queueBucket(session) === "blocked";
+}
+
+/**
+ * The right rail: icons only, always present, never moving. Pressing one opens
+ * that surface fully expanded over the window — the surfaces are drawn
+ * standalone in the design, so a docked panel was always the wrong container.
+ */
+const RAIL: { id: FullSurface; label: string; icon: IconName }[] = [
+  { id: "plan", label: "Plan", icon: "plan" },
+  { id: "changes", label: "Changes", icon: "diff" },
+  { id: "files", label: "Files", icon: "folder" },
+  { id: "sub-agents", label: "Sub-agents", icon: "users" },
+];
 
 function SessionRow({
   session,
@@ -106,16 +142,20 @@ function SessionRow({
   onToggleSelect?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [restoring, setRestoring] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const rowMenuRef = useRef<HTMLDivElement>(null);
 
   // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      const t = e.target as Node;
+      // Same portal caveat as SidebarMenu: the menu no longer lives inside the
+      // wrap that menuRef points at.
+      if (menuRef.current?.contains(t) || rowMenuRef.current?.contains(t)) return;
+      setMenuOpen(false);
     }
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
@@ -164,6 +204,8 @@ function SessionRow({
     setRestoring(true);
     try {
       await onRestore?.();
+    } catch (err: any) {
+      console.error("Failed to restore session:", err);
     } finally {
       setRestoring(false);
     }
@@ -211,7 +253,7 @@ function SessionRow({
             onClick={(e) => { e.stopPropagation(); onToggleChildren?.(); }}
             title={`${childrenSummary.total} sub-agent${childrenSummary.total !== 1 ? "s" : ""}`}
           >
-            <span className="children-badge-icon">{childrenExpanded ? "\u25BE" : "\u25B8"}</span>
+            <span className="children-badge-icon"><Icon name={childrenExpanded ? "chev" : "chevr"} size={11} /></span>
             <span className="children-badge-count">{childrenSummary.total}</span>
             {childrenSummary.working > 0 && (
               <span className="children-badge-dot children-badge-working" title={`${childrenSummary.working} working`} />
@@ -236,7 +278,7 @@ function SessionRow({
             disabled={restoring}
             title="Restore session"
           >
-            {restoring ? "restoring…" : "↺ restore"}
+            {restoring ? "restoring…" : <><Icon name="refresh" size={11} /> restore</>}
           </button>
         )}
         {session.status !== "stopped" && (
@@ -267,13 +309,25 @@ function SessionRow({
         {!selectionMode && <div className="session-row-menu-wrap" ref={menuRef}>
           <button
             className="session-row-menu-btn"
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              // .session-list scrolls, so an absolutely positioned menu is
+              // clipped by it — worst at the bottom of the list, which is
+              // exactly where stopped sessions sit.
+              const r = e.currentTarget.getBoundingClientRect();
+              const MENU_H = 260;
+              setMenuPos({
+                top: r.bottom + MENU_H > window.innerHeight ? r.top - MENU_H : r.bottom + 4,
+                right: Math.max(8, window.innerWidth - r.right),
+              });
+              setMenuOpen(!menuOpen);
+            }}
             aria-label="Session actions"
           >
-            ⋯
+            <Icon name="more" size={16} />
           </button>
-          {menuOpen && (
-            <div className="session-row-menu">
+          {menuOpen && menuPos && createPortal(
+            <div ref={rowMenuRef} className="session-row-menu" style={{ top: menuPos.top, right: menuPos.right }}>
               {onTogglePin && (
                 <button className="session-row-menu-item" onClick={(e) => { e.stopPropagation(); onTogglePin(); setMenuOpen(false); }}>
                   {pinned ? "Unpin" : "Pin to top"}
@@ -297,13 +351,14 @@ function SessionRow({
               )}
               {session.status === "stopped" && onRestore && (
                 <button className="session-row-menu-item" onClick={handleRestore} disabled={restoring}>
-                  {restoring ? "Restoring…" : "↺ Restore session"}
+                  {restoring ? "Restoring…" : <><Icon name="refresh" size={13} /> Restore session</>}
                 </button>
               )}
               <button className="session-row-menu-item danger" onClick={handleKill}>
                 {session.status === "stopped" ? "Delete" : "Kill session"}
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>}
       </div>
@@ -320,10 +375,13 @@ function SessionEditModal({
 }: {
   session: SessionInfo;
   presets: MetaPropertyPreset[];
-  onSave: (meta: Record<string, string>, updatedPresets: MetaPropertyPreset[]) => void;
+  onSave: (meta: Record<string, string>, updatedPresets: MetaPropertyPreset[], newDisplayName: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [meta, setMeta] = useState<Record<string, string>>(session.meta || {});
+  const [name, setName] = useState(session.displayName);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -333,14 +391,41 @@ function SessionEditModal({
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  const handleSave = async () => {
+    if (!name.trim()) {
+      setError("Name cannot be empty");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(meta, presets, name.trim());
+    } catch (err: any) {
+      setError(err?.message || "Failed to save");
+      setSaving(false);
+    }
+  };
+
   return createPortal(
     <div className="settings-overlay" onClick={onClose}>
       <div className="session-edit-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">{session.displayName}</span>
-          <button className="settings-close-btn" onClick={onClose}>&times;</button>
+          <button className="settings-close-btn" onClick={onClose}><Icon name="close" size={16} /></button>
         </div>
         <div className="session-edit-body">
+          <div className="session-edit-field">
+            <label className="session-edit-label">Name</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Session name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+              autoFocus
+            />
+          </div>
           {presets.map((preset) => (
             <div key={preset.key} className="session-edit-field">
               <label className="session-edit-label">{preset.label}</label>
@@ -367,9 +452,10 @@ function SessionEditModal({
             </div>
           ))}
         </div>
+        {error && <div className="session-edit-error">{error}</div>}
         <div className="session-edit-footer">
-          <button className="btn btn-primary" onClick={() => onSave(meta, presets)}>Save</button>
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+          <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
         </div>
       </div>
     </div>,
@@ -377,537 +463,98 @@ function SessionEditModal({
   );
 }
 
-interface PlanComment {
-  id: string;
-  selectedText: string;
-  comment: string;
-}
-
-
-function makeBlockRenderer(
-  tag: "p" | "h1" | "h2" | "h3" | "h4",
-  onGutterMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void,
-  onGutterTouchStart: (e: React.TouchEvent<HTMLButtonElement>) => void,
-  onBlockMouseEnter: (e: React.MouseEvent<HTMLElement>) => void,
-) {
-  const BlockTag = tag as React.ElementType;
-  return ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
-    <div className="plan-block-wrap" onMouseEnter={onBlockMouseEnter}>
-      <div className="plan-block-gutter">
-        <button
-          className="plan-gutter-btn"
-          tabIndex={-1}
-          aria-label="Add comment to this section"
-          onMouseDown={onGutterMouseDown}
-          onTouchStart={onGutterTouchStart}
-        >
-          +
-        </button>
-      </div>
-      <BlockTag {...props}>{children}</BlockTag>
-    </div>
-  );
-}
-
-function makeLiRenderer(
-  onGutterMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void,
-  onGutterTouchStart: (e: React.TouchEvent<HTMLButtonElement>) => void,
-  onBlockMouseEnter: (e: React.MouseEvent<HTMLElement>) => void,
-) {
-  return ({ children, ...props }: React.HTMLAttributes<HTMLLIElement>) => (
-    <li
-      {...props}
-      className={`plan-li-wrap${props.className ? " " + props.className : ""}`}
-      onMouseEnter={onBlockMouseEnter as React.MouseEventHandler<HTMLLIElement>}
-    >
-      <span className="plan-li-gutter">
-        <button
-          className="plan-gutter-btn"
-          tabIndex={-1}
-          aria-label="Add comment to this item"
-          onMouseDown={onGutterMouseDown}
-          onTouchStart={onGutterTouchStart}
-        >
-          +
-        </button>
-      </span>
-      {children}
-    </li>
-  );
-}
-
-function PlanView({ sessionName, viewMode }: { sessionName: string; viewMode: "rendered" | "raw" }) {
-  const [plan, setPlan] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
-
-  // Selection-based commenting
-  const [selectedText, setSelectedText] = useState("");
-  const [showCommentBtn, setShowCommentBtn] = useState<{ top: number; left: number } | null>(null);
-  const [commentBox, setCommentBox] = useState<{ top: number; text: string } | null>(null);
-  const [comment, setComment] = useState("");
-  const [pendingComments, setPendingComments] = useState<PlanComment[]>([]);
-  const [batchSending, setBatchSending] = useState(false);
-  const [batchExpanded, setBatchExpanded] = useState(false);
-  // Block drag-select state (gutter "+" drag)
-  const [blockSel, setBlockSel] = useState<{ start: number; end: number } | null>(null);
-  const [blockComment, setBlockComment] = useState("");
-  const [blockCommentTop, setBlockCommentTop] = useState<number | null>(null);
-  const blockCommentRef = useRef<HTMLTextAreaElement>(null);
-  const isBlockDraggingRef = useRef(false);
-  const blockDragStartRef = useRef(-1);
-
-  const contentRef = useRef<HTMLDivElement>(null);
-  const commentRef = useRef<HTMLTextAreaElement>(null);
-  const savedRange = useRef<Range | null>(null);
-
-  const loadPlan = useCallback(() => {
-    fetchPlan(sessionName).then((p) => {
-      setPlan(p);
-      setLoading(false);
-    }).catch(() => {
-      setLoading(false);
-    });
-  }, [sessionName]);
+/**
+ * Rare and destructive sidebar actions. Kill-all was previously the largest,
+ * loudest control in the sidebar; here it takes a deliberate second step and
+ * sits below a separator.
+ */
+function SidebarMenu({
+  canSelect,
+  canKillAll,
+  onSelect,
+  onKillAll,
+  groupAction,
+}: {
+  canSelect: boolean;
+  canKillAll: boolean;
+  onSelect: () => void;
+  onKillAll: () => void;
+  groupAction?: { label: string; run: () => void };
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setLoading(true);
-    loadPlan();
-    const interval = setInterval(loadPlan, 5000);
-    return () => clearInterval(interval);
-  }, [loadPlan]);
-
-  // Listen for plan-download event from parent dropdown menu
-  useEffect(() => {
-    const handler = () => handleDownload();
-    window.addEventListener("plan-download", handler);
-    return () => window.removeEventListener("plan-download", handler);
-  }, [plan, sessionName]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (commentBox && commentRef.current) commentRef.current.focus();
-  }, [commentBox]);
-
-  // Assign data-block-idx to each selectable block after plan renders
-  useLayoutEffect(() => {
-    if (!contentRef.current) return;
-    contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap").forEach((el, i) => {
-      el.dataset.blockIdx = String(i);
-    });
-  }, [plan, viewMode]);
-
-  // Apply/remove selection highlight class
-  useEffect(() => {
-    if (!contentRef.current) return;
-    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap");
-    const selMin = blockSel ? Math.min(blockSel.start, blockSel.end) : -1;
-    const selMax = blockSel ? Math.max(blockSel.start, blockSel.end) : -1;
-    blocks.forEach((el, i) => el.classList.toggle("plan-block-selected", i >= selMin && i <= selMax));
-  }, [blockSel]);
-
-  // Global mouseup/touchend: finalize drag → show inline comment box
-  useEffect(() => {
-    const onUp = () => {
-      if (!isBlockDraggingRef.current) return;
-      isBlockDraggingRef.current = false;
-      if (!contentRef.current || !blockSel) return;
-      const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap");
-      const lastIdx = Math.min(Math.max(blockSel.start, blockSel.end), blocks.length - 1);
-      const lastEl = blocks[lastIdx];
-      if (!lastEl) return;
-      const lastRect = lastEl.getBoundingClientRect();
-      const contentRect = contentRef.current.getBoundingClientRect();
-      const top = lastRect.bottom - contentRect.top + contentRef.current.scrollTop + 4;
-      setBlockCommentTop(top);
-      setBlockComment("");
-      setTimeout(() => {
-        blockCommentRef.current?.focus();
-        blockCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      }, 50);
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      // The menu is portalled to <body>, so it is not inside btnRef. Without
+      // checking it too, mousedown on an item closed the menu before the click
+      // could reach the item's handler — every option looked inert.
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("touchend", onUp);
-    return () => { window.removeEventListener("mouseup", onUp); window.removeEventListener("touchend", onUp); };
-  }, [blockSel]);
-
-  // Native touchmove to extend selection on touch (passive:false to allow preventDefault)
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    const onTouchMove = (e: TouchEvent) => {
-      if (!isBlockDraggingRef.current) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const el = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement | null;
-      const wrap = el?.closest<HTMLElement>("[data-block-idx]");
-      if (!wrap) return;
-      const idx = parseInt(wrap.dataset.blockIdx ?? "-1", 10);
-      if (idx >= 0) setBlockSel(prev => prev ? { start: blockDragStartRef.current, end: idx } : null);
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", esc);
     };
-    content.addEventListener("touchmove", onTouchMove, { passive: false });
-    return () => content.removeEventListener("touchmove", onTouchMove);
-  }, [plan]);
+  }, [open]);
 
-  // On mouseup inside plan content, check if there's a text selection
-  const handleContentMouseUp = useCallback(() => {
-    if (isBlockDraggingRef.current) return; // block drag takes precedence
-    // Small delay to let the browser finalize the selection
-    requestAnimationFrame(() => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !contentRef.current) return;
-      const text = sel.toString().trim();
-      if (!text) return;
-
-      const range = sel.getRangeAt(0);
-      if (!contentRef.current.contains(range.commonAncestorContainer)) return;
-
-      setSelectedText(text);
-      savedRange.current = range.cloneRange();
-      const rect = range.getBoundingClientRect();
-      const containerRect = contentRef.current.getBoundingClientRect();
-      setShowCommentBtn({
-        top: rect.bottom - containerRect.top + contentRef.current.scrollTop + 4,
-        left: rect.left - containerRect.left + rect.width / 2 - 50,
-      });
-    });
-  }, []);
-
-  // Clicking anywhere in content without a selection dismisses buttons/comment boxes
-  const handleContentMouseDown = useCallback(() => {
-    if (showCommentBtn && !commentBox) {
-      setShowCommentBtn(null);
-      setSelectedText("");
-    }
-    // Clear block selection if clicking in content area (gutter stops propagation)
-    if (blockCommentTop !== null) {
-      setBlockCommentTop(null);
-      setBlockSel(null);
-      setBlockComment("");
-    }
-  }, [showCommentBtn, commentBox, blockCommentTop]);
-
-  const handleOpenCommentBox = () => {
-    if (!showCommentBtn || !selectedText) return;
-    setCommentBox({ top: showCommentBtn.top + 32, text: selectedText });
-    setShowCommentBtn(null);
-    setComment("");
-    // Apply CSS Custom Highlight to keep selection visible
-    if (savedRange.current && typeof Highlight !== "undefined" && CSS.highlights) {
-      const hl = new Highlight(savedRange.current);
-      CSS.highlights.set("plan-comment-selection", hl);
-    }
+  const toggle = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    // Fixed + portal: the sidebar scrolls and clips, so an absolute menu here
+    // would be cut off.
+    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    setOpen((v) => !v);
   };
 
-  const clearHighlight = useCallback(() => {
-    if (typeof CSS !== "undefined" && CSS.highlights) {
-      CSS.highlights.delete("plan-comment-selection");
-    }
-    savedRange.current = null;
-  }, []);
-
-  const handleGutterMouseDown = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const wrap = e.currentTarget.closest<HTMLElement>("[data-block-idx]");
-    if (!wrap) return;
-    const idx = parseInt(wrap.dataset.blockIdx ?? "0", 10);
-    isBlockDraggingRef.current = true;
-    blockDragStartRef.current = idx;
-    setBlockSel({ start: idx, end: idx });
-    setBlockCommentTop(null);
-    setBlockComment("");
-    setCommentBox(null);
-    setShowCommentBtn(null);
-    clearHighlight();
-  }, [clearHighlight]);
-
-  const handleGutterTouchStart = useCallback((e: React.TouchEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
-    const wrap = e.currentTarget.closest<HTMLElement>("[data-block-idx]");
-    if (!wrap) return;
-    const idx = parseInt(wrap.dataset.blockIdx ?? "0", 10);
-    isBlockDraggingRef.current = true;
-    blockDragStartRef.current = idx;
-    setBlockSel({ start: idx, end: idx });
-    setBlockCommentTop(null);
-    setBlockComment("");
-  }, []);
-
-  const handleBlockMouseEnter = useCallback((e: React.MouseEvent<HTMLElement>) => {
-    if (!isBlockDraggingRef.current) return;
-    const wrap = e.currentTarget;
-    const idx = parseInt(wrap.dataset.blockIdx ?? "-1", 10);
-    if (idx >= 0) setBlockSel(prev => prev ? { start: blockDragStartRef.current, end: idx } : null);
-  }, []);
-
-  const handleAddBlockComment = useCallback(() => {
-    if (!blockComment.trim() || !blockSel || !contentRef.current) return;
-    const blocks = contentRef.current.querySelectorAll<HTMLElement>(".plan-block-wrap, .plan-li-wrap");
-    const selMin = Math.min(blockSel.start, blockSel.end);
-    const selMax = Math.max(blockSel.start, blockSel.end);
-    const selectedText = Array.from(blocks).slice(selMin, selMax + 1)
-      .map(el => el.innerText.trim()).filter(Boolean).join("\n");
-    setPendingComments(prev => [...prev, { id: crypto.randomUUID(), selectedText, comment: blockComment.trim() }]);
-    setBlockComment("");
-    setBlockCommentTop(null);
-    setBlockSel(null);
-    blocks.forEach(el => el.classList.remove("plan-block-selected"));
-  }, [blockComment, blockSel]);
-
-  const handleBlockCommentKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAddBlockComment(); }
-    if (e.key === "Escape") { setBlockCommentTop(null); setBlockSel(null); setBlockComment(""); }
-  };
-
-  const handleAddComment = () => {
-    if (!comment.trim() || !commentBox) return;
-    setPendingComments(prev => [...prev, {
-      id: crypto.randomUUID(),
-      selectedText: commentBox.text,
-      comment: comment.trim(),
-    }]);
-    setComment("");
-    setCommentBox(null);
-    setSelectedText("");
-    clearHighlight();
-    window.getSelection()?.removeAllRanges();
-  };
-
-  const handleCommentKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleAddComment();
-    }
-    if (e.key === "Escape") {
-      setComment("");
-      setCommentBox(null);
-      clearHighlight();
-    }
-  };
-
-  const handleDownload = () => {
-    if (!plan) return;
-    const filename = prompt("Save as:", `${sessionName}.md`);
-    if (!filename) return;
-    const blob = new Blob([plan], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename.endsWith(".md") ? filename : `${filename}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleSend = async () => {
-    if (!message.trim() || sending) return;
-    setSending(true);
-    try {
-      const planFile = `~/.config/agentdock/plans/${sessionName}.md`;
-      const planRef = plan ? `First read the plan at ${planFile} for full context, then:\n\n` : "";
-      await sendSessionInput(sessionName, planRef + message.trim());
-      setMessage("");
-    } catch (err) {
-      console.error("Failed to send message:", err);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleSendAll = async () => {
-    if (pendingComments.length === 0) return;
-    setBatchSending(true);
-    try {
-      const planFile = `~/.config/agentdock/plans/${sessionName}.md`;
-      const planRef = plan ? `First read the plan at ${planFile} for full context, then address these comments:\n\n` : "";
-      const msg = planRef + pendingComments.map(c =>
-        `Regarding this part of the plan:\n\`\`\`\n${c.selectedText}\n\`\`\`\n${c.comment}`
-      ).join("\n\n---\n\n");
-      await sendSessionInput(sessionName, msg);
-      setPendingComments([]);
-    } catch (err) {
-      console.error("Failed to send comments:", err);
-    } finally {
-      setBatchSending(false);
-    }
-  };
-
-  const markdownComponents = useMemo(() => ({
-    p:  makeBlockRenderer("p",  handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
-    h1: makeBlockRenderer("h1", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
-    h2: makeBlockRenderer("h2", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
-    h3: makeBlockRenderer("h3", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
-    h4: makeBlockRenderer("h4", handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
-    li: makeLiRenderer(handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter),
-  }), [handleGutterMouseDown, handleGutterTouchStart, handleBlockMouseEnter]);
-
-  if (loading) {
-    return <div className="plan-view"><div className="plan-loading">loading plan...</div></div>;
-  }
+  if (!canSelect && !canKillAll && !groupAction) return null;
 
   return (
-    <div className="plan-view">
-      {plan ? (
-        <>
-          <div
-            className="plan-content"
-            data-tutorial="plan-comment-area"
-            ref={contentRef}
-            style={{ position: "relative" }}
-            onMouseUp={handleContentMouseUp}
-            onMouseDown={handleContentMouseDown}
-          >
-            {viewMode === "rendered" ? (
-              <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{plan}</Markdown>
-            ) : (
-              <pre className="plan-raw">{plan}</pre>
-            )}
-
-            {showCommentBtn && !commentBox && (
-              <button
-                className="plan-add-comment-btn"
-                style={{ top: showCommentBtn.top, left: showCommentBtn.left }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={handleOpenCommentBox}
-              >
-                + add comment
-              </button>
-            )}
-
-            {commentBox && (
-              <div
-                className="plan-comment-popover"
-                style={{ top: commentBox.top, left: 0, right: 0 }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <div className="plan-comment-context">{commentBox.text}</div>
-                <textarea
-                  ref={commentRef}
-                  className="diff-comment-input"
-                  placeholder="Add a comment... (Enter to add, Esc to cancel)"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  onKeyDown={handleCommentKeyDown}
-                  rows={2}
-                />
-                <div className="diff-comment-actions">
-                  <button className="btn btn-sm" onClick={() => { setCommentBox(null); setComment(""); clearHighlight(); }}>
-                    cancel
-                  </button>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={handleAddComment}
-                    disabled={!comment.trim()}
-                  >
-                    add comment
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {blockCommentTop !== null && blockSel && (
-              <div
-                className="plan-block-comment-box"
-                style={{ top: blockCommentTop }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <textarea
-                  ref={blockCommentRef}
-                  className="diff-comment-input"
-                  placeholder="Add a comment... (Enter to add, Esc to cancel)"
-                  value={blockComment}
-                  onChange={(e) => setBlockComment(e.target.value)}
-                  onKeyDown={handleBlockCommentKeyDown}
-                  rows={2}
-                />
-                <div className="diff-comment-actions">
-                  <button className="btn btn-sm" onClick={() => { setBlockCommentTop(null); setBlockSel(null); setBlockComment(""); }}>
-                    cancel
-                  </button>
-                  <button className="btn btn-primary btn-sm" onClick={handleAddBlockComment} disabled={!blockComment.trim()}>
-                    add comment
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="plan-empty">no plan yet — ask the agent to create one</div>
-      )}
-
-      {pendingComments.length > 0 && (
-        <div className="comment-batch-bar">
-          <div className="comment-batch-summary" onClick={() => setBatchExpanded(!batchExpanded)}>
-            <span className="comment-batch-count">
-              {pendingComments.length} comment{pendingComments.length !== 1 ? "s" : ""}
-            </span>
-            <div className="comment-batch-actions">
-              <span className="comment-batch-expand">{batchExpanded ? "\u25BE" : "\u25B8"}</span>
-              <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); setPendingComments([]); }}>
-                clear
-              </button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={(e) => { e.stopPropagation(); handleSendAll(); }}
-                disabled={batchSending}
-              >
-                {batchSending ? "sending..." : "send all to claude"}
-              </button>
-            </div>
-          </div>
-          {batchExpanded && (
-            <div className="comment-batch-list">
-              {pendingComments.map((c) => (
-                <div key={c.id} className="comment-batch-item">
-                  <div className="comment-batch-item-header">
-                    <span className="comment-batch-item-file">plan</span>
-                    <button
-                      className="comment-batch-item-remove"
-                      onClick={() => setPendingComments(prev => prev.filter(p => p.id !== c.id))}
-                    >
-                      &times;
-                    </button>
-                  </div>
-                  <pre className="comment-batch-item-code">{c.selectedText}</pre>
-                  <div className="comment-batch-item-text">{c.comment}</div>
-                </div>
-              ))}
-            </div>
+    <>
+      <button
+        ref={btnRef}
+        className={`sidebar-iconbtn${open ? " sidebar-iconbtn-on" : ""}`}
+        onClick={toggle}
+        title="More actions"
+        aria-label="More actions"
+        aria-expanded={open}
+      >
+        &#8943;
+      </button>
+      {open && pos && createPortal(
+        <div ref={menuRef} className="sidebar-menu" style={{ top: pos.top, right: pos.right }} role="menu">
+          {groupAction && (
+            <button className="sidebar-menu-item" role="menuitem" onClick={() => { setOpen(false); groupAction.run(); }}>
+              {groupAction.label}
+            </button>
           )}
-        </div>
+          {canSelect && (
+            <button className="sidebar-menu-item" role="menuitem" onClick={() => { setOpen(false); onSelect(); }}>
+              Select multiple…
+            </button>
+          )}
+          {canSelect && canKillAll && <div className="sidebar-menu-sep" />}
+          {canKillAll && (
+            <button className="sidebar-menu-item danger" role="menuitem" onClick={() => { setOpen(false); onKillAll(); }}>
+              Kill all sessions
+            </button>
+          )}
+        </div>,
+        document.body,
       )}
-
-      <div className="plan-input-bar">
-        <textarea
-          className="plan-input"
-          placeholder="Send a message to the agent..."
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleInputKeyDown}
-          rows={2}
-        />
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={handleSend}
-          disabled={!message.trim() || sending}
-        >
-          {sending ? "sending..." : "send"}
-        </button>
-      </div>
-    </div>
+    </>
   );
 }
 
 export function Dashboard() {
   const { sessions, loading, refresh } = useSessions();
+  const { settings: appSettings } = useSettings();
   const { login: authLogin } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -925,6 +572,24 @@ export function Dashboard() {
 
   // Bottom pane (plan/changes/sub-agents) split with terminal
   const [bottomTab, setBottomTab] = useState<"plan" | "changes" | "sub-agents" | "files" | null>(null);
+  // Desktop uses the accordion; the design opens Plan and Changes by default.
+  const [openPanels, setOpenPanels] = useState<Set<string>>(() => new Set(["plan", "changes"]));
+  // Review is a full-window mode in the design, not a panel — review quality
+  // falls off when it is cramped, which is the whole reason it takes over.
+  /**
+   * The design draws every context surface standalone — filling the frame with
+   * no cockpit around it. The accordion carries a summary and an "open"
+   * affordance; the surface itself takes the window.
+   */
+  const [sharedWith, setSharedWith] = useState<{ session: string; files: number } | null>(null);
+  const [mobileApproveDismissed, setMobileApproveDismissed] = useState(false);
+  /* Plain shells in the same worktree, beside the agent. Two at most: past that
+     the panes are too small to run anything in. */
+  const [shells, setShells] = useState<string[]>([]);
+  const [shellBusy, setShellBusy] = useState(false);
+  const [panelSummary, setPanelSummary] = useState<{
+    planDone: number; planTotal: number; plus: number; minus: number; fileCount: number;
+  } | null>(null);
   const [splitRatio, setSplitRatio] = useState(0.5); // 0..1, fraction for terminal
   const [bottomMaximized, setBottomMaximized] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<"rendered" | "raw">("rendered");
@@ -981,12 +646,15 @@ export function Dashboard() {
 
   // First-run setup
   const [showSetup, setShowSetup] = useState(false);
-  const [setupStep, setSetupStep] = useState<"path" | "repos" | "password">("path");
+  const [setupStep, setSetupStep] = useState<"path" | "repos" | "hooks" | "password">("path");
+  const [setupHooks, setSetupHooks] = useState<HookState | null>(null);
+  const [setupHooksBusy, setSetupHooksBusy] = useState(false);
   const [setupPath, setSetupPath] = useState("~/projects");
   const [setupSaving, setSetupSaving] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [discoveredRepos, setDiscoveredRepos] = useState<{ alias: string; path: string; remote?: string; selected: boolean }[]>([]);
   const [setupPassword, setSetupPassword] = useState("");
+  const [setupAccess, setSetupAccess] = useState<"local" | "network">("network");
   const [setupPasswordConfirm, setSetupPasswordConfirm] = useState("");
 
   const [missingTools, setMissingTools] = useState<string[]>([]);
@@ -1021,7 +689,7 @@ export function Dashboard() {
         setDiscoveredRepos(repos.map((r) => ({ ...r, selected: true })));
         setSetupStep("repos");
       } else {
-        setSetupStep("password");
+        setSetupStep("hooks");
       }
     } catch (err: any) {
       setSetupError(err?.message || "Failed to scan repos");
@@ -1036,7 +704,7 @@ export function Dashboard() {
     try {
       const selected = discoveredRepos.filter((r) => r.selected);
       await Promise.all(selected.map((r) => addSettingsRepo({ alias: r.alias, path: r.path, remote: r.remote })));
-      setSetupStep("password");
+      setSetupStep("hooks");
     } catch (err: any) {
       setSetupError(err?.message || "Failed to save repos");
     } finally {
@@ -1066,9 +734,49 @@ export function Dashboard() {
 
   const toolbarRef = useRef<HTMLDivElement>(null);
   const activeSession = searchParams.get("session");
+
+  /**
+   * Session and open surface both live in the URL, so a refresh lands you back
+   * where you were. Each setter preserves the other key — the previous
+   * implementation replaced the whole param set, so switching session silently
+   * dropped whatever surface was open.
+   */
   const setActiveSession = useCallback((name: string | null) => {
-    setSearchParams(name ? { session: name } : {}, { replace: true });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (name) next.set("session", name);
+      else next.delete("session");
+      return next;
+    }, { replace: true });
   }, [setSearchParams]);
+
+  const rawView = searchParams.get("view");
+  const fullSurface: FullSurface | null =
+    rawView && (FULL_SURFACES as readonly string[]).includes(rawView)
+      ? (rawView as FullSurface)
+      : null;
+
+  const setFullSurface = useCallback((id: FullSurface | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set("view", id);
+      else next.delete("view");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  /**
+   * A phone renders surfaces through bottomTab; fullSurface is desktop only.
+   * A ?view= link shared from a desktop would otherwise leave the main area
+   * blank, so translate it once on arrival.
+   */
+  useEffect(() => {
+    if (!isMobile || !fullSurface) return;
+    setBottomTab(fullSurface as typeof bottomTab);
+    setBottomMaximized(true);
+    setMobileShowTerminal(true);
+    setFullSurface(null);
+  }, [isMobile, fullSurface, setFullSurface]);
 
   // Tour mode: active when ?tour=1 is in the URL (demo mode only)
   const [tourActive, setTourActive] = useState(() =>
@@ -1089,7 +797,35 @@ export function Dashboard() {
   // Drag-and-drop state for reordering parent sessions
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(new Set());
-  const [groupBy, setGroupBy] = useState<string>("");
+  const [groupBy, setGroupBy] = useState<string>("__queue__");
+  const [sortBy, setSortBy] = useState<string>("");
+  const [sessionStats, setSessionStats] = useState<Record<string, { count: number; last: number }>>({});
+  const sessionStatsRef = useRef<Record<string, { count: number; last: number }>>({});
+  const statsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Frozen display order for the "recently used" sort. Recency is recorded in
+  // sessionStats on every click, but this ordering only changes at non-disruptive
+  // moments (load, session add/remove, and after you settle on a session) so the
+  // list does not reshuffle each time you click through sessions.
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [recentOrder, setRecentOrder] = useState<string[]>([]);
+  const recentInitedRef = useRef(false);
+  const recentSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionNamesRef = useRef<string[]>([]);
+  const RECENT_SETTLE_MS = 8000;
+  const sortNamesByRecency = useCallback((names: string[], prevOrder: string[]): string[] => {
+    const prevIdx = new Map(prevOrder.map((n, i) => [n, i]));
+    return [...names].sort((a, b) => {
+      const la = sessionStatsRef.current[a]?.last ?? 0;
+      const lb = sessionStatsRef.current[b]?.last ?? 0;
+      if (lb !== la) return lb - la;
+      // Stable tie-break: keep prior frozen position, then name — never depends on
+      // the volatile server/tmux order, so equal-recency rows don't shuffle on poll.
+      const pa = prevIdx.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const pb = prevIdx.get(b) ?? Number.MAX_SAFE_INTEGER;
+      if (pa !== pb) return pa - pb;
+      return a.localeCompare(b);
+    });
+  }, []);
   const [metaPresets, setMetaPresets] = useState<MetaPropertyPreset[]>([]);
   const [editingSession, setEditingSession] = useState<SessionInfo | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -1108,10 +844,18 @@ export function Dashboard() {
   useEffect(() => {
     fetchPreferences().then((p) => {
       if (p.pinnedSessions) setPinnedSessions(new Set(p.pinnedSessions));
-      if (p.groupBy) setGroupBy(p.groupBy);
+      // Sort and grouping are mutually exclusive; a saved sort takes precedence.
+      if (p.sortBy) setSortBy(p.sortBy);
+      else if (p.groupBy) setGroupBy(p.groupBy);
+      else if (!p.sortBy) setGroupBy("__queue__");
       if (p.collapsedGroups) setCollapsedGroups(new Set(p.collapsedGroups));
       if (p.mruSessions) mruList.current = p.mruSessions;
-    });
+      if (p.sessionStats) {
+        sessionStatsRef.current = p.sessionStats;
+        setSessionStats(p.sessionStats);
+      }
+      setPrefsLoaded(true);
+    }).catch(() => setPrefsLoaded(true));
     fetchMetaPropertyPresets().then(setMetaPresets);
     const handler = () => fetchMetaPropertyPresets().then(setMetaPresets);
     window.addEventListener("agentdock-meta-presets-changed", handler);
@@ -1192,7 +936,64 @@ export function Dashboard() {
     mruSaveTimer.current = setTimeout(() => {
       updatePreferences({ mruSessions: mruList.current });
     }, 1000);
+
+    // Usage stats drive the "recently/frequently used" sort. They change ONLY
+    // here (on a deliberate session switch), never on the status poll, so the
+    // sorted list stays stable between navigations instead of flickering.
+    const cur = sessionStatsRef.current[activeSession] || { count: 0, last: 0 };
+    const nextStats = {
+      ...sessionStatsRef.current,
+      [activeSession]: { count: cur.count + 1, last: Date.now() },
+    };
+    sessionStatsRef.current = nextStats;
+    setSessionStats(nextStats);
+    if (statsSaveTimer.current) clearTimeout(statsSaveTimer.current);
+    statsSaveTimer.current = setTimeout(() => {
+      updatePreferences({ sessionStats: sessionStatsRef.current });
+    }, 1000);
+
+    // "Recently used" freeze: don't reorder the list on this click. Only re-sort
+    // once the user has settled on a session (no further switches for a while).
+    // Each switch resets the timer, so browsing through sessions never reshuffles.
+    if (recentSettleTimer.current) clearTimeout(recentSettleTimer.current);
+    recentSettleTimer.current = setTimeout(() => {
+      setRecentOrder((prev) => sortNamesByRecency(sessionNamesRef.current, prev));
+    }, RECENT_SETTLE_MS);
   }, [activeSession]);
+
+  // Keep a live snapshot of session names for the recency helpers (avoids stale closures)
+  useEffect(() => {
+    sessionNamesRef.current = sessions.map((s) => s.name);
+  }, [sessions]);
+
+  // Initialise the frozen recency order once prefs + sessions are available, then
+  // reconcile it on add/remove: new sessions go to the top, removed ones drop out,
+  // existing sessions keep their frozen positions (no reshuffle).
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    const names = sessions.map((s) => s.name);
+    if (names.length === 0) return;
+    setRecentOrder((prev) => {
+      if (!recentInitedRef.current) {
+        recentInitedRef.current = true;
+        return sortNamesByRecency(names, []);
+      }
+      const nameSet = new Set(names);
+      const prevSet = new Set(prev);
+      const kept = prev.filter((n) => nameSet.has(n));
+      const added = names.filter((n) => !prevSet.has(n));
+      if (added.length === 0 && kept.length === prev.length) return prev;
+      return [...added, ...kept];
+    });
+  }, [prefsLoaded, sessions]);
+
+  // Refresh the recency order when the user switches INTO "recently used" so it
+  // reflects current activity immediately (a deliberate mode change, not a click).
+  useEffect(() => {
+    if (sortBy === "recent" && recentInitedRef.current) {
+      setRecentOrder((prev) => sortNamesByRecency(sessionNamesRef.current, prev));
+    }
+  }, [sortBy, sortNamesByRecency]);
 
   // Close bottom pane when switching sessions
   useEffect(() => {
@@ -1235,6 +1036,8 @@ export function Dashboard() {
   useEffect(() => () => {
     if (mruDismissTimer.current) clearTimeout(mruDismissTimer.current);
     if (mruSaveTimer.current) clearTimeout(mruSaveTimer.current);
+    if (statsSaveTimer.current) clearTimeout(statsSaveTimer.current);
+    if (recentSettleTimer.current) clearTimeout(recentSettleTimer.current);
   }, []);
 
   // Build ordered session list: pinned first, then parents, then their children indented below
@@ -1248,7 +1051,31 @@ export function Dashboard() {
     const parents = sessions.filter((s) => !childNames.has(s.name));
     const pinnedParents = parents.filter((s) => pinnedSessions.has(s.name));
     const unpinnedParents = parents.filter((s) => !pinnedSessions.has(s.name));
-    const sortedParents = [...pinnedParents, ...unpinnedParents];
+
+    // Sort by usage when requested. Array.sort is stable, so never-used sessions
+    // (missing stats) keep their existing server/manual order — no flip-flopping.
+    const byUsage = (list: SessionInfo[]): SessionInfo[] => {
+      if (sortBy === "recent") {
+        // Use the frozen recency order (recentOrder), NOT live sessionStats, so
+        // clicking a session doesn't reorder the list — see the settle logic above.
+        const idx = new Map(recentOrder.map((n, i) => [n, i]));
+        return [...list].sort(
+          (a, b) =>
+            (idx.get(a.name) ?? Number.MAX_SAFE_INTEGER) -
+            (idx.get(b.name) ?? Number.MAX_SAFE_INTEGER),
+        );
+      }
+      if (sortBy === "frequent") {
+        return [...list].sort((a, b) => {
+          const ca = sessionStats[a.name]?.count ?? 0;
+          const cb = sessionStats[b.name]?.count ?? 0;
+          if (cb !== ca) return cb - ca;
+          return (sessionStats[b.name]?.last ?? 0) - (sessionStats[a.name]?.last ?? 0);
+        });
+      }
+      return list;
+    };
+    const sortedParents = [...byUsage(pinnedParents), ...byUsage(unpinnedParents)];
 
     const result: { session: SessionInfo; isChild: boolean; isLastChild: boolean; childrenSummary?: { total: number; working: number; done: number; error: number }; childrenExpanded: boolean; parentIdx: number }[] = [];
     let pIdx = 0;
@@ -1284,7 +1111,7 @@ export function Dashboard() {
       }
     }
     return result;
-  }, [sessions, collapsedParents, pinnedSessions]);
+  }, [sessions, collapsedParents, pinnedSessions, sortBy, sessionStats, recentOrder]);
 
   const filteredSessions = useMemo(() => {
     if (!sessionSearch.trim()) return orderedSessions;
@@ -1308,12 +1135,15 @@ export function Dashboard() {
   const groupedSessions = useMemo(() => {
     if (!groupBy) return null;
     const isStatusGroup = groupBy === "__status__";
+    const isQueue = groupBy === "__queue__";
     const groups: Record<string, typeof filteredSessions> = {};
     const ungrouped: typeof filteredSessions = [];
     for (const entry of filteredSessions) {
       if (entry.isChild) continue;
       let value: string;
-      if (isStatusGroup) {
+      if (isQueue) {
+        value = queueBucket(entry.session);
+      } else if (isStatusGroup) {
         value = getDisplayStatus(entry.session) || entry.session.status || "unknown";
       } else {
         value = entry.session.meta?.[groupBy] || "";
@@ -1331,6 +1161,14 @@ export function Dashboard() {
       const target = value ? groups[value] : ungrouped;
       target!.push(...childEntries);
     }
+    // The queue has one correct order, so it is fixed rather than sorted.
+    if (isQueue) {
+      const sorted: Record<string, typeof filteredSessions> = {};
+      for (const b of QUEUE_BUCKETS) {
+        if (groups[b.id] && groups[b.id]!.length) sorted[b.id] = groups[b.id]!;
+      }
+      return { groups: sorted, ungrouped: [] };
+    }
     // For status grouping, order groups sensibly
     if (isStatusGroup) {
       const order = ["working", "background", "input", "error", "waiting", "done", "unknown", "stopped"];
@@ -1346,6 +1184,28 @@ export function Dashboard() {
     }
     return { groups, ungrouped };
   }, [filteredSessions, groupBy]);
+
+  /* The phone's queue orders by what needs you, which is exactly what
+     __queue__ grouping means — so only a different grouping has anything to
+     add there. Without this the grouping control on the phone changed the
+     desktop's list and nothing the reader could see. */
+  const mobileGrouping = useMemo(() => {
+    if (!groupBy || groupBy === "__queue__" || !groupedSessions) return null;
+    const byName = new Map<string, string>();
+    const order: string[] = [];
+    for (const [value, entries] of Object.entries(groupedSessions.groups)) {
+      const label = groupBy === "__status__"
+        ? value.charAt(0).toUpperCase() + value.slice(1)
+        : value;
+      if (!order.includes(label)) order.push(label);
+      for (const e of entries) byName.set(e.session.name, label);
+    }
+    if (groupedSessions.ungrouped.length > 0) {
+      order.push("No value");
+      for (const e of groupedSessions.ungrouped) byName.set(e.session.name, "No value");
+    }
+    return order.length > 0 ? { byName, order } : null;
+  }, [groupBy, groupedSessions]);
 
   // Check if active session has children or is a child (for sub-agents tab & breadcrumb)
   const activeSessionInfo = sessions.find((s) => s.name === activeSession);
@@ -1494,7 +1354,11 @@ export function Dashboard() {
   };
 
   const handleRestoreSession = useCallback(async (name: string) => {
-    await restoreSession(name);
+    try {
+      await restoreSession(name);
+    } catch (err) {
+      console.error("Failed to restore session:", err);
+    }
     refresh();
   }, [refresh]);
 
@@ -1525,10 +1389,18 @@ export function Dashboard() {
       if (activeSession) setActiveSession(null);
       return;
     }
-    const liveSessions = sessions.filter((s) => s.status !== "stopped");
-    const candidates = liveSessions.length > 0 ? liveSessions : sessions;
-    if (!activeSession || !sessions.find((s) => s.name === activeSession)) {
-      setActiveSession(candidates[0].name);
+    // Only auto-open something that actually wants attention. When nothing is
+    // blocked, reviewable or running, leaving the selection empty is what lets
+    // the quiet state show — the design's point being that "nothing needs you"
+    // deserves saying out loud rather than dropping you into an idle terminal.
+    const live = sessions.filter((s) => {
+      const b = queueBucket(s);
+      return b === "blocked" || b === "review" || b === "working";
+    });
+    const stillThere = activeSession && sessions.find((s) => s.name === activeSession);
+    if (!stillThere) {
+      if (live.length > 0) setActiveSession(live[0].name);
+      else if (activeSession) setActiveSession(null);
     }
   }, [sessions, loading, activeSession, setActiveSession]);
 
@@ -1556,6 +1428,275 @@ export function Dashboard() {
     setGoBack?.(() => setMobileShowTerminal(false));
   }, [setGoBack]);
 
+  // Notify across the whole queue, not just the session on screen.
+  useQueueNotifications(sessions, activeSession, {
+    enabled: appSettings.notificationsEnabled,
+    blocked: appSettings.notifyBlocked,
+    review: appSettings.notifyReview,
+    quietEnabled: appSettings.notifyQuietEnabled,
+    quietStart: appSettings.notifyQuietStart,
+    quietEnd: appSettings.notifyQuietEnd,
+  });
+
+  // Read hook state when the wizard reaches that step.
+  useEffect(() => {
+    if (setupStep !== "hooks") return;
+    fetchHookState().then(setSetupHooks).catch(() => setSetupHooks(null));
+  }, [setupStep]);
+
+  const handleSetupInstallHooks = async () => {
+    setSetupHooksBusy(true);
+    try {
+      const r = await installHooks();
+      if (r.ok) setSetupHooks(r);
+    } finally {
+      setSetupHooksBusy(false);
+    }
+  };
+
+  /* Shells outlive a reload, so which ones exist is the server's answer, asked
+     again whenever the session changes. */
+  useEffect(() => {
+    if (!activeSession) { setShells([]); return; }
+    let alive = true;
+    setShells([]);
+    fetchShells(activeSession).then((s) => { if (alive) setShells(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [activeSession]);
+
+  const addShell = useCallback(async () => {
+    if (!activeSession || shellBusy || shells.length >= 2) return;
+    setShellBusy(true);
+    try {
+      setShells(await openShell(activeSession));
+    } catch {
+      /* Nothing to say here that the missing pane does not say already. */
+    } finally {
+      setShellBusy(false);
+    }
+  }, [activeSession, shellBusy, shells.length]);
+
+  const dropShell = useCallback(async (shell: string) => {
+    if (!activeSession) return;
+    const index = Number(shell.slice(shell.lastIndexOf("-") + 1));
+    setShells((prev) => prev.filter((s) => s !== shell));
+    try {
+      setShells(await closeShell(activeSession, index));
+    } catch {
+      /* Already gone. */
+    }
+  }, [activeSession]);
+
+  // One call feeds every panel badge, so they cannot disagree with each other.
+  useEffect(() => {
+    if (!activeSession || activeSessionPaths.length === 0) { setPanelSummary(null); return; }
+    let alive = true;
+    /* Cleared first: this effect only re-runs when the session or its paths
+       change, so anything still on screen belongs to the session you just left. */
+    setPanelSummary(null);
+    fetchPanelSummary(activeSession, activeSessionPaths)
+      .then((t) => {
+        if (!alive) return;
+        setPanelSummary({
+          planDone: t.plan.done,
+          planTotal: t.plan.total,
+          plus: t.diff.plus,
+          minus: t.diff.minus,
+          fileCount: t.diff.files,
+        });
+      })
+      .catch(() => { if (alive) setPanelSummary(null); });
+    return () => { alive = false; };
+  }, [activeSession, activeSessionPaths.join("|")]);
+
+  /**
+   * Jump to whatever costs you most right now. Deciding what to look at next
+   * is itself part of the coordination cost the queue exists to reduce, so it
+   * is one keystroke rather than a scan.
+   */
+  const goNext = useCallback(() => {
+    const order = ["blocked", "review", "working", "idle", "stale"] as const;
+    const live = sessions.filter((x) => !x.parentSession);
+    for (const bucket of order) {
+      const candidates = live.filter((x) => queueBucket(x) === bucket);
+      if (candidates.length === 0) continue;
+      const at = candidates.findIndex((x) => x.name === activeSession);
+      const target = candidates[(at + 1) % candidates.length];
+      if (target) {
+        setActiveSession(target.name);
+        setMobileShowTerminal(true);
+      }
+      return;
+    }
+  }, [sessions, activeSession, setActiveSession]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); goNext(); }
+      if (e.key === "Escape") setFullSurface(null);
+    };
+    const onEvent = () => goNext();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("agentdock-queue-next", onEvent);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("agentdock-queue-next", onEvent);
+    };
+  }, [goNext]);
+
+  useEffect(() => {
+    if (!activeSession) { setSharedWith(null); return; }
+    let alive = true;
+    const short = activeSession.replace(/^claude-/, "");
+    fetchConflicts()
+      .then((r) => {
+        if (!alive) return;
+        const hit = r.conflicts.find((c) => c.sessions.includes(short));
+        setSharedWith(hit ? { session: hit.sessions.find((x) => x !== short) ?? hit.sessions[1], files: hit.files.length } : null);
+      })
+      .catch(() => alive && setSharedWith(null));
+    return () => { alive = false; };
+  }, [activeSession]);
+
+  const togglePanel = useCallback((id: string) => {
+    setOpenPanels((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** A count only where it means something you would act on. */
+  // What is waiting on you, so the Sessions button carries the same kind of
+  // badge the surface buttons do.
+  /**
+   * Collapse or expand every group in the current grouping.
+   *
+   * Both the label and the action key off *this* grouping's keys.
+   * collapsedGroups is shared across groupings, so leftovers from another one —
+   * queue buckets while you are grouped by status, say — used to make the label
+   * read "Expand all groups" over groups that were plainly expanded, and the
+   * click then did the opposite of what it said.
+   */
+  /**
+   * The same control in two places. On a phone the sidebar sits behind the
+   * queue overlay, so the sidebar copy is unreachable — grouping could not be
+   * changed there at all. Defined once so the option list cannot drift.
+   */
+  const modeSelect = (className: string) => (
+    <select
+      className={className}
+      data-tutorial="group-by-select"
+      title="Sort or group sessions"
+      value={sortBy || groupBy}
+      onChange={(e) => {
+        const v = e.target.value;
+        if (v === "recent" || v === "frequent") {
+          setSortBy(v);
+          setGroupBy("");
+          updatePreferences({ sortBy: v, groupBy: "" });
+        } else {
+          setGroupBy(v);
+          setSortBy("");
+          updatePreferences({ groupBy: v, sortBy: "" });
+        }
+      }}
+    >
+      <option value="__queue__">Queue</option>
+      <option value="">Flat list</option>
+      <optgroup label="Sort by">
+        <option value="recent">Recently used</option>
+        <option value="frequent">Most used</option>
+      </optgroup>
+      <optgroup label="Group by">
+        <option value="__status__">Status</option>
+        {metaPresets.map((p) => (
+          <option key={p.key} value={p.key}>{p.label}</option>
+        ))}
+      </optgroup>
+    </select>
+  );
+
+  const groupCollapseAction = useMemo(() => {
+    if (!groupBy || !groupedSessions) return undefined;
+    const keys = Object.keys(groupedSessions.groups);
+    if (groupedSessions.ungrouped.length > 0) keys.push("__ungrouped__");
+    if (keys.length === 0) return undefined;
+    const allCollapsed = keys.every((k) => collapsedGroups.has(k));
+    return {
+      label: allCollapsed ? "Expand all groups" : "Collapse all groups",
+      run: () => {
+        const next = allCollapsed
+          ? new Set([...collapsedGroups].filter((k) => !keys.includes(k)))
+          : new Set([...collapsedGroups, ...keys]);
+        setCollapsedGroups(next);
+        updatePreferences({ collapsedGroups: [...next] });
+      },
+    };
+  }, [groupBy, groupedSessions, collapsedGroups]);
+
+  const sessionsBadge = useMemo(
+    () => sessions.filter((x) => !x.parentSession && queueBucket(x) === "blocked").length,
+    [sessions],
+  );
+
+  const railBadge = useCallback((id: FullSurface): string => {
+    if (id === "sub-agents") {
+      const kids = activeSessionInfo?.children?.length ?? 0;
+      return kids > 0 ? String(kids) : "";
+    }
+    if (!panelSummary) return "";
+    if (id === "changes") return panelSummary.fileCount > 0 ? String(panelSummary.fileCount) : "";
+    if (id === "plan") {
+      const left = panelSummary.planTotal - panelSummary.planDone;
+      return panelSummary.planTotal > 0 && left > 0 ? String(left) : "";
+    }
+    return "";
+  }, [panelSummary, activeSessionInfo]);
+
+  const panelSummaryLine = useCallback((id: string): string => {
+    const kids = activeSessionInfo?.children?.length ?? 0;
+    if (id === "sub-agents") {
+      if (kids === 0) return "This agent has not delegated anything.";
+      const blocked = (activeSessionInfo?.children ?? [])
+        .map((c) => sessions.find((x) => x.name === c))
+        .filter((c) => c && queueBucket(c) === "blocked").length;
+      return blocked > 0
+        ? `${kids} sub-agent${kids === 1 ? "" : "s"}, ${blocked} waiting on you.`
+        : `${kids} sub-agent${kids === 1 ? "" : "s"} running under this session.`;
+    }
+    if (!panelSummary) return "Reading the worktree\u2026";
+    if (id === "plan") {
+      if (panelSummary.planTotal === 0) return "No plan file for this session yet.";
+      const left = panelSummary.planTotal - panelSummary.planDone;
+      return `${panelSummary.planDone} of ${panelSummary.planTotal} steps done, ${left} still open.`;
+    }
+    if (id === "changes") {
+      if (panelSummary.fileCount === 0) return "Nothing has changed in this worktree yet.";
+      return `${panelSummary.fileCount} file${panelSummary.fileCount === 1 ? "" : "s"} changed, +${panelSummary.plus} \u2212${panelSummary.minus}.`;
+    }
+    if (id === "files") {
+      return panelSummary.fileCount > 0
+        ? `${panelSummary.fileCount} changed file${panelSummary.fileCount === 1 ? "" : "s"} in this tree.`
+        : "Browse the worktree.";
+    }
+    return "";
+  }, [panelSummary, activeSessionInfo, sessions]);
+
+  const panelBadge = useCallback((id: string): string => {
+    const kids = activeSessionInfo?.children?.length ?? 0;
+    if (id === "sub-agents") return kids > 0 ? String(kids) : "";
+    if (!panelSummary) return "";
+    if (id === "plan") return panelSummary.planTotal > 0 ? `${panelSummary.planDone} / ${panelSummary.planTotal}` : "";
+    if (id === "changes") return panelSummary.plus + panelSummary.minus > 0 ? `+${panelSummary.plus} \u2212${panelSummary.minus}` : "";
+    return "";
+  }, [panelSummary, activeSessionInfo]);
+
+  useEffect(() => { setMobileApproveDismissed(false); }, [activeSession]);
+
   const mobileInSession = mobileShowTerminal && !!activeSession;
 
   // Sync session title for mobile header
@@ -1574,44 +1715,47 @@ export function Dashboard() {
     return () => { document.body.classList.remove("mobile-kb-open"); };
   }, [kbOpen]);
 
+  /* The header's height and the nav's height were both hard-coded guesses —
+     48px and 52px — and both were wrong on a phone: the nav carries the home
+     indicator inset on top of its content, so the 52px body padding left the
+     terminal's toolbar buried under it. Measure them and publish the real
+     numbers instead. */
+  useEffect(() => {
+    const root = document.documentElement;
+    const measure = () => {
+      const header = document.querySelector(".header") as HTMLElement | null;
+      const nav = document.querySelector(".mobile-bottom-nav") as HTMLElement | null;
+      root.style.setProperty("--app-header-b", `${Math.round(header?.getBoundingClientRect().bottom ?? 48)}px`);
+      root.style.setProperty("--mobile-nav-h", `${Math.round(nav?.getBoundingClientRect().height ?? 0)}px`);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    const header = document.querySelector(".header");
+    const nav = document.querySelector(".mobile-bottom-nav");
+    if (header) ro.observe(header);
+    if (nav) ro.observe(nav);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, [isMobile, mobileInSession, kbOpen]);
+
   return (
     <>
     <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      {(isMobile || !fullSurface) && (
       <div className="split-sidebar">
         <div className="sidebar-header">
-          <span className="sidebar-title">sessions</span>
-          <div className="sidebar-actions">
-            {selectionMode ? (
-              <button className="btn btn-sm" onClick={handleExitSelectionMode}>cancel</button>
-            ) : (
-              <>
-                {sessions.length > 1 && (
-                  <button className="sidebar-select-link" onClick={() => setSelectionMode(true)}>select</button>
-                )}
-                {sessions.length > 0 && (
-                  <button className="btn btn-stop btn-sm" onClick={handleStopAll}>kill --all</button>
-                )}
-                <button className="btn btn-primary btn-sm" onClick={() => navigate("/create")} data-tutorial="new-session-btn">+ new</button>
-              </>
-            )}
-            <button
-              className="btn btn-sm sidebar-collapse-btn"
-              onClick={() => setSidebarCollapsed(true)}
-              title="Collapse sidebar"
-            >
-              &laquo;
-            </button>
-          </div>
-        </div>
-
-        <div className="session-toolbar-row">
-        {sessions.length > 0 && (
-          <div className="session-search-wrap">
+          <div className="sidebar-search">
+            <Icon name="search" size={13} />
             <input
               ref={sessionSearchRef}
               type="text"
-              className="session-search"
-              placeholder="Search sessions... (⌘K)"
+              className="sidebar-search-input"
+              placeholder="Search sessions…"
               value={sessionSearch}
               onChange={(e) => setSessionSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -1621,52 +1765,56 @@ export function Dashboard() {
                 }
               }}
             />
+            {sessionSearch ? (
+              <button className="sidebar-search-clear" onClick={() => setSessionSearch("")} aria-label="Clear search">&times;</button>
+            ) : (
+              <kbd className="sidebar-search-kbd">&#8984;K</kbd>
+            )}
           </div>
-        )}
-        <div className="session-group-by-wrap">
-          <span className="session-group-by-icon">&#x25A4;</span>
-          <select
-            className="session-group-by-select"
-            data-tutorial="group-by-select"
-            value={groupBy}
-            onChange={(e) => {
-              setGroupBy(e.target.value);
-              updatePreferences({ groupBy: e.target.value });
-            }}
+          <button
+            className="sidebar-iconbtn"
+            onClick={() => setSidebarCollapsed(true)}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
           >
-            <option value="">No grouping</option>
-            <option value="__status__">Status</option>
-            {metaPresets.map((p) => (
-              <option key={p.key} value={p.key}>{p.label}</option>
-            ))}
-          </select>
-          {groupBy && groupedSessions && (
-            <button
-              className="session-group-collapse-all"
-              onClick={() => {
-                const allKeys = [...Object.keys(groupedSessions.groups)];
-                if (groupedSessions.ungrouped.length > 0) allKeys.push("__ungrouped__");
-                const allCollapsed = allKeys.every(k => collapsedGroups.has(k));
-                const next = allCollapsed ? new Set<string>() : new Set(allKeys);
-                setCollapsedGroups(next);
-                updatePreferences({ collapsedGroups: [...next] });
-              }}
-              title={collapsedGroups.size > 0 ? "Expand all" : "Collapse all"}
-            >
-              {collapsedGroups.size > 0 ? "\u25B8\u25B8" : "\u25BE\u25BE"}
-            </button>
-          )}
+            <Icon name="chevl" size={14} />
+          </button>
         </div>
+
+        <div className="sidebar-controls">
+          {selectionMode ? (
+            <>
+              <span className="sidebar-count">{selectedSessions.size} selected</span>
+              <span className="sidebar-controls-spacer" />
+              <button className="sidebar-textbtn" onClick={handleExitSelectionMode}>cancel</button>
+            </>
+          ) : (
+            <>
+              {modeSelect("sidebar-mode")}
+
+              <span className="sidebar-controls-spacer" />
+              <span className="sidebar-count">
+                {sessions.length} session{sessions.length === 1 ? "" : "s"}
+              </span>
+              <SidebarMenu
+                canSelect={sessions.length > 1}
+                canKillAll={sessions.length > 0}
+                onSelect={() => setSelectionMode(true)}
+                onKillAll={handleStopAll}
+                groupAction={groupCollapseAction}
+              />
+            </>
+          )}
         </div>
         {missingTools.length > 0 && !missingToolsDismissed && (
           <div className="missing-tools-banner">
-            <span className="missing-tools-icon">⚠</span>
+            <span className="missing-tools-icon"><Icon name="alert" size={14} /></span>
             <span className="missing-tools-text">
               Required tool{missingTools.length > 1 ? "s" : ""} not installed:{" "}
               <strong>{missingTools.join(", ")}</strong>.
               {" "}Check Settings → Health for install instructions.
             </span>
-            <button className="missing-tools-dismiss" onClick={() => setMissingToolsDismissed(true)}>✕</button>
+            <button className="missing-tools-dismiss" onClick={() => setMissingToolsDismissed(true)}><Icon name="close" size={13} /></button>
           </div>
         )}
         <div className="session-list" data-tutorial="session-list">
@@ -1685,9 +1833,9 @@ export function Dashboard() {
               {Object.entries(groupedSessions.groups).map(([value, entries]) => (
                 <div
                   key={value}
-                  className={`session-group ${groupBy !== "__status__" && dragIdx !== null ? "session-group-drop-target" : ""}`}
-                  onDragOver={groupBy !== "__status__" ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
-                  onDrop={groupBy !== "__status__" ? (e) => {
+                  className={`session-group ${groupBy !== "__status__" && groupBy !== "__queue__" && dragIdx !== null ? "session-group-drop-target" : ""}`}
+                  onDragOver={groupBy !== "__status__" && groupBy !== "__queue__" ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } : undefined}
+                  onDrop={groupBy !== "__status__" && groupBy !== "__queue__" ? (e) => {
                     e.preventDefault();
                     const sessionName = e.dataTransfer.getData("text/plain");
                     if (sessionName) {
@@ -1700,10 +1848,19 @@ export function Dashboard() {
                     className="session-group-header"
                     onClick={() => toggleGroup(value)}
                   >
-                    <span className="session-group-chevron">{collapsedGroups.has(value) ? "\u25B8" : "\u25BE"}</span>
-                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""}`}>{value}</span>
+                    <span className="session-group-chevron"><Icon name={collapsedGroups.has(value) ? "chevr" : "chev"} size={12} /></span>
+                    <span className={`session-group-label ${groupBy === "__status__" ? `status-${value}` : ""} ${groupBy === "__queue__" ? `queue-${value}` : ""}`}>
+                      {groupBy === "__queue__"
+                        ? (QUEUE_BUCKETS.find((b) => b.id === value)?.label ?? value)
+                        : value}
+                    </span>
                     <span className="session-group-count">{entries.filter(e => !e.isChild).length}</span>
-                    {groupBy !== "__status__" && (
+                    {groupBy === "__queue__" && (
+                      <span className="session-group-cost">
+                        {QUEUE_BUCKETS.find((b) => b.id === value)?.cost}
+                      </span>
+                    )}
+                    {groupBy !== "__status__" && groupBy !== "__queue__" && (
                       <button
                         className="session-group-add"
                         onClick={(e) => { e.stopPropagation(); navigate(`/create?${groupBy}=${encodeURIComponent(value)}`); }}
@@ -1732,7 +1889,7 @@ export function Dashboard() {
                       onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
-                      onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                      onEditProps={() => setEditingSession(session)}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
@@ -1761,7 +1918,7 @@ export function Dashboard() {
                     className="session-group-header session-group-ungrouped"
                     onClick={() => toggleGroup("__ungrouped__")}
                   >
-                    <span className="session-group-chevron">{collapsedGroups.has("__ungrouped__") ? "\u25B8" : "\u25BE"}</span>
+                    <span className="session-group-chevron"><Icon name={collapsedGroups.has("__ungrouped__") ? "chevr" : "chev"} size={12} /></span>
                     <span className="session-group-label">Ungrouped</span>
                     <span className="session-group-count">{groupedSessions.ungrouped.filter(e => !e.isChild).length}</span>
                   </div>
@@ -1786,7 +1943,7 @@ export function Dashboard() {
                       onDragStart={!isChild ? (e: React.DragEvent) => { e.dataTransfer.setData("text/plain", session.name); setDragIdx(parentIdx); } : undefined}
                       onDragEnd={!isChild ? handleDragEnd : undefined}
                       isDragging={!isChild && dragIdx === parentIdx}
-                      onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                      onEditProps={() => setEditingSession(session)}
                       onPinToHeader={() => handlePinToHeader(session)}
                       onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                       onForkSession={session.status !== "stopped" ? () => handleForkSession(session) : undefined}
@@ -1817,14 +1974,14 @@ export function Dashboard() {
                   setMobileShowTerminal(true);
                 }}
                 onStopped={handleStopped}
-                draggable={!isChild}
-                onDragStart={!isChild ? handleDragStart(parentIdx) : undefined}
-                onDragOver={!isChild ? handleDragOver(parentIdx) : undefined}
-                onDragEnd={!isChild ? handleDragEnd : undefined}
-                onDrop={!isChild ? handleDrop(parentIdx) : undefined}
-                isDragging={!isChild && dragIdx === parentIdx}
-                isDragOver={!isChild && dragOverIdx === parentIdx && dragIdx !== parentIdx}
-                onEditProps={metaPresets.length > 0 ? () => setEditingSession(session) : undefined}
+                draggable={!isChild && sortBy === ""}
+                onDragStart={!isChild && sortBy === "" ? handleDragStart(parentIdx) : undefined}
+                onDragOver={!isChild && sortBy === "" ? handleDragOver(parentIdx) : undefined}
+                onDragEnd={!isChild && sortBy === "" ? handleDragEnd : undefined}
+                onDrop={!isChild && sortBy === "" ? handleDrop(parentIdx) : undefined}
+                isDragging={!isChild && sortBy === "" && dragIdx === parentIdx}
+                isDragOver={!isChild && sortBy === "" && dragOverIdx === parentIdx && dragIdx !== parentIdx}
+                onEditProps={() => setEditingSession(session)}
                 onPinToHeader={() => handlePinToHeader(session)}
                 onRestore={session.status === "stopped" ? () => handleRestoreSession(session.name) : undefined}
                 dataTutorial={getDemoTutorialAttr(session)}
@@ -1853,18 +2010,22 @@ export function Dashboard() {
           </div>
         )}
       </div>
+      )}
 
       <div className="split-main">
         {activeSession ? (
           <>
-            <div className="main-tabs">
+            {/* The surface carries its own identity strip, and the rail is
+                always on screen, so this bar would be a second header offering
+                a jump the rail already offers. */}
+            <div className="main-tabs" hidden={!isMobile && !!fullSurface}>
               {sidebarCollapsed && (
                 <button
                   className="main-tab sidebar-expand-btn"
                   onClick={() => setSidebarCollapsed(false)}
                   title="Expand sidebar"
                 >
-                  &raquo;
+                  <Icon name="chevr" size={14} />
                 </button>
               )}
               <button
@@ -1887,156 +2048,203 @@ export function Dashboard() {
                   <span className="breadcrumb-child">{activeSessionInfo?.displayName}</span>
                 </button>
               )}
+              {!isMobile && activeSessionInfo?.status !== "stopped" && (
+                <button
+                  className="main-tab review-enter"
+                  onClick={() => setFullSurface("changes")}
+                  title="Review this session's changes in a full window"
+                >
+                  <Icon name="diff" size={14} />
+                  review
+                  {/* Was the count of files no plan step accounted for. That was
+                      the Coverage tab's number and it went with it; how many
+                      files there are to read is the honest one for a button
+                      that opens the diff. */}
+                  {panelSummary && panelSummary.fileCount > 0 && (
+                    <span className="review-enter-badge">{panelSummary.fileCount}</span>
+                  )}
+                </button>
+              )}
               <div className="main-tabs-toolbar" ref={toolbarRef} />
             </div>
             <div className="main-content main-content-split" ref={splitContainerRef}>
+              {/* One surface at a time in the main area, chosen from the rail.
+                  There is no second row of tabs: the rail stays visible, so the
+                  thing you would switch with is already on screen. */}
+              {!isMobile && fullSurface && activeSession ? (
+                <div className="surface-pane">
+                  {/* The way out, then identity. The rail can close a surface by
+                      pressing its icon again, and the session name here has always
+                      been a button, but neither looks like the way back — so a
+                      reader who wanted the terminal reloaded the page. */}
+                  <div className="surface-head">
+                    <button
+                      className="surface-back"
+                      onClick={() => setFullSurface(null)}
+                      title="Back to the terminal"
+                    >
+                      <Icon name="chevl" size={13} />
+                      <span>terminal</span>
+                    </button>
+                    <span className="surface-head-sep">/</span>
+                    <span className="surface-head-name">{RAIL.find((r) => r.id === fullSurface)?.label ?? fullSurface}</span>
+                    <span className="surface-head-sep">/</span>
+                    <button
+                      className="surface-head-session"
+                      onClick={() => setFullSurface(null)}
+                      title="Back to the terminal"
+                    >
+                      {activeSessionInfo?.displayName ?? activeSession}
+                    </button>
+                    <span className="surface-head-spacer" />
+                    <span className="surface-head-path">{activeSessionPaths[0] ?? ""}</span>
+                  </div>
+                  {fullSurface === "changes" ? (
+                    <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setFullSurface(null)} />
+                  ) : fullSurface === "plan" ? (
+                    <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+                  ) : fullSurface === "files" ? (
+                    <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setFullSurface(null)} />
+                  ) : (
+                    <SubAgentsView
+                      key={activeSession}
+                      parentSession={activeSession}
+                      sessions={sessions}
+                      onSelectChild={(c) => { setActiveSession(c); setFullSurface(null); }}
+                      onRefresh={refresh}
+                    />
+                  )}
+                </div>
+              ) : (
               <div className="split-terminal-pane" data-tutorial="terminal-pane" style={bottomTab ? { height: bottomMaximized ? "0%" : `${splitRatio * 100}%` } : undefined}>
                 {activeSessionInfo?.status === "stopped" ? (
                   <div className="stopped-session-placeholder">
-                    <div className="stopped-session-icon">◎</div>
+                    <div className="stopped-session-icon"><Icon name="clock" size={40} strokeWidth={1.4} /></div>
                     <div className="stopped-session-title">{activeSessionInfo.displayName}</div>
                     <div className="stopped-session-desc">This session stopped (e.g. after a reboot).<br />Restore it to resume with full conversation history.</div>
                     <button
                       className="btn btn-primary stopped-session-restore-btn"
                       onClick={() => handleRestoreSession(activeSession)}
                     >
-                      ↺ Restore Session
+                      <><Icon name="refresh" size={15} /> Restore Session</>
                     </button>
                   </div>
                 ) : (!isMobile || mobileShowTerminal) && (
-                  <TerminalView
-                    key={activeSession}
-                    sessionName={activeSession}
-                    agentType={sessions.find((s) => s.name === activeSession)?.agentType}
-                    onClosed={handleSessionClosed}
-                    onAgentSwitched={refresh}
-                    toolbarPortal={toolbarRef}
-                    onSwipeBack={() => setMobileShowTerminal(false)}
-                    onKeyboardVisibilityChange={setKbOpen}
-                    isActive={!bottomTab}
-                  />
-                )}
-              </div>
-              <div className={`split-bottom-bar${bottomTab ? " split-bottom-bar-open" : ""}`}>
-                <div
-                  className="split-resize-handle"
-                  onMouseDown={handleSplitMouseDown}
-                />
-                <div className="split-bottom-tabs">
-                  <div className="plan-tab-wrap" ref={planMenuRef}>
-                    <button
-                      className={`main-tab ${bottomTab === "plan" ? "main-tab-active" : ""}`}
-                      data-tutorial="tab-plan"
-                      onClick={() => setBottomTab(bottomTab === "plan" ? null : "plan")}
-                    >
-                      plan
-                    </button>
-                    {bottomTab === "plan" && (
-                      <button
-                        className="plan-tab-menu-btn"
-                        onClick={() => setPlanMenuOpen(!planMenuOpen)}
-                      >
-                        &#x22EE;
-                      </button>
-                    )}
-                    {planMenuOpen && (
-                      <div className="plan-tab-menu">
-                        <button
-                          className="plan-tab-menu-item"
-                          onClick={() => {
-                            setPlanViewMode(planViewMode === "rendered" ? "raw" : "rendered");
-                            setPlanMenuOpen(false);
-                          }}
-                        >
-                          {planViewMode === "rendered" ? "View raw" : "View rendered"}
-                        </button>
-                        <button
-                          className="plan-tab-menu-item"
-                          onClick={() => {
-                            // Trigger download via a custom event the PlanView listens to
-                            window.dispatchEvent(new Event("plan-download"));
-                            setPlanMenuOpen(false);
-                          }}
-                        >
-                          Download
-                        </button>
+                  <div className={`term-split${!isMobile && shells.length > 0 ? " term-split-open" : ""}`}>
+                    <div className="term-split-agent">
+                      <TerminalView
+                        key={activeSession}
+                        sessionName={activeSession}
+                        agentType={sessions.find((s) => s.name === activeSession)?.agentType}
+                        onClosed={handleSessionClosed}
+                        onAgentSwitched={refresh}
+                        toolbarPortal={toolbarRef}
+                        onSwipeBack={() => setMobileShowTerminal(false)}
+                        onKeyboardVisibilityChange={setKbOpen}
+                        isActive={!bottomTab}
+                      />
+                    </div>
+                    {/* Desktop only: on a phone there is no room to split, and
+                        the agent is what you came for. */}
+                    {!isMobile && shells.length > 0 && (
+                      <div className="term-shells">
+                        {shells.map((shell) => (
+                          <div className="term-shell" key={shell}>
+                            <div className="term-shell-head">
+                              <Icon name="term" size={12} />
+                              <span className="term-shell-name">shell</span>
+                              <span className="term-shell-path">
+                                {(activeSessionPaths[0] || "").split("/").filter(Boolean).pop()}
+                              </span>
+                              <button
+                                className="term-shell-close"
+                                onClick={() => dropShell(shell)}
+                                title="Close this shell"
+                                aria-label="Close this shell"
+                              >
+                                ×
+                              </button>
+                            </div>
+                            <div className="term-shell-body">
+                              <TerminalView key={shell} sessionName={shell} isActive={false} bare />
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                  <button
-                    className={`main-tab ${bottomTab === "changes" ? "main-tab-active" : ""}`}
-                    data-tutorial="tab-changes"
-                    onClick={() => setBottomTab(bottomTab === "changes" ? null : "changes")}
-                  >
-                    changes
-                  </button>
-                  {hasChildren && (
-                    <button
-                      className={`main-tab main-tab-sub ${bottomTab === "sub-agents" ? "main-tab-active" : ""}`}
-                      onClick={() => setBottomTab(bottomTab === "sub-agents" ? null : "sub-agents")}
-                    >
-                      sub-agents
-                      <span className="tab-badge">{activeSessionInfo?.children?.length}</span>
-                    </button>
-                  )}
-                  <button
-                    className={`main-tab ${bottomTab === "files" ? "main-tab-active" : ""}`}
-                    onClick={() => setBottomTab(bottomTab === "files" ? null : "files")}
-                  >
-                    files
-                  </button>
-                  {bottomTab && (
-                    <button
-                      className="main-tab split-maximize-btn"
-                      onClick={() => setBottomMaximized(!bottomMaximized)}
-                      title={bottomMaximized ? "Restore split" : "Maximize"}
-                    >
-                      {bottomMaximized ? "\u25BD" : "\u25B3"}
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
-              {bottomTab && (
-                <div className="split-bottom-pane" data-tutorial={bottomTab === "plan" ? "plan-content" : bottomTab === "changes" ? "changes-content" : undefined} style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
-                  {bottomTab === "changes" ? (
-                    <ChangesView
-                      key={activeSession}
-                      sessionName={activeSession}
-                      sessionPaths={activeSessionPaths}
-                      onCommentsSent={() => setBottomTab(null)}
-                    />
-                  ) : bottomTab === "sub-agents" && hasChildren ? (
-                    <SubAgentsView
-                      key={activeSession}
-                      parentSession={activeSession}
-                      sessions={sessions}
-                      onSelectChild={(childName) => {
-                        setActiveSession(childName);
-                        setBottomTab(null);
-                        setMobileShowTerminal(true);
-                      }}
-                      onRefresh={refresh}
-                    />
-                  ) : bottomTab === "files" ? (
-                    <FileExplorer
-                      ref={fileExplorerRef}
-                      roots={activeSessionPaths}
-                      onClose={() => {
-                        setBottomTab(null);
-                        setTimeout(() => window.dispatchEvent(new Event("agentdock-focus-terminal")), 50);
-                      }}
-                    />
-                  ) : (
-                    <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+              )}
+
+              {!isMobile && !fullSurface && (
+                <div className="term-status">
+                  <span className="term-status-live">
+                    <span className="term-status-dot" />connected
+                  </span>
+                  <span className="term-status-path">{activeSessionPaths[0] ?? activeSessionInfo?.path ?? ""}</span>
+                  {panelSummary && (panelSummary.plus + panelSummary.minus > 0) && (
+                    <span className="term-status-diff">
+                      +{panelSummary.plus} &minus;{panelSummary.minus}
+                    </span>
                   )}
+                  <span className="term-status-agent">
+                    {activeSessionInfo?.agentType === "cursor" ? "cursor" : "claude"}
+                  </span>
                 </div>
+              )}
+              {/* The right rail: icons only. Pressing one opens the surface
+                  fully expanded, rather than docking it in a column. */}
+              {!isMobile ? (
+                <></>
+              ) : (
+                <>
+                  <div className={`split-bottom-bar${bottomTab ? " split-bottom-bar-open" : ""}`}>
+                    <div className="split-bottom-tabs" />
+                  </div>
+                  {bottomTab && (
+                    <div className="split-bottom-pane" style={{ height: bottomMaximized ? "100%" : `${(1 - splitRatio) * 100}%` }}>
+                      {bottomTab === "changes" ? (
+                        <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setBottomTab(null)} />
+                      ) : bottomTab === "sub-agents" && hasChildren ? (
+                        <SubAgentsView key={activeSession} parentSession={activeSession} sessions={sessions} onSelectChild={(c) => { setActiveSession(c); setBottomTab(null); setMobileShowTerminal(true); }} onRefresh={refresh} />
+                      ) : bottomTab === "files" ? (
+                        <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setBottomTab(null)} />
+                      ) : (
+                        <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </>
         ) : (
-          <div className="split-empty">
-            <span className="split-empty-text">select a session</span>
-          </div>
+          <QuietView
+            staleSessions={sessions
+              .filter((x) => queueBucket(x) === "stale")
+              .map((x) => ({
+                name: x.name,
+                displayName: x.displayName,
+                repo: (x.path || "").split("/").filter(Boolean).pop() || "—",
+                age: timeAgo(x.created),
+              }))}
+            onRestore={handleRestoreSession}
+            onRestoreAll={() => {
+              sessions
+                .filter((x) => queueBucket(x) === "stale")
+                .forEach((x) => handleRestoreSession(x.name));
+            }}
+            onStart={(kind) => {
+              if (kind === "chat") {
+                createSession({ targets: [], name: "general-chat", dangerouslySkipPermissions: true })
+                  .then((r) => { if (r.sessions?.[0]) setActiveSession(r.sessions[0]); refresh(); })
+                  .catch(() => {});
+              } else {
+                navigate("/create");
+              }
+            }}
+          />
         )}
       </div>
 
@@ -2078,6 +2286,62 @@ export function Dashboard() {
                       </button>
                     </div>
                   </>
+                ) : setupStep === "hooks" ? (
+                  <>
+                    <p className="setup-description">
+                      Let AgentDock see when an agent needs you.
+                      <span
+                        className="setup-help-icon"
+                        style={{ marginLeft: 6 }}
+                        data-tooltip={"Five lifecycle hooks in ~/.claude/settings.json.\nWithout them the queue reads the terminal to guess an agent's state, which is wrong often enough to matter."}
+                      >i</span>
+                    </p>
+                    <p className="setup-subtle">
+                      This is the difference between knowing an agent is blocked and finding out
+                      ninety seconds later. It writes to <code>~/.claude/settings.json</code>,
+                      outside AgentDock&rsquo;s own config, which is why it asks.
+                    </p>
+
+                    {setupHooks && (
+                      <div className="settings-hook-list" style={{ marginTop: 12 }}>
+                        {setupHooks.events.map((e) => {
+                          const on = setupHooks.installed.includes(e.event);
+                          return (
+                            <div key={e.event} className="settings-hook-row">
+                              <span className={`settings-hook-dot ${on ? "settings-hook-dot-on" : ""}`} />
+                              <span className="settings-hook-event">{e.event}</span>
+                              <span className="settings-hook-status">{e.status}</span>
+                              <span className="settings-hook-means">{e.means}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="setup-actions">
+                      {setupHooks?.ok ? (
+                        <button className="btn btn-primary" onClick={() => setSetupStep("password")}>
+                          Continue
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleSetupInstallHooks}
+                          disabled={setupHooksBusy}
+                        >
+                          {setupHooksBusy ? "Installing..." : "Install and continue"}
+                        </button>
+                      )}
+                      <button className="btn" onClick={() => setSetupStep("password")}>
+                        Skip
+                      </button>
+                    </div>
+                    {setupHooks && !setupHooks.ok && (
+                      <p className="setup-subtle" style={{ marginTop: 10 }}>
+                        Skipping falls back to reading the terminal, which is what earlier versions did.
+                      </p>
+                    )}
+                  </>
                 ) : setupStep === "repos" ? (
                   <>
                     <p className="setup-description">
@@ -2113,7 +2377,7 @@ export function Dashboard() {
                       >
                         {setupSaving ? "Adding..." : `Add ${discoveredRepos.filter((r) => r.selected).length} repos`}
                       </button>
-                      <button className="btn" onClick={() => setSetupStep("password")}>
+                      <button className="btn" onClick={() => setSetupStep("hooks")}>
                         Skip
                       </button>
                     </div>
@@ -2121,13 +2385,35 @@ export function Dashboard() {
                 ) : (
                   <>
                     <p className="setup-description">
-                      Optionally set a password to protect the dashboard when accessed over the network.
+                      Who can reach this?
                       <span
                         className="setup-help-icon"
                         style={{ marginLeft: 6 }}
-                        data-tooltip={"Recommended if you access agentdock from your phone or other devices on your network.\nLeave blank if you only use it locally on this machine."}
+                        data-tooltip={"AgentDock runs on your machine. The only question is whether anything else on your network can open it."}
                       >i</span>
                     </p>
+                    <div className="setup-access">
+                      {([
+                        { id: "local" as const, title: "This machine only", detail: "Bound to localhost. Nothing else can connect, and no password is needed." },
+                        { id: "network" as const, title: "Reachable on my network", detail: "So you can answer a blocked agent from your phone. A password is required — this is the whole reason the password exists." },
+                      ]).map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className={`setup-access-card${setupAccess === a.id ? " setup-access-card-on" : ""}`}
+                          onClick={() => setSetupAccess(a.id)}
+                          aria-pressed={setupAccess === a.id}
+                        >
+                          <span className="setup-access-title">
+                            <span className="setup-access-radio" />
+                            {a.title}
+                          </span>
+                          <span className="setup-access-detail">{a.detail}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {setupAccess === "network" && (
+                    <>
                     <label className="form-label">Password</label>
                     <input
                       type="password"
@@ -2148,6 +2434,8 @@ export function Dashboard() {
                         else if (e.key === "Enter") setShowSetup(false);
                       }}
                     />
+                    </>
+                    )}
                     <div className="setup-actions">
                       <button
                         className="btn btn-primary"
@@ -2167,21 +2455,80 @@ export function Dashboard() {
           </div>
         </div>
       )}
-      {editingSession && metaPresets.length > 0 && (
+      {editingSession && (
         <SessionEditModal
           session={editingSession}
           presets={metaPresets}
           onClose={() => setEditingSession(null)}
-          onSave={async (meta, updatedPresets) => {
+          onSave={async (meta, updatedPresets, newDisplayName) => {
             await updateSessionMeta(editingSession.name, meta);
-            await saveMetaPropertyPresets(updatedPresets);
-            setMetaPresets([...updatedPresets]);
+            if (updatedPresets.length > 0) {
+              await saveMetaPropertyPresets(updatedPresets);
+              setMetaPresets([...updatedPresets]);
+            }
+            if (newDisplayName && newDisplayName !== editingSession.displayName) {
+              const { name: renamed } = await renameSession(editingSession.name, newDisplayName);
+              if (activeSession === editingSession.name) setActiveSession(renamed);
+            }
             setEditingSession(null);
             refresh();
           }}
         />
       )}
       {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
+      {!isMobile && (
+        <nav className="app-rail" aria-label="Surfaces">
+          <button
+            className={`rail-btn${!fullSurface ? " rail-btn-active" : ""}`}
+            onClick={() => setFullSurface(null)}
+            title="Sessions"
+            aria-label="Sessions"
+            aria-pressed={!fullSurface}
+          >
+            <Icon name="layers" size={18} />
+            {sessionsBadge > 0 && <span className="rail-badge rail-badge-sessions">{sessionsBadge}</span>}
+          </button>
+
+          <span className="rail-sep" aria-hidden="true" />
+
+          {RAIL.filter((r) => r.id !== "sub-agents" || hasChildren).map((r) => {
+            const badge = railBadge(r.id);
+            const on = fullSurface === r.id;
+            return (
+              <button
+                key={r.id}
+                className={`rail-btn${on ? " rail-btn-active" : ""}`}
+                onClick={() => setFullSurface(on ? null : r.id)}
+                title={`${r.label}${badge ? ` — ${badge}` : ""}`}
+                aria-label={`${on ? "Close" : "Open"} ${r.label}${badge ? `, ${badge}` : ""}`}
+                aria-pressed={on}
+              >
+                <Icon name={r.icon} size={18} />
+                {badge && <span className={`rail-badge rail-badge-${r.id}`}>{badge}</span>}
+              </button>
+            );
+          })}
+
+          <span className="rail-sep" aria-hidden="true" />
+
+          {/* Not a surface: this splits the terminal area rather than replacing
+              it, so it sits after the separator and keeps its own state. */}
+          <button
+            className={`rail-btn${shells.length > 0 ? " rail-btn-active" : ""}`}
+            onClick={addShell}
+            disabled={!activeSession || shells.length >= 2 || shellBusy}
+            title={
+              shells.length >= 2
+                ? "Two shells is the limit"
+                : "Open a shell in this worktree"
+            }
+            aria-label="Open a shell in this worktree"
+          >
+            <Icon name="term" size={18} />
+            {shells.length > 0 && <span className="rail-badge rail-badge-shell">{shells.length}</span>}
+          </button>
+        </nav>
+      )}
     </div>
 
     {/* FAB: new session, only on session list */}
@@ -2191,48 +2538,96 @@ export function Dashboard() {
       </button>
     )}
 
-    {/* Bottom navigation bar */}
-    <nav className="mobile-bottom-nav">
-      <button
-        className={`mobile-nav-item ${!mobileInSession ? "mobile-nav-item-active" : ""}`}
-        onClick={() => setMobileShowTerminal(false)}
-      >
-        <span className="mobile-nav-icon">⊟</span>
-        <span className="mobile-nav-label">Sessions</span>
-      </button>
-      {mobileInSession && (
-        <>
-          <button
-            className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
-          >
-            <span className="mobile-nav-icon">▶</span>
-            <span className="mobile-nav-label">Terminal</span>
-          </button>
-          <button
-            className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
-          >
-            <span className="mobile-nav-icon">≡</span>
-            <span className="mobile-nav-label">Plan</span>
-          </button>
-          <button
-            className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
-          >
-            <span className="mobile-nav-icon">±</span>
-            <span className="mobile-nav-label">Changes</span>
-          </button>
-          <button
-            className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
-            onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
-          >
-            <span className="mobile-nav-icon">⊞</span>
-            <span className="mobile-nav-label">Files</span>
-          </button>
-        </>
-      )}
-    </nav>
+    {/* Mobile: the phone's one job the desktop cannot do — unblock an agent
+        while you are away from the machine. So blocked work leads, and the
+        approve sheet is reachable without opening a terminal at all. */}
+    {isMobile && !mobileInSession && !loading && sessions.length > 0 && (
+      <div className="mobile-queue-host">
+        <MobileQueue
+          modeControl={modeSelect("mq-mode")}
+          sectionOrder={mobileGrouping?.order}
+          rows={sessions
+            .filter((x) => !x.parentSession)
+            .map((x) => ({
+              name: x.name,
+              displayName: x.displayName,
+              bucket: queueBucket(x),
+              age: timeAgo(x.created),
+              repo: (x.path || "").split("/").filter(Boolean).pop() || "—",
+              line: x.statusLine?.message || "",
+              cta: queueBucket(x) === "blocked" ? "Answer" : queueBucket(x) === "review" ? "Review" : undefined,
+              section: mobileGrouping?.byName.get(x.name),
+            }))}
+          onOpen={(name) => { setActiveSession(name); setMobileShowTerminal(true); }}
+          onAction={(name, cta) => {
+            setActiveSession(name);
+            setMobileShowTerminal(true);
+            // A phone shows surfaces through bottomTab, not fullSurface — the
+            // latter only renders on desktop, so Review was a dead tap.
+            if (cta === "Review") {
+              setBottomTab("changes");
+              setBottomMaximized(true);
+            }
+          }}
+        />
+      </div>
+    )}
+
+    {isMobile && mobileInSession && activeSessionInfo && isBlocked(activeSessionInfo) && !mobileApproveDismissed && (
+      <MobileApprove
+        displayName={activeSessionInfo.displayName}
+        waited={timeAgo(activeSessionInfo.created)}
+        question={activeSessionInfo.statusLine?.message || "This agent is waiting on you."}
+        conflictWith={sharedWith?.session}
+        onAllowOnce={() => { sendSessionInput(activeSession!, "1").catch(() => {}); setMobileApproveDismissed(true); }}
+        onAllowSession={() => { sendSessionInput(activeSession!, "2").catch(() => {}); setMobileApproveDismissed(true); }}
+        onDeny={(reason) => { sendSessionInput(activeSession!, reason || "no").catch(() => {}); setMobileApproveDismissed(true); }}
+        onDismiss={() => setMobileApproveDismissed(true)}
+      />
+    )}
+
+    {/* Bottom navigation bar. Only while a session is open: on the queue screen
+        its one item was "Sessions", the screen you are already on, so the bar
+        was 90px of nothing above the home indicator. */}
+    {mobileInSession && (
+      <nav className="mobile-bottom-nav">
+        <button
+          className="mobile-nav-item"
+          onClick={() => setMobileShowTerminal(false)}
+        >
+          <span className="mobile-nav-icon"><Icon name="layers" size={20} /></span>
+          <span className="mobile-nav-label">Sessions</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${!bottomTab ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab(null); setBottomMaximized(false); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="term" size={20} /></span>
+          <span className="mobile-nav-label">Terminal</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${bottomTab === "plan" ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab("plan"); setBottomMaximized(true); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="plan" size={20} /></span>
+          <span className="mobile-nav-label">Plan</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${bottomTab === "changes" ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab("changes"); setBottomMaximized(true); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="diff" size={20} /></span>
+          <span className="mobile-nav-label">Changes</span>
+        </button>
+        <button
+          className={`mobile-nav-item ${bottomTab === "files" ? "mobile-nav-item-active" : ""}`}
+          onClick={() => { setBottomTab("files"); setBottomMaximized(true); }}
+        >
+          <span className="mobile-nav-icon"><Icon name="folder" size={20} /></span>
+          <span className="mobile-nav-label">Files</span>
+        </button>
+      </nav>
+    )}
     {mruSwitcherVisible && createPortal(
       <div className="mru-switcher">
         {mruList.current

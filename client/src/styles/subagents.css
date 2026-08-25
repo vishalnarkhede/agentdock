@@ -1,0 +1,332 @@
+/* SubAgentsView. Class names are prefixed `sa-` so the legacy .sub-agent-*
+   rules in styles.css cannot cascade in, and the keyframes are prefixed for
+   the same reason — @keyframes names are global. */
+
+.sa {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  color: var(--text-2);
+}
+
+/* ── Stat row ───────────────────────────────────────────────────────────── */
+
+.sa-stats {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.sa-stat {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.sa-stat-value {
+  font-size: calc(var(--fs-base) + 5px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--text-1);
+}
+
+.sa-stat-value--working { color: var(--status-working); }
+.sa-stat-value--blocked { color: var(--status-blocked); }
+
+.sa-stat-label {
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-killall {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: calc(var(--fs-base) - 2px);
+  cursor: pointer;
+}
+
+.sa-killall:hover {
+  background: var(--hover);
+  border-color: var(--intent-danger);
+  color: var(--intent-danger);
+}
+
+.sa-killall:focus-visible,
+.sa-kill:focus-visible,
+.sa-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+
+.sa-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sa-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.sa-card:hover { background: var(--surface-3); }
+
+.sa-card--blocked { border-color: var(--status-blocked); }
+
+.sa-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sa-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--status-stale);
+}
+
+.sa-dot--review { background: var(--status-ready); }
+
+.sa-dot--blocked {
+  background: var(--status-blocked);
+  animation: sa-breathe 2s ease-in-out infinite;
+}
+
+.sa-dot--working {
+  width: 11px;
+  height: 11px;
+  background: none;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--status-working);
+  animation: sa-spin 0.8s linear infinite;
+}
+
+@keyframes sa-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sa-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+.sa-name {
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: calc(var(--fs-base) - 2px);
+  line-height: 1.5;
+  color: var(--status-stale);
+  border: 1px solid var(--border-subtle);
+}
+
+.sa-pill--blocked {
+  color: var(--status-blocked);
+  border-color: var(--status-blocked);
+}
+
+.sa-pill--working {
+  color: var(--status-working);
+  border-color: var(--status-working);
+}
+
+.sa-pill--review {
+  color: var(--status-ready);
+  border-color: var(--status-ready);
+}
+
+.sa-age {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-3);
+}
+
+.sa-doing {
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sa-facts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-right: auto;
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) - 2px);
+  color: var(--text-4);
+}
+
+.sa-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sa-kill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-4);
+  cursor: pointer;
+}
+
+.sa-kill:hover:not(:disabled) {
+  color: var(--intent-danger);
+  border-color: var(--border-subtle);
+}
+
+.sa-kill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sa-open {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: calc(var(--fs-base) - 2px);
+  cursor: pointer;
+}
+
+.sa-open:hover { border-color: var(--border-strong); }
+
+.sa-open--answer {
+  background: var(--intent-primary);
+  border-color: var(--intent-primary);
+  color: var(--intent-primary-ink);
+  font-weight: 600;
+}
+
+.sa-note {
+  margin: 0;
+  color: var(--text-4);
+  font-size: calc(var(--fs-base) - 2px);
+}
+
+/* ── Empty state ────────────────────────────────────────────────────────── */
+
+.sa-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  margin: auto;
+  padding: 32px 16px;
+  max-width: 380px;
+}
+
+.sa-empty-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-4);
+}
+
+.sa-empty-title {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sa-empty-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: calc(var(--fs-base) - 2px);
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .sa-killall,
+  .sa-open,
+  .sa-kill {
+    min-height: 44px;
+  }
+
+  .sa-kill {
+    min-width: 44px;
+  }
+
+  .sa-card-foot {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sa-dot--working,
+  .sa-dot--blocked {
+    animation: none;
+  }
+}

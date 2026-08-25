@@ -274,9 +274,12 @@ export async function fetchSessionChildren(sessionName: string): Promise<Session
   return res.json();
 }
 
-export function wsUrl(sessionName: string): string {
+export function wsUrl(sessionName: string, scrollback?: number): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws/sessions/${sessionName}`;
+  /* The reader's scrollback setting decides how much history the server paints
+     at connect, so it travels with the connection. */
+  const qs = scrollback ? `?scrollback=${Math.round(scrollback)}` : "";
+  return `${proto}//${window.location.host}/ws/sessions/${sessionName}${qs}`;
 }
 
 // ─── File System API ───
@@ -334,7 +337,7 @@ export async function grepFsFiles(query: string, roots: string[]): Promise<GrepR
   return data.results ?? [];
 }
 
-export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number }> {
+export async function fetchFsFile(path: string, roots: string[]): Promise<{ content: string; language: string; size: number; version: string }> {
   const params = new URLSearchParams({ path });
   if (roots.length > 0) params.set("roots", roots.join(","));
   const res = await fetch(`${BASE}/api/fs/read?${params}`);
@@ -343,6 +346,42 @@ export async function fetchFsFile(path: string, roots: string[]): Promise<{ cont
     throw new Error(data.error || "Failed to read file");
   }
   return res.json();
+}
+
+export interface WriteConflict {
+  conflict: true;
+  error: string;
+  currentVersion: string;
+  currentContent: string;
+}
+
+export interface WriteOk {
+  ok: true;
+  version: string;
+  size: number;
+}
+
+/**
+ * Save a file. `version` is the token /read handed back; the server refuses the
+ * write if the file changed since, which is what stops a save from quietly
+ * overwriting whatever the agent wrote in the meantime.
+ */
+export async function writeFsFile(
+  path: string,
+  roots: string[],
+  content: string,
+  version: string,
+  force = false,
+): Promise<WriteOk | WriteConflict> {
+  const res = await fetch(`${BASE}/api/fs/write`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, roots: roots.join(","), content, version, force }),
+  });
+  const data = await res.json();
+  if (res.status === 409) return data as WriteConflict;
+  if (!res.ok) throw new Error(data.error || "Failed to save file");
+  return data as WriteOk;
 }
 
 // ─── Settings API ───
@@ -551,39 +590,16 @@ export async function deleteCustomAction(id: string): Promise<void> {
   });
 }
 
-// ─── MCP Servers API ───
+// ─── What MCP servers the agents have (read-only) ───
 
-export interface McpServerInfo {
-  name: string;
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-}
-
-export async function fetchMcpServers(): Promise<McpServerInfo[]> {
+/** Names, commands and args of every MCP server the agent CLIs are configured
+ *  with. Read from their own config, so it sees servers added outside AgentDock. */
+export async function fetchAgentMcpNames(): Promise<string[]> {
   if (isDemo()) return [];
-  const res = await fetch(`${BASE}/api/settings/mcp-servers`);
-  return res.json();
-}
-
-export async function addMcpServerApi(server: McpServerInfo): Promise<void> {
-  if (isDemo()) return;
-  const res = await fetch(`${BASE}/api/settings/mcp-servers`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(server),
-  });
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || "Failed to add MCP server");
-  }
-}
-
-export async function deleteMcpServer(name: string): Promise<void> {
-  if (isDemo()) return;
-  await fetch(`${BASE}/api/settings/mcp-servers/${encodeURIComponent(name)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(`${BASE}/api/settings/agent-mcp`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data.names) ? data.names : [];
 }
 
 // ─── Preferences API ───
@@ -636,6 +652,23 @@ export async function updateSessionMeta(
   return res.json();
 }
 
+export async function renameSession(
+  sessionName: string,
+  newName: string,
+): Promise<{ name: string; displayName: string }> {
+  if (isDemo()) return { name: sessionName, displayName: newName };
+  const res = await fetch(`${BASE}/api/sessions/${sessionName}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to rename session");
+  }
+  return res.json();
+}
+
 // ─── Ngrok API ───
 
 export interface NgrokStatus {
@@ -680,5 +713,98 @@ export async function setNgrokBasicAuth(value: string): Promise<{ ok?: boolean; 
 
 export async function deleteNgrokBasicAuth(): Promise<void> {
   await fetch(`${BASE}/api/settings/ngrok-basic-auth`, { method: "DELETE" });
+}
+
+
+// ─── Plain shells beside the agent ───
+
+export async function fetchShells(session: string): Promise<string[]> {
+  if (isDemo()) return [];
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(session)}/shells`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data.shells) ? data.shells : [];
+}
+
+export async function openShell(session: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(session)}/shells`, {
+    method: "POST",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any).error || "Could not open a shell");
+  return Array.isArray((data as any).shells) ? (data as any).shells : [];
+}
+
+export async function closeShell(session: string, index: number): Promise<string[]> {
+  const res = await fetch(
+    `${BASE}/api/sessions/${encodeURIComponent(session)}/shells/${index}`,
+    { method: "DELETE" },
+  );
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray((data as any).shells) ? (data as any).shells : [];
+}
+
+// ─── Review summary ───
+
+/** The counts the Plan and Changes headers show. */
+export interface PanelSummary {
+  plan: { total: number; done: number };
+  diff: { files: number; plus: number; minus: number };
+  hasPlan: boolean;
+}
+
+export async function fetchPanelSummary(
+  session: string,
+  paths: string[],
+): Promise<PanelSummary> {
+  const qs = new URLSearchParams();
+  qs.set("session", session);
+  for (const p of paths) qs.append("path", p);
+  const res = await fetch(`${BASE}/api/review/summary?${qs.toString()}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as any).error || "Failed to load summary");
+  }
+  return res.json();
+}
+
+// ─── Status hooks ───
+
+export interface HookState {
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+  settingsPath: string;
+  scriptPath: string;
+  events: { event: string; status: string; means: string }[];
+}
+
+export async function fetchHookState(): Promise<HookState> {
+  const res = await fetch(`${BASE}/api/settings/hooks`);
+  if (!res.ok) throw new Error("Failed to read hook state");
+  return res.json();
+}
+
+export async function installHooks(): Promise<HookState> {
+  const res = await fetch(`${BASE}/api/settings/hooks`, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any).error || "Install failed");
+  return data as HookState;
+}
+
+export interface ConflictPair {
+  sessions: [string, string];
+  files: string[];
+}
+
+export interface ConflictResult {
+  conflicts: ConflictPair[];
+  worktrees: { session: string; fileCount: number }[];
+}
+
+export async function fetchConflicts(): Promise<ConflictResult> {
+  const res = await fetch(`${BASE}/api/review/conflicts`);
+  if (!res.ok) throw new Error("Failed to scan for conflicts");
+  return res.json();
 }
 

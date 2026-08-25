@@ -1,11 +1,15 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { CustomKeyboard } from "./CustomKeyboard";
+import { Icon } from "./Icon";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
+import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { paneDiffers, repaintSequence } from "../terminal-sync";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
@@ -74,6 +78,29 @@ function getTermTheme() {
   return { background: bg, ...colors };
 }
 
+// Mirrors the send-keys / load-buffer split in server/src/services/tmux.ts.
+const PASTE_BUFFER_THRESHOLD = 400;
+
+function switchSteps(from: AgentType, to: AgentType) {
+  return [
+    { label: `Compact the ${from} conversation`, note: from === "claude" ? "/compact" : "/summarize" },
+    { label: "Capture the compacted context" },
+    { label: `Exit ${from}`, note: "/exit" },
+    { label: "Wait for the shell prompt" },
+    { label: `Start ${to} on the context file`, note: to },
+  ];
+}
+
+function activeSwitchStep(step: string): number {
+  if (step.startsWith("Compressing")) return 0;
+  if (step.startsWith("Capturing")) return 1;
+  if (step.startsWith("Exiting")) return 2;
+  if (step.startsWith("Waiting for shell")) return 3;
+  if (step.startsWith("Switched to")) return 5;
+  if (step.startsWith("Starting") && step !== "Starting switch...") return 4;
+  return 0;
+}
+
 interface Props {
   sessionName: string;
   agentType?: AgentType;
@@ -83,9 +110,12 @@ interface Props {
   onSwipeBack?: () => void;
   onKeyboardVisibilityChange?: (visible: boolean) => void;
   isActive?: boolean;
+  /** A plain shell pane: no toolbar, no agent controls. The pane is small and
+   *  none of those actions belong to a shell. */
+  bare?: boolean;
 }
 
-export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive }: Props) {
+export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive, bare }: Props) {
   const { settings, updateSetting } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -96,8 +126,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [focused, setFocused] = useState(true);
   const [switchingAgent, setSwitchingAgent] = useState(false);
   const [switchStep, setSwitchStep] = useState("");
+  const [switchTarget, setSwitchTarget] = useState<AgentType | null>(null);
+  const [switchError, setSwitchError] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showPasteInput, setShowPasteInput] = useState(false);
+  const [pasteValue, setPasteValue] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
@@ -110,6 +143,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       setTimeout(() => setPasteError(""), 2000);
     } catch {
       // Permission denied — show paste bar as last resort
+      setPasteValue("");
       setShowPasteInput(true);
       requestAnimationFrame(() => pasteInputRef.current?.focus());
     }
@@ -120,6 +154,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const touchOriginYRef = useRef<number>(0);
   const touchScrollingRef = useRef<boolean>(false);
   const scrollPausedRef = useRef(false);
+  /* Which path the server took for this session. Streaming means the pane's
+     bytes arrive as they are produced and xterm owns the screen; snapshot means
+     the whole pane is re-sent and repainted on every change. */
+  const streamingRef = useRef(false);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
@@ -142,14 +180,36 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [isActive]);
 
-  // Refit terminal whenever the terminal-wrapper changes size (keyboard show/hide, window resize, etc.)
+  /**
+   * Refit whenever the wrapper changes size — keyboard, window resize, opening
+   * a surface, toggling the sidebar.
+   *
+   * The refit must be told to tmux. It used to fit silently, so xterm shrank
+   * while the pane kept its old height and the two drifted apart. The cursor
+   * is placed by absolute row from tmux's report, so a three-row difference
+   * put it three rows above the input box — on the border, where it looks
+   * like there is no cursor at all.
+   */
   useEffect(() => {
     if (!containerRef.current) return;
+    let last = "";
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
       fitAddonRef.current?.fit();
+      const term = termRef.current;
+      if (!term) return;
+      const size = `${term.cols}x${term.rows}`;
+      if (size === last) return;
+      last = size;
+      if (timer) clearTimeout(timer);
+      // Debounced: a drag emits a resize per frame, and each one is a tmux call.
+      timer = setTimeout(() => sendResizeRef.current(term.cols, term.rows), 80);
     });
     ro.observe(containerRef.current);
-    return () => ro.disconnect();
+    return () => {
+      if (timer) clearTimeout(timer);
+      ro.disconnect();
+    };
   }, []);
 
   // Non-passive touchmove listener so we can call preventDefault and prevent
@@ -216,6 +276,60 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
+
+    /* GPU glyph atlas instead of the DOM renderer, loaded on the next frame
+       rather than inline.
+       
+       Loading it inline threw on session switch: React (in dev, twice on every
+       mount) opens the terminal and disposes it in quick succession, and the
+       addon's own teardown ran against a renderer that was already gone —
+       "Cannot read properties of undefined (reading '_isDisposed')" out of
+       WebglAddon.dispose(), which took the whole component down with it. So it
+       is only attached once the container has a size and the effect is still
+       alive, it is disposed explicitly before the terminal rather than through
+       the terminal's addon manager, and every one of those steps tolerates
+       having already happened. */
+    let webgl: WebglAddon | null = null;
+    let torndown = false;
+    /* A pane that is switched to starts at zero width, and attaching to a
+       zero-width container silently leaves the atlas empty, so wait for a real
+       size — bounded, because a pane that never gets one should just keep the
+       DOM renderer.
+
+       On a timer rather than requestAnimationFrame: Chrome stops serving frames
+       to an occluded window, and a terminal that only gets its renderer when
+       the window happens to be visible is not a renderer you can reason about.
+       A macrotask is all this needs — it exists to leave the synchronous
+       mount-then-dispose window, not to line up with a paint. */
+    let attempts = 0;
+    let attachTimer: ReturnType<typeof setTimeout> | null = null;
+    const attachWebgl = () => {
+      attachTimer = null;
+      if (torndown || webgl) return;
+      if (!containerRef.current?.clientWidth) {
+        if (attempts++ < 40) attachTimer = setTimeout(attachWebgl, 50);
+        return;
+      }
+      try {
+        const addon = new WebglAddon();
+        /* A lost context renders nothing at all, so fall back rather than leave
+           the reader with a blank terminal. */
+        addon.onContextLoss(() => {
+          try {
+            addon.dispose();
+          } catch {
+            /* already gone */
+          }
+          if (webgl === addon) webgl = null;
+        });
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        /* No WebGL here (old browser, blocklisted driver) — the DOM renderer is
+           still correct, only slower. */
+      }
+    };
+    attachTimer = setTimeout(attachWebgl, 0);
     fitAddon.fit();
 
     // Intercept Shift+Enter before xterm processes it
@@ -252,10 +366,15 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     const container = containerRef.current;
     const handleViewportResize = () => {
       if (vv && container) {
-        // Set parent layout height to visual viewport (accounts for keyboard)
         const layout = container.closest(".split-layout") as HTMLElement;
         if (layout) {
-          layout.style.height = `${vv.height}px`;
+          /* The layout starts below the header and ends above the bottom nav,
+             so its height is the visible viewport minus both. Setting it to the
+             whole viewport pushed the terminal's toolbar under the nav. */
+          const top = layout.getBoundingClientRect().top - (vv.offsetTop || 0);
+          const nav = document.querySelector(".mobile-bottom-nav");
+          const navH = nav ? nav.getBoundingClientRect().height : 0;
+          layout.style.height = `${Math.max(160, Math.round(vv.height - top - navH))}px`;
         }
       }
       fitAddon.fit();
@@ -277,6 +396,30 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     });
 
     if (!isMobile) term.focus();
+
+    /**
+     * xterm only paints a cursor while it believes it is focused, and it learns
+     * that from a focus event on its hidden textarea. Focusing an element that
+     * is already document.activeElement fires nothing — which happens when the
+     * page loads with the window unfocused, and again whenever the blur handler
+     * below calls textarea.focus() on an already-active textarea. The result is
+     * a terminal that is genuinely focused and accepts typing but shows no
+     * cursor until you click it.
+     *
+     * So reconcile: if the textarea holds focus but xterm does not know, bounce
+     * it once to generate the event.
+     */
+    const syncFocusState = () => {
+      const ta = term.textarea;
+      const root = containerRef.current?.querySelector(".xterm");
+      if (!ta || !root) return;
+      if (document.activeElement === ta && !root.classList.contains("focus")) {
+        ta.blur();
+        term.focus();
+      }
+    };
+    window.addEventListener("focus", syncFocusState);
+    const syncTimer = setTimeout(syncFocusState, 300);
 
     // Detect scroll position on xterm's viewport — pause rendering when
     // user scrolls up, resume when they scroll back to the bottom.
@@ -329,6 +472,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
 
     return () => {
+      clearTimeout(syncTimer);
+      window.removeEventListener("focus", syncFocusState);
       clearTimeout(viewportScrollTimer);
       const viewport = containerRef.current?.querySelector(".xterm-viewport");
       viewport?.removeEventListener("scroll", handleViewportScroll);
@@ -339,7 +484,22 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         textarea.removeEventListener("focus", onFocus);
         textarea.removeEventListener("blur", onBlur);
       }
-      term.dispose();
+      torndown = true;
+      if (attachTimer) clearTimeout(attachTimer);
+      try {
+        webgl?.dispose();
+      } catch {
+        /* Already disposed, or never finished initialising. */
+      }
+      webgl = null;
+      try {
+        term.dispose();
+      } catch {
+        /* xterm schedules a scroll sync from open() on a timer; when a switch
+           disposes the terminal before it fires, that timer reads a renderer
+           that is gone. Nothing here can be done about it and nothing depends
+           on it, so it must not reach React. */
+      }
     };
   }, [settings.cursorBlink, settings.scrollback, settings.terminalFontSize]);
 
@@ -354,20 +514,48 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       return;
     }
 
-    // Write the clear + content in a single term.write() call so xterm batches
-    // them atomically in one animation frame — no blank flash between clear and render.
-    // \x1b[H = cursor to home, \x1b[2J = erase display, \x1bc = full reset (parser + screen).
-    // Using \x1bc inside write() resets the ANSI parser AND clears the screen within
-    // the same render pass, eliminating the flicker that term.reset() caused.
-    const row = snapshot.cursorY + 1;
-    const col = snapshot.cursorX + 1;
+    // Clear and content in one term.write() so xterm batches them into a single
+    // animation frame — no blank flash between the clear and the render.
+    // \x1bc is a full reset: it resets the ANSI parser AND clears the screen
+    // inside the same render pass, which term.reset() did not.
+    /**
+     * The cursor is placed by counting up from the bottom rather than by
+     * addressing a row — which is what finally fixed the off-by-one this code
+     * carried a note about for weeks.
+     *
+     * Two faults compounded. tmux's capture ends in a newline, so the write
+     * left the cursor on the row *below* the pane's last line; that scrolled
+     * the screen up by one and left row 0 blank — the blank first row the old
+     * note could not explain. And stripping *every* trailing newline made a
+     * pane with blank rows at the bottom come out short, after which an
+     * absolute row address was pointing into a screen whose rows no longer
+     * lined up with tmux's at all.
+     *
+     * So: drop exactly one trailing newline, which leaves the cursor on the
+     * pane's last row, then move up by however many rows the real cursor sits
+     * above it. Relative movement needs no agreement between xterm's row count
+     * and tmux's — and that agreement was the assumption that kept breaking.
+     */
+    const body = snapshot.content.endsWith("\n")
+      ? snapshot.content.slice(0, -1)
+      : snapshot.content;
+    const paneHeight = snapshot.paneHeight || term.rows;
+    const rowsUp = Math.max(0, paneHeight - 1 - snapshot.cursorY);
     term.write(
-      "\x1bc" +         // full reset (parser + screen) — atomic with content below
-      "\x1b[?25l" +     // hide cursor during render
-      snapshot.content.replace(/\n+$/, "") +
-      `\x1b[${row};${col}H` +
-      "\x1b[?25h"       // show cursor at final position
+      "\x1bc" +                                  // full reset — atomic with the content below
+      "\x1b[?25l" +                              // hide the cursor while painting
+      body +
+      (rowsUp > 0 ? `\x1b[${rowsUp}A` : "") +    // up from the pane's last row
+      `\x1b[${snapshot.cursorX + 1}G` +          // and across to the column
+      "\x1b[?25h"                                // show it where it really is
     );
+
+    /* The capture carries the scrollback above the pane as well, so the write
+       leaves the viewport partway up that history. tmux owns the real history —
+       xterm's buffer only ever holds what we paint plus what the stream appends
+       after it — so this is the reader's whole scrollback, and they should start
+       at the end of it. */
+    term.scrollToBottom();
     setLastContent(snapshot.content);
 
     // Update scrollbar thumb after render
@@ -400,7 +588,124 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [handleData]);
 
-  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(sessionName, handleWsData, onClosed);
+  /**
+   * Streaming: the server sends the pane's bytes as tmux produces them, so the
+   * work here is to hand them to xterm and stay out of the way. No React state
+   * per chunk — a keystroke's echo would otherwise re-render the tree — and no
+   * skipping writes while the reader has scrolled up, because xterm already
+   * keeps the viewport still and appends to the buffer underneath.
+   */
+  const scrollbarFrame = useRef<number | null>(null);
+  const syncScrollbar = useCallback(() => {
+    if (scrollbarFrame.current !== null) return;
+    scrollbarFrame.current = requestAnimationFrame(() => {
+      scrollbarFrame.current = null;
+      const viewport = containerRef.current?.querySelector(".xterm-viewport");
+      if (!viewport) return;
+      const { scrollTop, scrollHeight, clientHeight } = viewport as HTMLElement;
+      if (scrollHeight <= clientHeight) {
+        setScrollThumb({ top: 0, size: 1 });
+        return;
+      }
+      const size = clientHeight / scrollHeight;
+      const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
+      setScrollThumb({ top, size });
+    });
+  }, []);
+
+  const handleBytes = useCallback((bytes: Uint8Array) => {
+    const term = termRef.current;
+    if (!term) return;
+    term.write(bytes);
+    syncScrollbar();
+  }, [syncScrollbar]);
+
+  /* The server decodes the pane's bytes once and sends text, so xterm never has
+     to stitch a UTF-8 character across a frame boundary it cannot see — which is
+     where single box-drawing characters were turning into replacement
+     characters under a flood. */
+  const handleText = useCallback((text: string) => {
+    const term = termRef.current;
+    if (!term) return;
+    term.write(text);
+    syncScrollbar();
+  }, [syncScrollbar]);
+
+  /** The visible pane plus a little scrollback, read back out of xterm. */
+  const readTerminalText = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return "";
+    const buf = term.buffer.active;
+    const first = Math.max(0, buf.length - term.rows - 200);
+    const lines: string[] = [];
+    for (let i = first; i < buf.length; i++) {
+      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+    }
+    return lines.join("\n").replace(/\n+$/, "");
+  }, []);
+
+  /* In streaming mode nothing re-sends the pane as text, but two things still
+     want it: the copy button, and the Cursor status scan (Cursor has no
+     lifecycle hooks, so its state is read off the screen). Once a second, and
+     only when it actually changed — against five re-renders a second on the
+     snapshot path. */
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!streamingRef.current || !termRef.current) return;
+      const text = readTerminalText();
+      setLastContent((prev) => (prev === text ? prev : text));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [readTerminalText]);
+
+  /**
+   * The drift check.
+   *
+   * The server re-captures the pane during lulls; this compares it with what is
+   * actually on screen and repaints only when they disagree. Almost every check
+   * agrees and costs one string compare — the repaint is for the case the user
+   * used to fix by reloading the page.
+   */
+  const resyncCount = useRef(0);
+  const handleResync = useCallback((raw: unknown) => {
+    const term = termRef.current;
+    if (!term || !raw || typeof raw !== "object" || !("content" in raw)) return;
+    const snap = raw as PaneSnapshot;
+    /* Scrolled up: the pane is off screen, and yanking the view back to repaint
+       it would be worse than the wrong cell they are not looking at. */
+    if (scrollPausedRef.current) return;
+
+    const buf = term.buffer.active;
+    const rows: string[] = [];
+    const first = Math.max(0, buf.length - term.rows);
+    for (let i = first; i < buf.length; i++) {
+      rows.push(buf.getLine(i)?.translateToString(true) ?? "");
+    }
+    if (!paneDiffers(snap.content, rows)) return;
+
+    resyncCount.current += 1;
+    console.log(`[terminal] ${sessionName}: repainted a drifted screen (${resyncCount.current})`);
+    term.write(
+      repaintSequence(snap.content, snap.paneHeight || term.rows, snap.cursorX, snap.cursorY),
+    );
+    syncScrollbar();
+  }, [sessionName, syncScrollbar]);
+
+  const handleMode = useCallback((mode: "stream" | "snapshot") => {
+    streamingRef.current = mode === "stream";
+    console.log(`[terminal] ${sessionName}: ${mode} mode`);
+  }, [sessionName]);
+
+  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(
+    sessionName,
+    handleWsData,
+    onClosed,
+    handleBytes,
+    handleText,
+    handleMode,
+    handleResync,
+    settings.scrollback,
+  );
   sendInputRef.current = sendInput;
   sendShiftEnterRef.current = sendShiftEnter;
   const sendResizeRef = useRef<(cols: number, rows: number) => void>(() => {});
@@ -428,7 +733,14 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
   }, [fullscreen]);
 
-  useNotifications(sessionName, lastContent, settings.notificationsEnabled);
+  // Terminal scanning is the Cursor fallback only — Cursor has no lifecycle
+  // hooks. Claude sessions are notified from hook-derived status in
+  // useQueueNotifications, which also covers sessions you are not viewing.
+  useNotifications(
+    sessionName,
+    agentType === "cursor" ? lastContent : null,
+    settings.notificationsEnabled,
+  );
 
 
   const handleSwitchAgent = useCallback(async () => {
@@ -438,13 +750,18 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     if (!confirm(`Switch from ${agentType} to ${newAgentType}?`)) return;
     
     setSwitchingAgent(true);
+    setSwitchTarget(newAgentType);
+    setSwitchError("");
     setSwitchStep("Starting switch...");
     try {
       await switchAgent(
         sessionName,
         newAgentType,
         "Continue where the previous agent left off.",
-        (step) => setSwitchStep(step),
+        (step) => {
+          if (step.startsWith("Error:")) setSwitchError(step.replace(/^Error:\s*/, ""));
+          else setSwitchStep(step);
+        },
       );
       onAgentSwitched?.();
     } catch (err: any) {
@@ -452,6 +769,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     } finally {
       setSwitchingAgent(false);
       setSwitchStep("");
+      setSwitchError("");
+      setSwitchTarget(null);
     }
   }, [sessionName, agentType, onAgentSwitched]);
 
@@ -514,7 +833,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           <button
             className="terminal-copy-btn"
             onClick={() => {
-              const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+              const source = streamingRef.current ? readTerminalText() : lastContent || "";
+              const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
               navigator.clipboard.writeText(clean.trim());
               setCopied(true);
               setTimeout(() => setCopied(false), 1500);
@@ -543,12 +863,13 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         {agentType && connected && (
           <button
-            className="terminal-copy-btn"
+            className="terminal-copy-btn tv-toolbar-btn"
             onClick={handleSwitchAgent}
             disabled={switchingAgent}
             title={`Switch to ${agentType === "claude" ? "Cursor" : "Claude"}`}
           >
-            {switchingAgent ? "..." : agentType === "claude" ? "→ Cursor" : "→ Claude"}
+            <Icon name="refresh" size={13} />
+            {switchingAgent ? "..." : agentType === "claude" ? "Cursor" : "Claude"}
           </button>
         )}
         <button
@@ -571,10 +892,32 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       onDrop={onDrop}
     >
       {switchingAgent && (
-        <div className="terminal-switch-overlay">
-          <div className="terminal-switch-content">
-            <div className="terminal-switch-spinner" />
-            <div className="terminal-switch-step">{switchStep}</div>
+        <div className="terminal-switch-overlay tv-switch">
+          <div className="tv-switch-card">
+            <div className="tv-switch-title">Switching to {switchTarget ?? "the other agent"}</div>
+            <p className="tv-switch-lede">
+              The conversation is compacted first, so the new agent starts from a summary of the
+              work so far instead of an empty context.
+            </p>
+            <ul className="tv-switch-steps">
+              {switchSteps(agentType ?? "claude", switchTarget ?? "claude").map((step, i) => {
+                const active = activeSwitchStep(switchStep);
+                const state = i < active ? "is-done" : i === active ? "is-active" : "is-pending";
+                return (
+                  <li key={step.label} className={`tv-switch-step ${state}`}>
+                    <span className="tv-switch-dot" />
+                    <span className="tv-switch-step-label">{step.label}</span>
+                    {step.note && <span className="tv-switch-step-note">{step.note}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+            {switchError && (
+              <div className="tv-switch-error">
+                <Icon name="alert" size={14} />
+                <span>{switchError}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -583,9 +926,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           Drop files here
         </div>
       )}
-      {toolbarPortal?.current
-        ? createPortal(toolbarContent, toolbarPortal.current)
-        : toolbarContent}
+      {bare
+        ? null
+        : toolbarPortal?.current
+          ? createPortal(toolbarContent, toolbarPortal.current)
+          : toolbarContent}
       {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
       <div className="term-scrollbar-area">
         {scrollThumb.size < 0.99 && (
@@ -704,74 +1049,131 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           click to type
         </div>
       )}
-      {contextMenu && (
-        <>
-          <div
-            className="terminal-context-backdrop"
-            onClick={() => setContextMenu(null)}
-          />
-          <div
-            className="terminal-context-menu"
-            style={{
-              top: Math.min(contextMenu.y, window.innerHeight - 120),
-              left: Math.min(contextMenu.x, window.innerWidth - 160),
-            }}
-          >
-            <button
-              onClick={() => {
-                setContextMenu(null);
-                // Show paste bar immediately (synchronous) so iOS can focus it
-                // within the user gesture context, then try clipboard API in background
-                setShowPasteInput(true);
-                requestAnimationFrame(() => pasteInputRef.current?.focus());
-                navigator.clipboard.readText().then((text) => {
-                  if (text) { sendInputRef.current(text); setShowPasteInput(false); }
-                }).catch(() => {});
+      {contextMenu && (() => {
+        const hasSelection = !!termRef.current?.getSelection();
+        const itemHeight = window.innerWidth <= 768 ? 44 : 38;
+        const menuHeight = (hasSelection ? 4 : 3) * itemHeight + 12;
+        return (
+          <>
+            <div
+              className="terminal-context-backdrop"
+              onClick={() => setContextMenu(null)}
+            />
+            <div
+              className="terminal-context-menu tv-ctxmenu"
+              style={{
+                top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - menuHeight - 12)),
+                left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 244)),
               }}
             >
-              Paste
-            </button>
-            <button
-              onClick={() => {
-                setContextMenu(null);
-                const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-                navigator.clipboard.writeText(clean.trim());
-              }}
-            >
-              Copy All
-            </button>
-            {termRef.current?.getSelection() && (
+              {hasSelection && (
+                <button
+                  onClick={() => {
+                    setContextMenu(null);
+                    const sel = termRef.current?.getSelection() || "";
+                    navigator.clipboard.writeText(sel);
+                  }}
+                >
+                  <Icon name="copy" size={14} />
+                  <span className="tv-ctxmenu-label">Copy selection</span>
+                  <span className="tv-ctxmenu-key">⌘C</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setContextMenu(null);
-                  const sel = termRef.current?.getSelection() || "";
-                  navigator.clipboard.writeText(sel);
+                  const source = streamingRef.current ? readTerminalText() : lastContent || "";
+              const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+                  navigator.clipboard.writeText(clean.trim());
                 }}
               >
-                Copy Selection
+                <Icon name="file" size={14} />
+                <span className="tv-ctxmenu-label">Copy everything on screen</span>
               </button>
-            )}
-          </div>
-        </>
-      )}
+              <button
+                onClick={() => {
+                  setContextMenu(null);
+                  // Show paste bar immediately (synchronous) so iOS can focus it
+                  // within the user gesture context, then try clipboard API in background
+                  setPasteValue("");
+                  setShowPasteInput(true);
+                  requestAnimationFrame(() => pasteInputRef.current?.focus());
+                  navigator.clipboard.readText().then((text) => {
+                    if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+                  }).catch(() => {});
+                }}
+              >
+                <Icon name="plus" size={14} />
+                <span className="tv-ctxmenu-label">Paste</span>
+                <span className="tv-ctxmenu-key">⌘V</span>
+              </button>
+              <button
+                className="tv-ctxmenu-danger"
+                onClick={() => {
+                  setContextMenu(null);
+                  sendInput("\x1b");
+                }}
+              >
+                <Icon name="stop" size={14} />
+                <span className="tv-ctxmenu-label">Interrupt</span>
+                <span className="tv-ctxmenu-key">esc</span>
+              </button>
+            </div>
+          </>
+        );
+      })()}
       {pasteError && (
         <div className="terminal-paste-error">{pasteError}</div>
       )}
       {showPasteInput && (
-        <div className="terminal-paste-bar">
+        <div className="terminal-paste-bar tv-paste">
+          <div className="tv-paste-head">
+            <Icon name="copy" size={14} />
+            <span className="tv-paste-title">
+              {pasteValue.length
+                ? `Paste ${pasteValue.length} characters`
+                : "Paste from the clipboard"}
+            </span>
+            <span className="tv-paste-note">sent as one buffer, not keystrokes</span>
+          </div>
           <textarea
             ref={pasteInputRef}
-            className="terminal-paste-bar-input"
+            className="terminal-paste-bar-input tv-paste-input"
             placeholder="Clipboard access denied — long-press here to paste manually"
-            rows={1}
+            rows={2}
             autoFocus
+            value={pasteValue}
+            onChange={(e) => setPasteValue(e.target.value)}
             onPaste={(e) => {
               e.preventDefault();
               const text = e.clipboardData.getData("text");
-              if (text) { sendInputRef.current(text); setShowPasteInput(false); }
+              if (text) { sendInputRef.current(text); setShowPasteInput(false); setPasteValue(""); }
             }}
           />
-          <button className="terminal-paste-bar-cancel" onClick={() => setShowPasteInput(false)}>✕</button>
+          <div className="tv-paste-actions">
+            <button
+              className="tv-paste-btn tv-paste-btn-primary"
+              disabled={!pasteValue.length}
+              onClick={() => {
+                sendInputRef.current(pasteValue);
+                setShowPasteInput(false);
+                setPasteValue("");
+              }}
+            >
+              <Icon name="send" size={14} />
+              Paste
+            </button>
+            <button
+              className="tv-paste-btn"
+              onClick={() => { setShowPasteInput(false); setPasteValue(""); }}
+            >
+              <Icon name="close" size={14} />
+              Cancel
+            </button>
+            <span className="tv-paste-foot">
+              Anything over {PASTE_BUFFER_THRESHOLD} characters takes this path automatically.
+            </span>
+          </div>
         </div>
       )}
       {/* Mobile bottom toolbar — Stop / Copy / Keyboard toggle */}
@@ -785,16 +1187,19 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         {lastContent && (
           <button className="mobile-term-btn" onClick={() => {
-            const clean = (lastContent || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+            const source = streamingRef.current ? readTerminalText() : lastContent || "";
+            const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
             navigator.clipboard.writeText(clean.trim());
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}>
-            {copied ? "✓ Copied" : "⎘ Copy"}
+            <Icon name={copied ? "check" : "copy"} size={14} />
+            {copied ? "Copied" : "Copy"}
           </button>
         )}
         <button className={`mobile-term-btn${showPasteInput ? " mobile-term-btn-active" : ""}`} onClick={handlePaste}>
-          ⊕ Paste
+          <Icon name="plus" size={14} />
+          Paste
         </button>
         <button className="mobile-term-btn" onClick={() => {
           if (!customKb) {
@@ -804,7 +1209,8 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             setKbVisible((v) => !v);
           }
         }}>
-          {customKb && kbVisible ? "⌨ hide" : "⌨ write"}
+          <Icon name="keyboard" size={14} />
+          {customKb && kbVisible ? "Hide" : "Write"}
         </button>
       </div>
       {customKb && kbVisible && <CustomKeyboard onInput={sendInput} onAttach={handleFileDrop} onPasteRequest={handlePaste} />}

@@ -41,13 +41,6 @@ export interface DbShard {
   sslmode?: string;
 }
 
-export interface McpServer {
-  name: string;
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-}
-
 export interface CreateSessionRequest {
   targets: string[];
   name?: string;

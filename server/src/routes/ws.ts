@@ -1,4 +1,5 @@
 import { capturePaneSnapshot, hasSession, sendKeysRaw, sendSpecialKey, resizePane } from "../services/tmux";
+import { attachControl, type ControlClient } from "../services/tmux-control";
 
 export function handleWebSocket(server: any) {
   // WebSocket upgrade and handling is done in the Bun.serve config
@@ -12,11 +13,51 @@ const INPUT_POLL_MS = 50;
 // If no message received from client in 60s, consider connection dead
 const HEARTBEAT_TIMEOUT_MS = 60_000;
 
-export async function handleWsOpen(ws: any, sessionName: string) {
+/* Streaming is the default path; AGENTDOCK_STREAM=0 forces the polling one,
+   which is also the automatic fallback when tmux cannot be attached. */
+const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
+
+/* How often a streamed pane is re-captured so the client can check its copy
+   against it, and how quiet the stream has to be first. Tight, because the
+   corruption this catches is upstream in xterm's parser and will keep
+   happening: a second of a wrong cell is a blink, four is long enough to reach
+   for the reload button. Streaming makes the
+   browser a mirror rather than a re-render, and a mirror can drift — a dropped
+   frame or a sequence read differently leaves a wrong cell there until
+   something repaints. This is the check that catches it, at one capture per
+   lull instead of the five a second the polling path did. */
+const RESYNC_MS = 1500;
+const RESYNC_QUIET_MS = 350;
+
+/* Pane output goes to the client as text, not bytes.
+   
+   A flood of `╭─╮ ✓ é 🎉` reliably turned single three-byte characters into two
+   or three replacement characters on screen. It was not this end: every frame
+   leaving here was proven complete and valid UTF-8, cut on character
+   boundaries, under 4 kB — and it still happened. What it was, was a pointless
+   round trip. tmux hands us text; we decoded it to find the escapes, re-encoded
+   it to bytes, and left xterm to decode it a third time across frame
+   boundaries it could not see. Decoding once, here, with a streaming decoder
+   that holds a partial character until the rest arrives, means a character is
+   never split at all: a JS string has no half-characters in it. */
+
+/* The polling path re-sends the whole capture on every change, so its history
+   stays small whatever the reader asked for; streaming captures once. */
+const POLL_SCROLLBACK = 200;
+const MAX_SCROLLBACK = 20000;
+
+export async function handleWsOpen(ws: any, sessionName: string, scrollback?: number) {
   console.log(`[ws] open: session="${sessionName}"`);
 
-  // Send initial snapshot
-  const result = await capturePaneSnapshot(sessionName);
+  /* tmux owns the pane's history, so whatever this capture does not carry is
+     history the reader cannot reach: xterm's buffer starts empty and only grows
+     from what the stream appends after this point. It used to ask for 200 lines
+     no matter what the terminal's scrollback was set to, which is why 10,000
+     scrolled back about one screen. */
+  const wanted = Number.isFinite(scrollback as number)
+    ? Math.min(Math.max(Math.round(scrollback as number), POLL_SCROLLBACK), MAX_SCROLLBACK)
+    : POLL_SCROLLBACK;
+  const result = await capturePaneSnapshot(sessionName, STREAM_ENABLED ? wanted : POLL_SCROLLBACK);
   if (!result.ok) {
     console.error(`[ws] snapshot failed: ${result.error}`);
     ws.send(JSON.stringify({ type: "error", data: result.error }));
@@ -24,10 +65,27 @@ export async function handleWsOpen(ws: any, sessionName: string) {
     return;
   }
 
-  ws.send(JSON.stringify({ type: "snapshot", data: result.data }));
+  /* Control mode: one long-lived tmux client streaming this pane's bytes, in
+     place of ten process spawns a second and a full-pane repaint per frame.
+     The initial screen still comes from a capture — attaching does not replay
+     what is already on the pane — and anything the stream buffered while that
+     capture was in flight is dropped, because the capture already shows it. */
+  let initial = result.data;
+
+  if (STREAM_ENABLED) {
+    const control = await attachControl(sessionName);
+    if (control) {
+      streamPane(ws, sessionName, control, initial);
+      return;
+    }
+    console.warn(`[ws] control mode unavailable, polling: session="${sessionName}"`);
+  }
+
+  ws.send(JSON.stringify({ type: "mode", mode: "snapshot" }));
+  ws.send(JSON.stringify({ type: "snapshot", data: initial }));
 
   // Adaptive polling state
-  let lastSnapshot = JSON.stringify(result.data);
+  let lastSnapshot = JSON.stringify(initial);
   let pollMs = MIN_POLL_MS;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let lastClientActivity = Date.now();
@@ -99,6 +157,106 @@ export async function handleWsOpen(ws: any, sessionName: string) {
 
   // Store cleanup handles
   ws.data = { cleanup, heartbeatInterval, sessionName, nudgePoll, touchActivity: () => { lastClientActivity = Date.now(); } };
+}
+
+/**
+ * The streaming path: paint once from a capture, then forward bytes.
+ *
+ * Nothing polls here. The heartbeat stays, because a client that goes away
+ * without closing the socket is still the common case on a phone.
+ */
+function streamPane(ws: any, sessionName: string, control: ControlClient, initial: unknown) {
+  let stopped = false;
+  let lastClientActivity = Date.now();
+
+  ws.send(JSON.stringify({ type: "mode", mode: "stream" }));
+  ws.send(JSON.stringify({ type: "snapshot", data: initial }));
+  /* Everything up to here is on the captured screen already. */
+  control.dropBuffered();
+
+  let lastOutputAt = 0;
+  let changedSinceResync = false;
+
+  /* One decoder for the life of the connection: a character split across two
+     bursts of pane output is held here until the rest of it arrives. */
+  const decoder = new TextDecoder("utf-8");
+
+  control.onOutput((bytes) => {
+    if (stopped) return;
+    lastOutputAt = Date.now();
+    changedSinceResync = true;
+    const text = decoder.decode(bytes, { stream: true });
+    if (!text) return;
+    try {
+      ws.send(text);
+    } catch {
+      /* Socket went away between the check and the send. */
+    }
+  });
+
+  /* Only after something changed, and only once the stream goes quiet: during a
+     burst the screen is about to be overwritten anyway, and a capture taken
+     mid-redraw would disagree with the client for reasons that are not drift. */
+  const resyncTimer = setInterval(async () => {
+    if (stopped || !changedSinceResync) return;
+    if (Date.now() - lastOutputAt < RESYNC_QUIET_MS) return;
+    changedSinceResync = false;
+    const snap = await capturePaneSnapshot(sessionName, 0);
+    if (stopped || !snap.ok) return;
+    try {
+      ws.send(JSON.stringify({ type: "resync", data: snap.data }));
+    } catch {
+      /* Socket went away mid-capture. */
+    }
+  }, RESYNC_MS);
+
+  function cleanup() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(resyncTimer);
+    control.close();
+    if (ws.data?.heartbeatInterval) clearInterval(ws.data.heartbeatInterval);
+  }
+
+  control.onExit((reason) => {
+    if (stopped) return;
+    try {
+      ws.send(JSON.stringify({ type: "closed", data: reason || "Session ended" }));
+    } catch {
+      /* already gone */
+    }
+    cleanup();
+    try {
+      ws.close();
+    } catch {
+      /* already closed */
+    }
+  });
+
+  const heartbeatInterval = setInterval(() => {
+    if (Date.now() - lastClientActivity > HEARTBEAT_TIMEOUT_MS) {
+      console.log(`[ws] heartbeat timeout: session="${sessionName}"`);
+      cleanup();
+      clearInterval(heartbeatInterval);
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+    }
+  }, 15_000);
+
+  ws.data = {
+    cleanup,
+    heartbeatInterval,
+    sessionName,
+    streaming: true,
+    /* Polling concepts the message handler still asks for. */
+    nudgePoll: () => {},
+    touchActivity: () => {
+      lastClientActivity = Date.now();
+    },
+  };
 }
 
 const SPECIAL_KEYS: Record<string, string> = {

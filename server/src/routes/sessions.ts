@@ -17,11 +17,13 @@ import {
   getKnownSessionNames,
 } from "../services/config";
 import { detectStatus, extractStatusLine } from "../services/status";
+import { listShells, openShell, closeShell, shellName, MAX_SHELLS } from "../services/shells";
 import {
   startSession,
   stopSession,
   stopAllSessions,
   restoreSession,
+  renameSession,
 } from "../services/session-manager";
 import type { CreateSessionRequest, SessionInfo, AgentType } from "../types";
 
@@ -377,6 +379,20 @@ app.patch("/:name/meta", async (c) => {
   return c.json(merged);
 });
 
+app.post("/:name/rename", async (c) => {
+  const name = c.req.param("name");
+  const body = await c.req.json() as { name?: string };
+  if (!body.name || !body.name.trim()) {
+    return c.json({ error: "name is required" }, 400);
+  }
+  try {
+    const newName = await renameSession(name, body.name);
+    return c.json({ name: newName, displayName: newName.replace(`${PREFIX}-`, "") });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 409);
+  }
+});
+
 app.post("/:name/restore", async (c) => {
   const name = c.req.param("name");
   try {
@@ -385,6 +401,35 @@ app.post("/:name/restore", async (c) => {
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
+});
+
+// ─── Plain shells beside the agent ───
+
+app.get("/:name/shells", async (c) => {
+  return c.json({ shells: await listShells(c.req.param("name")), max: MAX_SHELLS });
+});
+
+app.post("/:name/shells", async (c) => {
+  const name = c.req.param("name");
+  try {
+    const sessions = await listSessions(PREFIX);
+    const fallback = sessions.find((s) => s.name === name)?.path;
+    const shell = await openShell(name, fallback);
+    if (!shell) return c.json({ error: `at most ${MAX_SHELLS} shells per session` }, 409);
+    return c.json({ shell, shells: await listShells(name) }, 201);
+  } catch (err: any) {
+    return c.json({ error: err?.message || "could not open a shell" }, 500);
+  }
+});
+
+app.delete("/:name/shells/:index", async (c) => {
+  const name = c.req.param("name");
+  const index = Number(c.req.param("index"));
+  if (!Number.isInteger(index) || index < 1 || index > MAX_SHELLS) {
+    return c.json({ error: "no such shell" }, 400);
+  }
+  await closeShell(shellName(name, index));
+  return c.json({ ok: true, shells: await listShells(name) });
 });
 
 app.delete("/:name", async (c) => {
