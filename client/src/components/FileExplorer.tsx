@@ -827,8 +827,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       await sendSessionInput(sessionName, message);
       setNoteOpen(false);
       setNoteText("");
-      setNoteSent(true);
-      setTimeout(() => setNoteSent(false), 2200);
+      /* Back to the terminal, the way sending diff comments does it: the note
+         is now the last thing in the session and watching the agent take it is
+         better proof it arrived than a toast over a file you are done with. */
+      if (onClose) onClose();
+      else {
+        setNoteSent(true);
+        setTimeout(() => setNoteSent(false), 2200);
+      }
     } catch (err: any) {
       setNoteError(err?.message || "could not send");
     } finally {
