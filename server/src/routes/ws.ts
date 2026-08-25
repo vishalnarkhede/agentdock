@@ -17,6 +17,15 @@ const HEARTBEAT_TIMEOUT_MS = 60_000;
    which is also the automatic fallback when tmux cannot be attached. */
 const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
 
+/* How often a streamed pane is re-captured so the client can check its copy
+   against it, and how quiet the stream has to be first. Streaming makes the
+   browser a mirror rather than a re-render, and a mirror can drift — a dropped
+   frame or a sequence read differently leaves a wrong cell there until
+   something repaints. This is the check that catches it, at one capture per
+   lull instead of the five a second the polling path did. */
+const RESYNC_MS = 4000;
+const RESYNC_QUIET_MS = 900;
+
 export async function handleWsOpen(ws: any, sessionName: string) {
   console.log(`[ws] open: session="${sessionName}"`);
 
@@ -140,8 +149,13 @@ function streamPane(ws: any, sessionName: string, control: ControlClient, initia
   /* Everything up to here is on the captured screen already. */
   control.dropBuffered();
 
+  let lastOutputAt = 0;
+  let changedSinceResync = false;
+
   control.onOutput((bytes) => {
     if (stopped) return;
+    lastOutputAt = Date.now();
+    changedSinceResync = true;
     try {
       ws.send(bytes);
     } catch {
@@ -149,9 +163,26 @@ function streamPane(ws: any, sessionName: string, control: ControlClient, initia
     }
   });
 
+  /* Only after something changed, and only once the stream goes quiet: during a
+     burst the screen is about to be overwritten anyway, and a capture taken
+     mid-redraw would disagree with the client for reasons that are not drift. */
+  const resyncTimer = setInterval(async () => {
+    if (stopped || !changedSinceResync) return;
+    if (Date.now() - lastOutputAt < RESYNC_QUIET_MS) return;
+    changedSinceResync = false;
+    const snap = await capturePaneSnapshot(sessionName, 0);
+    if (stopped || !snap.ok) return;
+    try {
+      ws.send(JSON.stringify({ type: "resync", data: snap.data }));
+    } catch {
+      /* Socket went away mid-capture. */
+    }
+  }, RESYNC_MS);
+
   function cleanup() {
     if (stopped) return;
     stopped = true;
+    clearInterval(resyncTimer);
     control.close();
     if (ws.data?.heartbeatInterval) clearInterval(ws.data.heartbeatInterval);
   }

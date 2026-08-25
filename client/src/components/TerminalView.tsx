@@ -9,6 +9,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { paneDiffers, repaintSequence } from "../terminal-sync";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
@@ -643,6 +644,39 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     return () => clearInterval(id);
   }, [readTerminalText]);
 
+  /**
+   * The drift check.
+   *
+   * The server re-captures the pane during lulls; this compares it with what is
+   * actually on screen and repaints only when they disagree. Almost every check
+   * agrees and costs one string compare — the repaint is for the case the user
+   * used to fix by reloading the page.
+   */
+  const resyncCount = useRef(0);
+  const handleResync = useCallback((raw: unknown) => {
+    const term = termRef.current;
+    if (!term || !raw || typeof raw !== "object" || !("content" in raw)) return;
+    const snap = raw as PaneSnapshot;
+    /* Scrolled up: the pane is off screen, and yanking the view back to repaint
+       it would be worse than the wrong cell they are not looking at. */
+    if (scrollPausedRef.current) return;
+
+    const buf = term.buffer.active;
+    const rows: string[] = [];
+    const first = Math.max(0, buf.length - term.rows);
+    for (let i = first; i < buf.length; i++) {
+      rows.push(buf.getLine(i)?.translateToString(true) ?? "");
+    }
+    if (!paneDiffers(snap.content, rows)) return;
+
+    resyncCount.current += 1;
+    console.log(`[terminal] ${sessionName}: repainted a drifted screen (${resyncCount.current})`);
+    term.write(
+      repaintSequence(snap.content, snap.paneHeight || term.rows, snap.cursorX, snap.cursorY),
+    );
+    syncScrollbar();
+  }, [sessionName, syncScrollbar]);
+
   const handleMode = useCallback((mode: "stream" | "snapshot") => {
     streamingRef.current = mode === "stream";
     console.log(`[terminal] ${sessionName}: ${mode} mode`);
@@ -654,6 +688,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     onClosed,
     handleBytes,
     handleMode,
+    handleResync,
   );
   sendInputRef.current = sendInput;
   sendShiftEnterRef.current = sendShiftEnter;
