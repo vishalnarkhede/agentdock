@@ -26,13 +26,23 @@ const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
 const RESYNC_MS = 4000;
 const RESYNC_QUIET_MS = 900;
 
-export async function handleWsOpen(ws: any, sessionName: string) {
+/* The polling path re-sends the whole capture on every change, so its history
+   stays small whatever the reader asked for; streaming captures once. */
+const POLL_SCROLLBACK = 200;
+const MAX_SCROLLBACK = 20000;
+
+export async function handleWsOpen(ws: any, sessionName: string, scrollback?: number) {
   console.log(`[ws] open: session="${sessionName}"`);
 
-  /* With scrollback: tmux owns the pane's history, so whatever this capture
-     does not carry is history the reader cannot reach — xterm's buffer starts
-     empty and only grows from what the stream appends after this point. */
-  const result = await capturePaneSnapshot(sessionName, 200);
+  /* tmux owns the pane's history, so whatever this capture does not carry is
+     history the reader cannot reach: xterm's buffer starts empty and only grows
+     from what the stream appends after this point. It used to ask for 200 lines
+     no matter what the terminal's scrollback was set to, which is why 10,000
+     scrolled back about one screen. */
+  const wanted = Number.isFinite(scrollback as number)
+    ? Math.min(Math.max(Math.round(scrollback as number), POLL_SCROLLBACK), MAX_SCROLLBACK)
+    : POLL_SCROLLBACK;
+  const result = await capturePaneSnapshot(sessionName, STREAM_ENABLED ? wanted : POLL_SCROLLBACK);
   if (!result.ok) {
     console.error(`[ws] snapshot failed: ${result.error}`);
     ws.send(JSON.stringify({ type: "error", data: result.error }));

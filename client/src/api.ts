@@ -274,9 +274,12 @@ export async function fetchSessionChildren(sessionName: string): Promise<Session
   return res.json();
 }
 
-export function wsUrl(sessionName: string): string {
+export function wsUrl(sessionName: string, scrollback?: number): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws/sessions/${sessionName}`;
+  /* The reader's scrollback setting decides how much history the server paints
+     at connect, so it travels with the connection. */
+  const qs = scrollback ? `?scrollback=${Math.round(scrollback)}` : "";
+  return `${proto}//${window.location.host}/ws/sessions/${sessionName}${qs}`;
 }
 
 // ─── File System API ───

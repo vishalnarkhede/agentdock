@@ -56,8 +56,12 @@ const server = Bun.serve({
         return new Response("Unauthorized", { status: 401 });
       }
       const sessionName = url.pathname.replace("/ws/sessions/", "");
+      /* How much scrollback the viewer wants painted at connect. The terminal's
+         own setting is the reader's, so it travels with the connection rather
+         than being guessed at here. */
+      const scrollback = Number(url.searchParams.get("scrollback")) || undefined;
       if (sessionName) {
-        const upgraded = server.upgrade(req, { data: { sessionName } as any });
+        const upgraded = server.upgrade(req, { data: { sessionName, scrollback } as any });
         if (upgraded) return undefined;
         return new Response("WebSocket upgrade failed", { status: 500 });
       }
@@ -69,7 +73,7 @@ const server = Bun.serve({
     open(ws) {
       const sessionName = (ws.data as any)?.sessionName;
       if (sessionName) {
-        handleWsOpen(ws, sessionName);
+        handleWsOpen(ws, sessionName, (ws.data as any)?.scrollback);
       }
     },
     message(ws, message) {

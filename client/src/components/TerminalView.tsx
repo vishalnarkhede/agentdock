@@ -689,6 +689,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     handleBytes,
     handleMode,
     handleResync,
+    settings.scrollback,
   );
   sendInputRef.current = sendInput;
   sendShiftEnterRef.current = sendShiftEnter;

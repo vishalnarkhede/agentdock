@@ -69,6 +69,9 @@ export async function hasSession(name: string): Promise<boolean> {
   return exitCode === 0;
 }
 
+/** Lines of scrollback tmux keeps per pane for sessions AgentDock creates. */
+export const HISTORY_LIMIT = 20000;
+
 export async function createSession(
   name: string,
   cwd: string,
@@ -88,7 +91,23 @@ export async function createSession(
   await run(["set-environment", "-g", "-r", "NO_COLOR"]);
   // Enable 24-bit true color passthrough
   await run(["set-option", "-g", "-a", "terminal-overrides", ",*:Tc"]);
-  await run(args);
+  /* tmux keeps the pane's history, so its limit is the ceiling on anything the
+     terminal can ever scroll back to — and the default is 2000 lines, which an
+     agent reading files blows through in a minute.
+     
+     A pane's limit is fixed when the pane is created and reads the *global*
+     option: setting it on the session afterwards does nothing, and neither does
+     respawning the window (both verified). So raise the global, create, and put
+     it back — the new session keeps the larger limit, and the user's own tmux
+     sessions are left exactly as they were. */
+  const previous = (await run(["show-options", "-gv", "history-limit"])).stdout.trim();
+  const raised = /^\d+$/.test(previous) && Number(previous) < HISTORY_LIMIT;
+  if (raised) await run(["set-option", "-g", "history-limit", String(HISTORY_LIMIT)]);
+  try {
+    await run(args);
+  } finally {
+    if (raised) await run(["set-option", "-g", "history-limit", previous]);
+  }
 }
 
 export async function killSession(name: string): Promise<void> {

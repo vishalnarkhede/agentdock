@@ -28,6 +28,8 @@ export function useWebSocket(
   onMode?: (mode: "stream" | "snapshot") => void,
   /** A fresh capture of the pane, for checking the rendered copy against. */
   onResync?: (data: unknown) => void,
+  /** Lines of history to paint at connect — the terminal's scrollback setting. */
+  scrollback?: number,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -38,11 +40,15 @@ export function useWebSocket(
   const onBytesRef = useRef(onBytes);
   const onModeRef = useRef(onMode);
   const onResyncRef = useRef(onResync);
+  /* Read through a ref: changing the setting should not tear the socket down,
+     it applies the next time one opens. */
+  const scrollbackRef = useRef(scrollback);
   onDataRef.current = onData;
   onClosedRef.current = onClosed;
   onBytesRef.current = onBytes;
   onModeRef.current = onMode;
   onResyncRef.current = onResync;
+  scrollbackRef.current = scrollback;
 
   useEffect(() => {
     if (isDemo()) {
@@ -57,7 +63,7 @@ export function useWebSocket(
       if (stopped) return;
       if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-      const ws = new WebSocket(wsUrl(sessionName));
+      const ws = new WebSocket(wsUrl(sessionName, scrollbackRef.current));
       /* Pane bytes arrive as binary frames; without this they land as Blobs and
          every chunk would need an async read before it could be written. */
       ws.binaryType = "arraybuffer";
