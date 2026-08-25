@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchWorktrees, type WorktreeInfo } from "../api";
+import { deleteWorktree, fetchWorktrees, type WorktreeInfo } from "../api";
 import { Icon } from "./Icon";
 import "../styles/worktrees.css";
 
@@ -36,6 +36,8 @@ export function WorktreesView({
   const [all, setAll] = useState<WorktreeInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ path: string; message: string } | null>(null);
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -61,6 +63,38 @@ export function WorktreesView({
   }, [all, query]);
 
   const orphans = shown.filter((w) => !w.sessionName).length;
+
+  /**
+   * Deleting one.
+   *
+   * The prompt says what is actually at stake — the directory goes, the branch
+   * stays, and uncommitted work is named and counted rather than folded into a
+   * generic "are you sure". The server refuses dirty worktrees unless told
+   * otherwise, so the confirmation and the force flag are the same decision.
+   */
+  const remove = async (w: WorktreeInfo) => {
+    const dirty = w.dirty ?? 0;
+    const lines = [
+      `Delete this worktree?`,
+      ``,
+      `  ${w.path}`,
+      w.branch ? `  branch ${w.branch} — kept, not deleted` : `  detached at ${w.head}`,
+    ];
+    if (dirty > 0) {
+      lines.push(``, `${dirty} uncommitted file${dirty === 1 ? "" : "s"} will be lost.`);
+    }
+    if (!confirm(lines.join("\n"))) return;
+
+    setBusy(w.path);
+    setFailed(null);
+    const res = await deleteWorktree(w.path, dirty > 0);
+    setBusy(null);
+    if (res.worktrees) {
+      setAll(res.worktrees);
+      return;
+    }
+    setFailed({ path: w.path, message: res.error || "could not remove it" });
+  };
 
   if (error) return <div className="wt-empty">{error}</div>;
   if (!all) return <div className="wt-empty">reading git…</div>;
@@ -132,9 +166,20 @@ export function WorktreesView({
                       <Icon name="chev" size={12} />
                     </button>
                   ) : (
-                    <span className="wt-tag wt-tag-orphan">no session</span>
+                    <>
+                      <span className="wt-tag wt-tag-orphan">no session</span>
+                      <button
+                        className="wt-delete"
+                        onClick={() => remove(w)}
+                        disabled={busy === w.path}
+                        title="Delete this worktree directory — the branch is kept"
+                      >
+                        {busy === w.path ? "deleting…" : "delete"}
+                      </button>
+                    </>
                   )}
                 </span>
+                {failed?.path === w.path && <span className="wt-failed">{failed.message}</span>}
               </li>
             );
           })}

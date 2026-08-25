@@ -168,3 +168,29 @@
   color: var(--text-3);
   font-size: var(--fs-base);
 }
+
+/* Only on rows no session owns: a worktree in use is removed by killing the
+   session that owns it, which is the operation that means that. */
+.wt-delete {
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--intent-danger) 35%, transparent);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--intent-danger);
+  font: inherit;
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  cursor: pointer;
+}
+.wt-delete:hover { background: color-mix(in srgb, var(--intent-danger) 12%, transparent); }
+.wt-delete:disabled { opacity: 0.5; cursor: default; }
+
+.wt-failed {
+  padding: 0 14px 8px 12px;
+  color: var(--intent-danger);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+}
+
+/* The row grows a second line when something failed, so it cannot stay a
+   single flex line. */
+.wt-row { flex-wrap: wrap; }
+.wt-failed { flex: 1 0 100%; }

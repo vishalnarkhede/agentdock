@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { dedupeByPath, ownersByPath, parseWorktreeList } from "../services/worktrees";
+import {
+  checkDeletable,
+  dedupeByPath,
+  ownersByPath,
+  parseWorktreeList,
+} from "../services/worktrees";
 
 const REAL = `worktree /Users/vishal/projects/chat
 HEAD d89b0827c1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6
@@ -105,5 +110,62 @@ describe("dedupeByPath", () => {
 
   it("handles an empty list", () => {
     expect(dedupeByPath([])).toEqual([]);
+  });
+});
+
+describe("checkDeletable", () => {
+  const base = {
+    path: "/wt/x",
+    repo: "chat",
+    repoPath: "/repo/chat",
+    branch: "feature/x",
+    head: "abc1234567",
+    primary: false,
+    session: null,
+    sessionName: null,
+    prunable: false,
+    exists: true,
+    dirty: 0,
+  };
+
+  it("allows a clean orphan", () => {
+    expect(checkDeletable(base, false)).toEqual({ ok: true });
+  });
+
+  it("refuses a path that is not in the listing", () => {
+    const v = checkDeletable(undefined, false);
+    expect(v).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it("refuses the repository's own working tree", () => {
+    const v = checkDeletable({ ...base, primary: true }, true);
+    expect(v).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("refuses a worktree a session is using, even when forced", () => {
+    const v = checkDeletable({ ...base, session: "fix-thing", sessionName: "claude-fix-thing" }, true);
+    expect(v).toMatchObject({ ok: false, status: 409 });
+    if (v.ok === false) expect(v.error).toContain("kill the session");
+  });
+
+  it("asks before discarding uncommitted work", () => {
+    const v = checkDeletable({ ...base, dirty: 3 }, false);
+    expect(v).toMatchObject({ ok: false, status: 409, dirty: 3 });
+    if (v.ok === false) expect(v.error).toContain("3 uncommitted files");
+  });
+
+  it("says file, not files, for one", () => {
+    const v = checkDeletable({ ...base, dirty: 1 }, false);
+    if (v.ok === false) expect(v.error).toContain("1 uncommitted file ");
+  });
+
+  it("proceeds on uncommitted work once forced", () => {
+    expect(checkDeletable({ ...base, dirty: 9 }, true)).toEqual({ ok: true });
+  });
+
+  it("allows one whose directory is already gone", () => {
+    expect(checkDeletable({ ...base, exists: false, dirty: null, prunable: true }, false)).toEqual({
+      ok: true,
+    });
   });
 });

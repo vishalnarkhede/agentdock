@@ -184,3 +184,59 @@ export async function listAllWorktrees(): Promise<WorktreeInfo[]> {
     };
   });
 }
+
+/**
+ * Whether a worktree may be deleted from here, and why not when it may not.
+ *
+ * Two refusals matter. The repository's own working tree is not a worktree to
+ * remove — that request is a mistake, not an intention. And a worktree with a
+ * live session would be pulled out from under an agent whose cwd it is; killing
+ * the session is the operation that means "and remove its worktree", and it
+ * already does.
+ *
+ * Uncommitted work is a question rather than a refusal: the caller can say yes,
+ * but has to say it.
+ */
+export function checkDeletable(
+  wt: WorktreeInfo | undefined,
+  force: boolean,
+): { ok: true } | { ok: false; status: 400 | 404 | 409; error: string; dirty?: number } {
+  if (!wt) return { ok: false, status: 404, error: "no such worktree" };
+  if (wt.primary) {
+    return { ok: false, status: 400, error: "that is the repository itself, not a worktree" };
+  }
+  if (wt.sessionName) {
+    return {
+      ok: false,
+      status: 409,
+      error: `${wt.session} is using this worktree — kill the session, which removes it`,
+    };
+  }
+  if (!force && wt.dirty !== null && wt.dirty > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: `${wt.dirty} uncommitted file${wt.dirty === 1 ? "" : "s"} would be lost`,
+      dirty: wt.dirty,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Removes a worktree. The branch is left alone — it is where the committed work
+ * is, and this is a request to free the directory, not to discard the history.
+ */
+export async function removeWorktree(
+  repoPath: string,
+  path: string,
+  force: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const args = ["worktree", "remove", ...(force ? ["--force"] : []), path];
+  const { ok } = await git(repoPath, args);
+  /* Prune regardless: a directory deleted by hand leaves a registration behind,
+     and that is exactly the row someone is trying to clear. */
+  await git(repoPath, ["worktree", "prune"]);
+  if (!ok && existsSync(path)) return { ok: false, error: "git refused to remove it" };
+  return { ok: true };
+}

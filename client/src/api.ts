@@ -740,6 +740,23 @@ export async function fetchWorktrees(): Promise<WorktreeInfo[]> {
   return Array.isArray(data.worktrees) ? data.worktrees : [];
 }
 
+/**
+ * Removes a worktree. `force` is the answer to the server's own refusal when it
+ * holds uncommitted work — it is never sent unprompted.
+ */
+export async function deleteWorktree(
+  path: string,
+  force = false,
+): Promise<{ worktrees?: WorktreeInfo[]; error?: string; dirty?: number; status: number }> {
+  const res = await fetch(`${BASE}/api/worktrees`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, force }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ...(data as any), status: res.status };
+}
+
 // ─── Plain shells beside the agent ───
 
 export async function fetchShells(session: string): Promise<string[]> {
