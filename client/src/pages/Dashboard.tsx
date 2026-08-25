@@ -1765,6 +1765,32 @@ export function Dashboard() {
   return (
     <>
     <div className={`split-layout ${mobileInSession ? "mobile-show-terminal" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      {/* Global navigation, at the outside edge. Sessions and Worktrees belong
+          to no one session, so they do not belong in the rail on the right —
+          that one is what you do *to* the session you have open. */}
+      {!isMobile && (
+        <nav className="app-rail app-rail-left" aria-label="Everything">
+          <button
+            className={`rail-btn${!fullSurface ? " rail-btn-active" : ""}`}
+            onClick={() => setFullSurface(null)}
+            title="Sessions"
+            aria-label="Sessions"
+            aria-pressed={!fullSurface}
+          >
+            <Icon name="layers" size={18} />
+            {sessionsBadge > 0 && <span className="rail-badge rail-badge-sessions">{sessionsBadge}</span>}
+          </button>
+          <button
+            className={`rail-btn${fullSurface === "worktrees" ? " rail-btn-active" : ""}`}
+            onClick={() => setFullSurface(fullSurface === "worktrees" ? null : "worktrees")}
+            title="Worktrees"
+            aria-label="Worktrees"
+            aria-pressed={fullSurface === "worktrees"}
+          >
+            <Icon name="branch" size={18} />
+          </button>
+        </nav>
+      )}
       {(isMobile || !fullSurface) && (
       <div className="split-sidebar">
         <div className="sidebar-header">
@@ -2510,32 +2536,7 @@ export function Dashboard() {
       )}
       {tourActive && <TutorialOverlay onClose={() => setTourActive(false)} />}
       {!isMobile && (
-        <nav className="app-rail" aria-label="Surfaces">
-          <button
-            className={`rail-btn${!fullSurface ? " rail-btn-active" : ""}`}
-            onClick={() => setFullSurface(null)}
-            title="Sessions"
-            aria-label="Sessions"
-            aria-pressed={!fullSurface}
-          >
-            <Icon name="layers" size={18} />
-            {sessionsBadge > 0 && <span className="rail-badge rail-badge-sessions">{sessionsBadge}</span>}
-          </button>
-
-          {/* Global, like Sessions: worktrees belong to no one session, so it
-              sits with the list rather than with the per-session surfaces. */}
-          <button
-            className={`rail-btn${fullSurface === "worktrees" ? " rail-btn-active" : ""}`}
-            onClick={() => setFullSurface(fullSurface === "worktrees" ? null : "worktrees")}
-            title="Worktrees"
-            aria-label="Worktrees"
-            aria-pressed={fullSurface === "worktrees"}
-          >
-            <Icon name="branch" size={18} />
-          </button>
-
-          <span className="rail-sep" aria-hidden="true" />
-
+        <nav className="app-rail" aria-label="This session">
           {RAIL.filter((r) => r.id !== "sub-agents" || hasChildren).map((r) => {
             const badge = railBadge(r.id);
             const on = fullSurface === r.id;

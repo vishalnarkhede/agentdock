@@ -726,6 +726,15 @@ h1 {
   overflow-x: hidden;
 }
 
+/* The left rail is the same object mirrored: global navigation on the outside
+   edge, session surfaces on the other. Order 0 puts it before the session list,
+   which the sidebar's own order does not otherwise guarantee. */
+.app-rail-left {
+  order: 0;
+  border-left: none;
+  border-right: 1px solid var(--border-subtle);
+}
+
 .rail-sep {
   width: 22px;
   height: 1px;
