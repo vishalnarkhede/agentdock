@@ -617,6 +617,17 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     syncScrollbar();
   }, [syncScrollbar]);
 
+  /* The server decodes the pane's bytes once and sends text, so xterm never has
+     to stitch a UTF-8 character across a frame boundary it cannot see — which is
+     where single box-drawing characters were turning into replacement
+     characters under a flood. */
+  const handleText = useCallback((text: string) => {
+    const term = termRef.current;
+    if (!term) return;
+    term.write(text);
+    syncScrollbar();
+  }, [syncScrollbar]);
+
   /** The visible pane plus a little scrollback, read back out of xterm. */
   const readTerminalText = useCallback(() => {
     const term = termRef.current;
@@ -687,6 +698,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     handleWsData,
     onClosed,
     handleBytes,
+    handleText,
     handleMode,
     handleResync,
     settings.scrollback,

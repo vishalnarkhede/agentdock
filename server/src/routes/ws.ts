@@ -18,13 +18,28 @@ const HEARTBEAT_TIMEOUT_MS = 60_000;
 const STREAM_ENABLED = process.env.AGENTDOCK_STREAM !== "0";
 
 /* How often a streamed pane is re-captured so the client can check its copy
-   against it, and how quiet the stream has to be first. Streaming makes the
+   against it, and how quiet the stream has to be first. Tight, because the
+   corruption this catches is upstream in xterm's parser and will keep
+   happening: a second of a wrong cell is a blink, four is long enough to reach
+   for the reload button. Streaming makes the
    browser a mirror rather than a re-render, and a mirror can drift — a dropped
    frame or a sequence read differently leaves a wrong cell there until
    something repaints. This is the check that catches it, at one capture per
    lull instead of the five a second the polling path did. */
-const RESYNC_MS = 4000;
-const RESYNC_QUIET_MS = 900;
+const RESYNC_MS = 1500;
+const RESYNC_QUIET_MS = 350;
+
+/* Pane output goes to the client as text, not bytes.
+   
+   A flood of `╭─╮ ✓ é 🎉` reliably turned single three-byte characters into two
+   or three replacement characters on screen. It was not this end: every frame
+   leaving here was proven complete and valid UTF-8, cut on character
+   boundaries, under 4 kB — and it still happened. What it was, was a pointless
+   round trip. tmux hands us text; we decoded it to find the escapes, re-encoded
+   it to bytes, and left xterm to decode it a third time across frame
+   boundaries it could not see. Decoding once, here, with a streaming decoder
+   that holds a partial character until the rest arrives, means a character is
+   never split at all: a JS string has no half-characters in it. */
 
 /* The polling path re-sends the whole capture on every change, so its history
    stays small whatever the reader asked for; streaming captures once. */
@@ -162,12 +177,18 @@ function streamPane(ws: any, sessionName: string, control: ControlClient, initia
   let lastOutputAt = 0;
   let changedSinceResync = false;
 
+  /* One decoder for the life of the connection: a character split across two
+     bursts of pane output is held here until the rest of it arrives. */
+  const decoder = new TextDecoder("utf-8");
+
   control.onOutput((bytes) => {
     if (stopped) return;
     lastOutputAt = Date.now();
     changedSinceResync = true;
+    const text = decoder.decode(bytes, { stream: true });
+    if (!text) return;
     try {
-      ws.send(bytes);
+      ws.send(text);
     } catch {
       /* Socket went away between the check and the send. */
     }

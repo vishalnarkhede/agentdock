@@ -22,8 +22,10 @@ export function useWebSocket(
   sessionName: string,
   onData: (data: unknown) => void,
   onClosed?: () => void,
-  /** Raw pane bytes, when the server is streaming rather than snapshotting. */
+  /** Raw pane bytes — kept for the binary path; unused while the server sends text. */
   onBytes?: (bytes: Uint8Array) => void,
+  /** Pane output as text, already decoded once by the server. */
+  onText?: (text: string) => void,
   /** Which path the server took, sent once before the first paint. */
   onMode?: (mode: "stream" | "snapshot") => void,
   /** A fresh capture of the pane, for checking the rendered copy against. */
@@ -38,6 +40,7 @@ export function useWebSocket(
   const onDataRef = useRef(onData);
   const onClosedRef = useRef(onClosed);
   const onBytesRef = useRef(onBytes);
+  const onTextRef = useRef(onText);
   const onModeRef = useRef(onMode);
   const onResyncRef = useRef(onResync);
   /* Read through a ref: changing the setting should not tear the socket down,
@@ -46,6 +49,7 @@ export function useWebSocket(
   onDataRef.current = onData;
   onClosedRef.current = onClosed;
   onBytesRef.current = onBytes;
+  onTextRef.current = onText;
   onModeRef.current = onMode;
   onResyncRef.current = onResync;
   scrollbackRef.current = scrollback;
@@ -82,6 +86,13 @@ export function useWebSocket(
       ws.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
           onBytesRef.current?.(new Uint8Array(event.data));
+          return;
+        }
+        /* Pane output arrives as a text frame that is not JSON. Everything the
+           server sends as JSON starts with "{", so the cheap check is enough
+           and costs nothing on the hot path. */
+        if (typeof event.data === "string" && event.data.charCodeAt(0) !== 123) {
+          onTextRef.current?.(event.data);
           return;
         }
         try {
