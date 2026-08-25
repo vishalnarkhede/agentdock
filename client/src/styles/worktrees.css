@@ -1,0 +1,170 @@
+/* Every worktree on disk. The ones with a session are a way in; the ones
+   without are the clean-up list, so an orphan is marked rather than hidden. */
+
+.wt {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface-0);
+}
+
+.wt-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.wt-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  max-width: 460px;
+  padding: 0 8px;
+  min-height: 32px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.wt-search:focus-within { border-color: var(--border-strong); }
+
+.wt-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-base);
+}
+.wt-search-input:focus { outline: none; }
+.wt-search-input::placeholder { color: var(--text-4); }
+
+.wt-search-clear {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wt-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+.wt-count-orphans { color: var(--status-blocked); }
+
+.wt-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+
+.wt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 0;
+  border-left: 2px solid transparent;
+}
+.wt-row:hover { background: var(--hover); }
+.wt-row-active { border-left-color: var(--intent-primary); }
+.wt-row[data-orphan="true"] { border-left-color: color-mix(in srgb, var(--status-blocked) 45%, transparent); }
+
+.wt-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0 9px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wt-row-main:disabled { cursor: default; }
+
+.wt-branch {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  color: var(--text-1);
+}
+
+.wt-repo {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  color: var(--text-3);
+}
+
+/* The identifying tail only — see pathTail. */
+.wt-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  color: var(--text-4);
+}
+
+.wt-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wt-tag {
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  white-space: nowrap;
+}
+.wt-tag-dirty { background: var(--yellow-dim, var(--surface-3)); color: var(--status-blocked); }
+.wt-tag-gone { background: var(--surface-3); color: var(--text-3); }
+.wt-tag-orphan { background: var(--surface-3); color: var(--text-3); }
+
+.wt-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  cursor: pointer;
+}
+.wt-jump:hover { border-color: var(--border-strong); background: var(--hover); }
+
+.wt-empty {
+  padding: 28px 16px;
+  color: var(--text-3);
+  font-size: var(--fs-base);
+}

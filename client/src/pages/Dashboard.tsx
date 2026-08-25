@@ -20,6 +20,7 @@ import { useSettings } from "../hooks/useSettings";
 import { TerminalView } from "../components/TerminalView";
 import { ChangesView } from "../components/ChangesView";
 import { SubAgentsView } from "../components/SubAgentsView";
+import { WorktreesView } from "../components/WorktreesView";
 import { FileExplorer } from "../components/FileExplorer";
 import type { FileExplorerHandle } from "../components/FileExplorer";
 import { useMobileNav } from "../MobileNavContext";
@@ -59,7 +60,7 @@ function getDisplayStatus(session: SessionInfo): string {
     ?? (session.status === "shell" ? "done" : session.status === "unknown" ? "" : session.status);
 }
 
-const FULL_SURFACES = ["plan", "changes", "files", "sub-agents"] as const;
+const FULL_SURFACES = ["plan", "changes", "files", "sub-agents", "worktrees"] as const;
 type FullSurface = (typeof FULL_SURFACES)[number];
 
 /** Surfaces reachable from the full-window host's own tab bar. */
@@ -761,6 +762,24 @@ export function Dashboard() {
       const next = new URLSearchParams(prev);
       if (id) next.set("view", id);
       else next.delete("view");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  /**
+   * Opening a session from inside a surface: one URL write, not two.
+   *
+   * setActiveSession and setFullSurface both call setSearchParams, and its
+   * functional form reads the params from the last committed render rather than
+   * from a queued update — so calling them in the same handler makes the second
+   * overwrite the first. The surface closed and the session did not change,
+   * which is what jumping from Sub-agents did too.
+   */
+  const jumpToSession = useCallback((name: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("session", name);
+      next.delete("view");
       return next;
     }, { replace: true });
   }, [setSearchParams]);
@@ -2071,7 +2090,7 @@ export function Dashboard() {
               {/* One surface at a time in the main area, chosen from the rail.
                   There is no second row of tabs: the rail stays visible, so the
                   thing you would switch with is already on screen. */}
-              {!isMobile && fullSurface && activeSession ? (
+              {!isMobile && fullSurface && (activeSession || fullSurface === "worktrees") ? (
                 <div className="surface-pane">
                   {/* The way out, then identity. The rail can close a surface by
                       pressing its icon again, and the session name here has always
@@ -2087,19 +2106,33 @@ export function Dashboard() {
                       <span>terminal</span>
                     </button>
                     <span className="surface-head-sep">/</span>
-                    <span className="surface-head-name">{RAIL.find((r) => r.id === fullSurface)?.label ?? fullSurface}</span>
-                    <span className="surface-head-sep">/</span>
-                    <button
-                      className="surface-head-session"
-                      onClick={() => setFullSurface(null)}
-                      title="Back to the terminal"
-                    >
-                      {activeSessionInfo?.displayName ?? activeSession}
-                    </button>
+                    <span className="surface-head-name">
+                      {fullSurface === "worktrees"
+                        ? "Worktrees"
+                        : RAIL.find((r) => r.id === fullSurface)?.label ?? fullSurface}
+                    </span>
+                    {/* Worktrees belongs to no session, so naming one here would
+                        be a lie about what you are looking at. */}
+                    {fullSurface !== "worktrees" && (
+                      <>
+                        <span className="surface-head-sep">/</span>
+                        <button
+                          className="surface-head-session"
+                          onClick={() => setFullSurface(null)}
+                          title="Back to the terminal"
+                        >
+                          {activeSessionInfo?.displayName ?? activeSession}
+                        </button>
+                      </>
+                    )}
                     <span className="surface-head-spacer" />
-                    <span className="surface-head-path">{activeSessionPaths[0] ?? ""}</span>
+                    <span className="surface-head-path">
+                      {fullSurface === "worktrees" ? "" : activeSessionPaths[0] ?? ""}
+                    </span>
                   </div>
-                  {fullSurface === "changes" ? (
+                  {fullSurface === "worktrees" ? (
+                    <WorktreesView activeSession={activeSession} onOpenSession={jumpToSession} />
+                  ) : fullSurface === "changes" ? (
                     <ChangesView key={activeSession} sessionName={activeSession} sessionPaths={activeSessionPaths} onCommentsSent={() => setFullSurface(null)} />
                   ) : fullSurface === "plan" ? (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
@@ -2110,7 +2143,7 @@ export function Dashboard() {
                       key={activeSession}
                       parentSession={activeSession}
                       sessions={sessions}
-                      onSelectChild={(c) => { setActiveSession(c); setFullSurface(null); }}
+                      onSelectChild={jumpToSession}
                       onRefresh={refresh}
                     />
                   )}
@@ -2487,6 +2520,18 @@ export function Dashboard() {
           >
             <Icon name="layers" size={18} />
             {sessionsBadge > 0 && <span className="rail-badge rail-badge-sessions">{sessionsBadge}</span>}
+          </button>
+
+          {/* Global, like Sessions: worktrees belong to no one session, so it
+              sits with the list rather than with the per-session surfaces. */}
+          <button
+            className={`rail-btn${fullSurface === "worktrees" ? " rail-btn-active" : ""}`}
+            onClick={() => setFullSurface(fullSurface === "worktrees" ? null : "worktrees")}
+            title="Worktrees"
+            aria-label="Worktrees"
+            aria-pressed={fullSurface === "worktrees"}
+          >
+            <Icon name="branch" size={18} />
           </button>
 
           <span className="rail-sep" aria-hidden="true" />

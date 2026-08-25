@@ -716,6 +716,30 @@ export async function deleteNgrokBasicAuth(): Promise<void> {
 }
 
 
+// ─── Worktrees ───
+
+export interface WorktreeInfo {
+  path: string;
+  repo: string;
+  repoPath: string;
+  branch: string | null;
+  head: string;
+  primary: boolean;
+  session: string | null;
+  sessionName: string | null;
+  prunable: boolean;
+  exists: boolean;
+  dirty: number | null;
+}
+
+export async function fetchWorktrees(): Promise<WorktreeInfo[]> {
+  if (isDemo()) return [];
+  const res = await fetch(`${BASE}/api/worktrees`);
+  if (!res.ok) throw new Error("Failed to list worktrees");
+  const data = await res.json();
+  return Array.isArray(data.worktrees) ? data.worktrees : [];
+}
+
 // ─── Plain shells beside the agent ───
 
 export async function fetchShells(session: string): Promise<string[]> {
