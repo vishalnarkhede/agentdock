@@ -200,7 +200,11 @@ app.get("/hooks", (c) => {
 app.post("/hooks", (c) => {
   try {
     syncHooksToClaudeSettings();
-    return c.json({ ok: true, ...getHookInstallState() });
+    /* The state's own `ok` means "every hook is installed", which is not the
+       same claim as "the request worked" — and the spread was silently winning
+       over a literal `ok: true` that TypeScript flagged as dead. The status
+       code says whether the request worked; the body says what the state is. */
+    return c.json(getHookInstallState());
   } catch (err: any) {
     return c.json({ ok: false, error: err?.message || "install failed" }, 500);
   }

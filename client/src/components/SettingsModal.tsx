@@ -494,9 +494,10 @@ function HookPanel() {
     setBusy(true);
     setErr(null);
     try {
-      const r = await installHooks();
-      if (r.ok) setState(r);
-      else setErr(r.error || "Install failed");
+      /* `ok` on the state means every hook is installed, not that the install
+         worked — reading it as the latter reported "Install failed" on a
+         partial install that had in fact just succeeded. A failure throws. */
+      setState(await installHooks());
     } catch (e: any) {
       setErr(e.message);
     } finally {

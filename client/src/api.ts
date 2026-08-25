@@ -785,9 +785,11 @@ export async function fetchHookState(): Promise<HookState> {
   return res.json();
 }
 
-export async function installHooks(): Promise<HookState & { ok: boolean; error?: string }> {
+export async function installHooks(): Promise<HookState> {
   const res = await fetch(`${BASE}/api/settings/hooks`, { method: "POST" });
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any).error || "Install failed");
+  return data as HookState;
 }
 
 export interface ConflictPair {
