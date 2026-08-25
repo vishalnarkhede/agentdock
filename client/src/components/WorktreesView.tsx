@@ -100,7 +100,10 @@ export function WorktreesView({
             const jumpable = Boolean(w.sessionName);
             return (
               <li
-                key={w.path}
+                /* Composite, not the path alone: the same worktree reachable
+                   through two repos would otherwise collide, and React keeps
+                   stale rows when keys repeat. */
+                key={`${w.repoPath}:${w.path}`}
                 className={`wt-row${w.sessionName === activeSession ? " wt-row-active" : ""}`}
                 data-orphan={!jumpable}
               >

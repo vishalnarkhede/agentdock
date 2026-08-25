@@ -88,6 +88,27 @@ export function parseWorktreeList(stdout: string): {
   return out;
 }
 
+/**
+ * One entry per worktree, keeping the first.
+ *
+ * Configured repos are not necessarily distinct repositories: several of them
+ * can be worktrees of the same one, and `git worktree list` run in any of them
+ * reports the whole set. Scanning each configured repo therefore returns the
+ * same worktree several times — 130 records for 101 worktrees here — which the
+ * list then rendered with duplicate React keys, and a duplicate key breaks
+ * reconciliation: filtering left stale rows on screen.
+ */
+export function dedupeByPath<T extends { path: string }>(list: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of list) {
+    if (seen.has(item.path)) continue;
+    seen.add(item.path);
+    out.push(item);
+  }
+  return out;
+}
+
 /** Which session owns which worktree directory, by absolute path. */
 export function ownersByPath(metas: Record<string, { repoPath: string; wtDir: string }[]>): Map<string, string> {
   const owners = new Map<string, string>();
@@ -101,8 +122,24 @@ export async function listAllWorktrees(): Promise<WorktreeInfo[]> {
   const repos = getRepos();
   const owners = ownersByPath(getAllSessionMetas());
 
-  const perRepo = await Promise.all(
+  /* Two configured repos that are worktrees of the same repository would each
+     report the whole set, so scan one repo per repository. The common git dir
+     is what identifies a repository — a worktree's points back at its parent. */
+  const byRepository = new Map<string, (typeof repos)[number]>();
+  await Promise.all(
     repos.map(async (repo) => {
+      const { stdout, ok } = await git(repo.path, [
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ]);
+      const key = ok && stdout.trim() ? stdout.trim() : repo.path;
+      if (!byRepository.has(key)) byRepository.set(key, repo);
+    }),
+  );
+
+  const perRepo = await Promise.all(
+    [...byRepository.values()].map(async (repo) => {
       const { stdout, ok } = await git(repo.path, ["worktree", "list", "--porcelain"]);
       if (!ok) return [];
       return parseWorktreeList(stdout).map((wt, i) => ({
@@ -114,7 +151,10 @@ export async function listAllWorktrees(): Promise<WorktreeInfo[]> {
     }),
   );
 
-  const flat = perRepo.flat();
+  /* Belt and braces: one repository can still be reached by two paths that
+     resolve to different common dirs (a symlinked checkout), and a duplicate
+     key is worse than a missing row. */
+  const flat = dedupeByPath(perRepo.flat());
 
   /* One `git status` per worktree, in parallel: whether a worktree still holds
      work is the question you ask right after "why is this still here". */

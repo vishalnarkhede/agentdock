@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { ownersByPath, parseWorktreeList } from "../services/worktrees";
+import { dedupeByPath, ownersByPath, parseWorktreeList } from "../services/worktrees";
 
 const REAL = `worktree /Users/vishal/projects/chat
 HEAD d89b0827c1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6
@@ -82,5 +82,28 @@ describe("ownersByPath", () => {
 
   it("has nothing to say about a worktree no session claims", () => {
     expect(ownersByPath({}).get("/wt/orphan")).toBeUndefined();
+  });
+});
+
+describe("dedupeByPath", () => {
+  it("keeps one entry per path, the first", () => {
+    const out = dedupeByPath([
+      { path: "/a", repo: "one" },
+      { path: "/b", repo: "one" },
+      { path: "/a", repo: "two" },
+    ]);
+    expect(out).toEqual([
+      { path: "/a", repo: "one" },
+      { path: "/b", repo: "one" },
+    ]);
+  });
+
+  it("leaves a list that is already unique alone", () => {
+    const list = [{ path: "/a" }, { path: "/b" }];
+    expect(dedupeByPath(list)).toEqual(list);
+  });
+
+  it("handles an empty list", () => {
+    expect(dedupeByPath([])).toEqual([]);
   });
 });
