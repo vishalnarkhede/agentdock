@@ -716,6 +716,47 @@ export async function deleteNgrokBasicAuth(): Promise<void> {
 }
 
 
+// ─── Worktrees ───
+
+export interface WorktreeInfo {
+  path: string;
+  repo: string;
+  repoPath: string;
+  branch: string | null;
+  head: string;
+  primary: boolean;
+  session: string | null;
+  sessionName: string | null;
+  prunable: boolean;
+  exists: boolean;
+  dirty: number | null;
+}
+
+export async function fetchWorktrees(): Promise<WorktreeInfo[]> {
+  if (isDemo()) return [];
+  const res = await fetch(`${BASE}/api/worktrees`);
+  if (!res.ok) throw new Error("Failed to list worktrees");
+  const data = await res.json();
+  return Array.isArray(data.worktrees) ? data.worktrees : [];
+}
+
+/**
+ * Removes a worktree. `force` is the answer to the server's own refusal when it
+ * holds uncommitted work — it is never sent unprompted.
+ */
+export async function deleteWorktree(
+  path: string,
+  force = false,
+): Promise<{ worktrees?: WorktreeInfo[]; error?: string; dirty?: number; status: number }> {
+  const res = await fetch(`${BASE}/api/worktrees`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, force }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ...(data as any), status: res.status };
+}
+
 // ─── Plain shells beside the agent ───
 
 export async function fetchShells(session: string): Promise<string[]> {
