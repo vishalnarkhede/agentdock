@@ -2036,15 +2036,26 @@ export function Dashboard() {
                   thing you would switch with is already on screen. */}
               {!isMobile && fullSurface && activeSession ? (
                 <div className="surface-pane">
-                  {/* Identity, not navigation. With the session list hidden,
-                      nothing else on screen says whose Plan or Files this is. */}
+                  {/* The way out, then identity. The rail can close a surface by
+                      pressing its icon again, and the session name here has always
+                      been a button, but neither looks like the way back — so a
+                      reader who wanted the terminal reloaded the page. */}
                   <div className="surface-head">
+                    <button
+                      className="surface-back"
+                      onClick={() => setFullSurface(null)}
+                      title="Back to the terminal"
+                    >
+                      <Icon name="chevl" size={13} />
+                      <span>terminal</span>
+                    </button>
+                    <span className="surface-head-sep">/</span>
                     <span className="surface-head-name">{RAIL.find((r) => r.id === fullSurface)?.label ?? fullSurface}</span>
                     <span className="surface-head-sep">/</span>
                     <button
                       className="surface-head-session"
                       onClick={() => setFullSurface(null)}
-                      title="Back to sessions"
+                      title="Back to the terminal"
                     >
                       {activeSessionInfo?.displayName ?? activeSession}
                     </button>
