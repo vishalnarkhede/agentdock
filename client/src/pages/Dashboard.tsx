@@ -11,7 +11,7 @@ import { fetchHookState, installHooks, type HookState } from "../api";
 import { PlanView } from "../components/PlanView";
 import "../styles/sidebar-header.css";
 import { QUEUE_BUCKETS, queueBucket } from "../queue";
-import { fetchConflicts, fetchPanelSummary } from "../api";
+import { fetchConflicts, fetchPanelSummary, fetchShells, openShell, closeShell } from "../api";
 import { QuietView } from "../components/QuietView";
 import { MobileQueue } from "../components/MobileQueue";
 import { MobileApprove } from "../components/MobileApprove";
@@ -583,6 +583,10 @@ export function Dashboard() {
    */
   const [sharedWith, setSharedWith] = useState<{ session: string; files: number } | null>(null);
   const [mobileApproveDismissed, setMobileApproveDismissed] = useState(false);
+  /* Plain shells in the same worktree, beside the agent. Two at most: past that
+     the panes are too small to run anything in. */
+  const [shells, setShells] = useState<string[]>([]);
+  const [shellBusy, setShellBusy] = useState(false);
   const [panelSummary, setPanelSummary] = useState<{
     planDone: number; planTotal: number; plus: number; minus: number; fileCount: number;
   } | null>(null);
@@ -1450,6 +1454,39 @@ export function Dashboard() {
     }
   };
 
+  /* Shells outlive a reload, so which ones exist is the server's answer, asked
+     again whenever the session changes. */
+  useEffect(() => {
+    if (!activeSession) { setShells([]); return; }
+    let alive = true;
+    setShells([]);
+    fetchShells(activeSession).then((s) => { if (alive) setShells(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, [activeSession]);
+
+  const addShell = useCallback(async () => {
+    if (!activeSession || shellBusy || shells.length >= 2) return;
+    setShellBusy(true);
+    try {
+      setShells(await openShell(activeSession));
+    } catch {
+      /* Nothing to say here that the missing pane does not say already. */
+    } finally {
+      setShellBusy(false);
+    }
+  }, [activeSession, shellBusy, shells.length]);
+
+  const dropShell = useCallback(async (shell: string) => {
+    if (!activeSession) return;
+    const index = Number(shell.slice(shell.lastIndexOf("-") + 1));
+    setShells((prev) => prev.filter((s) => s !== shell));
+    try {
+      setShells(await closeShell(activeSession, index));
+    } catch {
+      /* Already gone. */
+    }
+  }, [activeSession]);
+
   // One call feeds every panel badge, so they cannot disagree with each other.
   useEffect(() => {
     if (!activeSession || activeSessionPaths.length === 0) { setPanelSummary(null); return; }
@@ -2093,17 +2130,49 @@ export function Dashboard() {
                     </button>
                   </div>
                 ) : (!isMobile || mobileShowTerminal) && (
-                  <TerminalView
-                    key={activeSession}
-                    sessionName={activeSession}
-                    agentType={sessions.find((s) => s.name === activeSession)?.agentType}
-                    onClosed={handleSessionClosed}
-                    onAgentSwitched={refresh}
-                    toolbarPortal={toolbarRef}
-                    onSwipeBack={() => setMobileShowTerminal(false)}
-                    onKeyboardVisibilityChange={setKbOpen}
-                    isActive={!bottomTab}
-                  />
+                  <div className={`term-split${!isMobile && shells.length > 0 ? " term-split-open" : ""}`}>
+                    <div className="term-split-agent">
+                      <TerminalView
+                        key={activeSession}
+                        sessionName={activeSession}
+                        agentType={sessions.find((s) => s.name === activeSession)?.agentType}
+                        onClosed={handleSessionClosed}
+                        onAgentSwitched={refresh}
+                        toolbarPortal={toolbarRef}
+                        onSwipeBack={() => setMobileShowTerminal(false)}
+                        onKeyboardVisibilityChange={setKbOpen}
+                        isActive={!bottomTab}
+                      />
+                    </div>
+                    {/* Desktop only: on a phone there is no room to split, and
+                        the agent is what you came for. */}
+                    {!isMobile && shells.length > 0 && (
+                      <div className="term-shells">
+                        {shells.map((shell) => (
+                          <div className="term-shell" key={shell}>
+                            <div className="term-shell-head">
+                              <Icon name="term" size={12} />
+                              <span className="term-shell-name">shell</span>
+                              <span className="term-shell-path">
+                                {(activeSessionPaths[0] || "").split("/").filter(Boolean).pop()}
+                              </span>
+                              <button
+                                className="term-shell-close"
+                                onClick={() => dropShell(shell)}
+                                title="Close this shell"
+                                aria-label="Close this shell"
+                              >
+                                ×
+                              </button>
+                            </div>
+                            <div className="term-shell-body">
+                              <TerminalView key={shell} sessionName={shell} isActive={false} bare />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               )}
@@ -2439,6 +2508,25 @@ export function Dashboard() {
               </button>
             );
           })}
+
+          <span className="rail-sep" aria-hidden="true" />
+
+          {/* Not a surface: this splits the terminal area rather than replacing
+              it, so it sits after the separator and keeps its own state. */}
+          <button
+            className={`rail-btn${shells.length > 0 ? " rail-btn-active" : ""}`}
+            onClick={addShell}
+            disabled={!activeSession || shells.length >= 2 || shellBusy}
+            title={
+              shells.length >= 2
+                ? "Two shells is the limit"
+                : "Open a shell in this worktree"
+            }
+            aria-label="Open a shell in this worktree"
+          >
+            <Icon name="term" size={18} />
+            {shells.length > 0 && <span className="rail-badge rail-badge-shell">{shells.length}</span>}
+          </button>
         </nav>
       )}
     </div>

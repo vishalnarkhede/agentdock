@@ -716,6 +716,34 @@ export async function deleteNgrokBasicAuth(): Promise<void> {
 }
 
 
+// ─── Plain shells beside the agent ───
+
+export async function fetchShells(session: string): Promise<string[]> {
+  if (isDemo()) return [];
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(session)}/shells`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data.shells) ? data.shells : [];
+}
+
+export async function openShell(session: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(session)}/shells`, {
+    method: "POST",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any).error || "Could not open a shell");
+  return Array.isArray((data as any).shells) ? (data as any).shells : [];
+}
+
+export async function closeShell(session: string, index: number): Promise<string[]> {
+  const res = await fetch(
+    `${BASE}/api/sessions/${encodeURIComponent(session)}/shells/${index}`,
+    { method: "DELETE" },
+  );
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray((data as any).shells) ? (data as any).shells : [];
+}
+
 // ─── Review summary ───
 
 /** The counts the Plan and Changes headers show. */

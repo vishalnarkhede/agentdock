@@ -110,9 +110,12 @@ interface Props {
   onSwipeBack?: () => void;
   onKeyboardVisibilityChange?: (visible: boolean) => void;
   isActive?: boolean;
+  /** A plain shell pane: no toolbar, no agent controls. The pane is small and
+   *  none of those actions belong to a shell. */
+  bare?: boolean;
 }
 
-export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive }: Props) {
+export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched, toolbarPortal, onSwipeBack, onKeyboardVisibilityChange, isActive, bare }: Props) {
   const { settings, updateSetting } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -923,9 +926,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           Drop files here
         </div>
       )}
-      {toolbarPortal?.current
-        ? createPortal(toolbarContent, toolbarPortal.current)
-        : toolbarContent}
+      {bare
+        ? null
+        : toolbarPortal?.current
+          ? createPortal(toolbarContent, toolbarPortal.current)
+          : toolbarContent}
       {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
       <div className="term-scrollbar-area">
         {scrollThumb.size < 0.99 && (

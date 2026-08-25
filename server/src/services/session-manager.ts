@@ -36,6 +36,7 @@ import {
   getPreferences,
 } from "./config";
 import * as tmux from "./tmux";
+import { closeShellsFor } from "./shells";
 import * as worktree from "./worktree";
 import type { CreateSessionRequest, AgentType } from "../types";
 
@@ -425,6 +426,10 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
 }
 
 export async function stopSession(sessionName: string): Promise<void> {
+  /* Shells belong to the session; leaving them running would strand a pane
+     nothing in the UI can reach any more. */
+  await closeShellsFor(sessionName).catch(() => {});
+
   // Stop all child sessions first
   const children = getSessionChildren(sessionName);
   for (const child of children) {

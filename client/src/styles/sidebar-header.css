@@ -252,3 +252,97 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
+
+/* ═══ Shells beside the agent ══════════════════════════════════════════════
+   A plain shell in the same worktree, for the command you would otherwise type
+   into the agent's prompt. The agent keeps the left half; shells stack on the
+   right, so the second one splits the first rather than shrinking the agent
+   again. */
+.term-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.term-split-agent {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.term-split-open .term-split-agent {
+  border-right: 1px solid var(--border-strong);
+}
+
+.term-shells {
+  display: flex;
+  flex-direction: column;
+  /* Half the room, and no less: a shell you cannot read a command in is not
+     worth the split. */
+  flex: 1 1 50%;
+  min-width: 320px;
+  min-height: 0;
+}
+
+.term-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.term-shell + .term-shell {
+  border-top: 1px solid var(--border-strong);
+}
+
+.term-shell-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 6px 4px 9px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.term-shell-name { color: var(--text-2); }
+
+.term-shell-path {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: max(10px, calc(var(--fs-base) - 3px));
+  color: var(--text-4);
+}
+
+.term-shell-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.term-shell-close:hover { background: var(--hover); color: var(--text-1); }
+
+.term-shell-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rail-badge-shell { background: var(--text-3); color: var(--surface-0); }
