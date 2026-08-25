@@ -9,8 +9,9 @@
  * session is gone, and worktrees AgentDock never made.
  */
 
-import { getRepos, getAllSessionMetas, PREFIX } from "./config";
-import { existsSync } from "fs";
+import { getRepos, getAllSessionMetas, getBasePath, PREFIX } from "./config";
+import { existsSync, readdirSync, rmdirSync } from "fs";
+import { dirname, join } from "path";
 
 export interface WorktreeInfo {
   /** Absolute path of the worktree directory. */
@@ -224,6 +225,26 @@ export function checkDeletable(
 }
 
 /**
+ * The directory AgentDock wrapped this worktree in, if it made one.
+ *
+ * A session's worktrees live at `<base>/.worktrees/<slug>/<repo>` so a
+ * multi-repo session can keep them together — which means removing the worktree
+ * empties `<slug>` but leaves it behind. Sessions with a single repo sometimes
+ * sit directly at `<base>/.worktrees/<name>` and have no wrapper at all.
+ *
+ * Only a directory one level under AgentDock's own worktrees root counts. This
+ * decides what gets removed from disk, so it says no to anything it does not
+ * recognise rather than guessing.
+ */
+export function workspaceWrapper(path: string, basePath: string): string | null {
+  const root = join(basePath, ".worktrees");
+  const parent = dirname(path);
+  if (parent === root) return null; /* No wrapper: the worktree is the entry. */
+  if (dirname(parent) !== root) return null;
+  return parent;
+}
+
+/**
  * Removes a worktree. The branch is left alone — it is where the committed work
  * is, and this is a request to free the directory, not to discard the history.
  */
@@ -238,5 +259,20 @@ export async function removeWorktree(
      and that is exactly the row someone is trying to clear. */
   await git(repoPath, ["worktree", "prune"]);
   if (!ok && existsSync(path)) return { ok: false, error: "git refused to remove it" };
+
+  /* git removed the worktree; the directory AgentDock put it in is ours to
+     clear. Only when empty — a multi-repo session's wrapper still holds the
+     other repos' worktrees, and those are not part of this request. */
+  removeIfEmpty(workspaceWrapper(path, getBasePath()));
+  removeIfEmpty(join(getBasePath(), ".worktrees"));
   return { ok: true };
+}
+
+function removeIfEmpty(dir: string | null): void {
+  if (!dir || !existsSync(dir)) return;
+  try {
+    if (readdirSync(dir).length === 0) rmdirSync(dir);
+  } catch {
+    /* Busy, or not ours to remove — leaving it is harmless. */
+  }
 }

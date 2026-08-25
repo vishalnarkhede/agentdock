@@ -10,6 +10,7 @@ import {
   dedupeByPath,
   ownersByPath,
   parseWorktreeList,
+  workspaceWrapper,
 } from "../services/worktrees";
 
 const REAL = `worktree /Users/vishal/projects/chat
@@ -167,5 +168,31 @@ describe("checkDeletable", () => {
     expect(checkDeletable({ ...base, exists: false, dirty: null, prunable: true }, false)).toEqual({
       ok: true,
     });
+  });
+});
+
+describe("workspaceWrapper", () => {
+  const base = "/Users/x/projects";
+
+  it("finds the wrapper of a multi-repo session's worktree", () => {
+    expect(workspaceWrapper(`${base}/.worktrees/wt-855085/volt-dashboard`, base)).toBe(
+      `${base}/.worktrees/wt-855085`,
+    );
+  });
+
+  it("reports none when the worktree sits directly under the root", () => {
+    expect(workspaceWrapper(`${base}/.worktrees/volt-mod2-1165`, base)).toBeNull();
+  });
+
+  it("reports none for a worktree outside AgentDock's root", () => {
+    expect(workspaceWrapper("/Users/x/.cursor/worktrees/chat/orf", base)).toBeNull();
+  });
+
+  it("reports none for something nested deeper than a wrapper", () => {
+    expect(workspaceWrapper(`${base}/.worktrees/wt-1/repo/inner`, base)).toBeNull();
+  });
+
+  it("reports none for the repository itself", () => {
+    expect(workspaceWrapper(`${base}/chat`, base)).toBeNull();
   });
 });
