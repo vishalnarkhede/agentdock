@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deleteWorktree, fetchWorktrees, type WorktreeInfo } from "../api";
+import { deleteWorktrees, fetchWorktrees, type WorktreeInfo } from "../api";
 import { Icon } from "./Icon";
 import "../styles/worktrees.css";
 
@@ -38,6 +38,8 @@ export function WorktreesView({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ path: string; message: string } | null>(null);
+  /* Selected by path, so a selection survives filtering and re-fetching. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -64,36 +66,94 @@ export function WorktreesView({
 
   const orphans = shown.filter((w) => !w.sessionName).length;
 
+  const deletable = useMemo(() => shown.filter((w) => !w.sessionName), [shown]);
+  const chosen = useMemo(
+    () => (all ?? []).filter((w) => selected.has(w.path) && !w.sessionName),
+    [all, selected],
+  );
+  const allShownChosen = deletable.length > 0 && deletable.every((w) => selected.has(w.path));
+
+  const toggle = (path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const toggleAllShown = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allShownChosen) for (const w of deletable) next.delete(w.path);
+      else for (const w of deletable) next.add(w.path);
+      return next;
+    });
+  };
+
   /**
-   * Deleting one.
+   * Deleting, one or many.
    *
-   * The prompt says what is actually at stake — the directory goes, the branch
-   * stays, and uncommitted work is named and counted rather than folded into a
-   * generic "are you sure". The server refuses dirty worktrees unless told
-   * otherwise, so the confirmation and the force flag are the same decision.
+   * The prompt says what is actually at stake — the directories go, the
+   * branches stay, and uncommitted work is named and counted rather than folded
+   * into a generic "are you sure". The server refuses dirty worktrees unless
+   * told otherwise, so the confirmation and the force flag are the same
+   * decision.
    */
-  const remove = async (w: WorktreeInfo) => {
-    const dirty = w.dirty ?? 0;
-    const lines = [
-      `Delete this worktree?`,
-      ``,
-      `  ${w.path}`,
-      w.branch ? `  branch ${w.branch} — kept, not deleted` : `  detached at ${w.head}`,
-    ];
-    if (dirty > 0) {
-      lines.push(``, `${dirty} uncommitted file${dirty === 1 ? "" : "s"} will be lost.`);
+  const remove = async (targets: WorktreeInfo[]) => {
+    if (targets.length === 0) return;
+    const dirty = targets.filter((w) => (w.dirty ?? 0) > 0);
+    const dirtyFiles = dirty.reduce((n, w) => n + (w.dirty ?? 0), 0);
+
+    const lines =
+      targets.length === 1
+        ? [
+            `Delete this worktree?`,
+            ``,
+            `  ${targets[0].path}`,
+            targets[0].branch
+              ? `  branch ${targets[0].branch} — kept, not deleted`
+              : `  detached at ${targets[0].head}`,
+          ]
+        : [
+            `Delete ${targets.length} worktrees?`,
+            ``,
+            ...targets.slice(0, 8).map((w) => `  ${w.branch ?? w.head} — ${w.repo}`),
+            ...(targets.length > 8 ? [`  …and ${targets.length - 8} more`] : []),
+            ``,
+            `Their branches are kept, not deleted.`,
+          ];
+    if (dirtyFiles > 0) {
+      lines.push(
+        ``,
+        targets.length === 1
+          ? `${dirtyFiles} uncommitted file${dirtyFiles === 1 ? "" : "s"} will be lost.`
+          : `${dirty.length} of them hold ${dirtyFiles} uncommitted file${dirtyFiles === 1 ? "" : "s"}, which will be lost.`,
+      );
     }
     if (!confirm(lines.join("\n"))) return;
 
-    setBusy(w.path);
+    setBusy(targets.length === 1 ? targets[0].path : "batch");
     setFailed(null);
-    const res = await deleteWorktree(w.path, dirty > 0);
+    const res = await deleteWorktrees(
+      targets.map((w) => w.path),
+      dirtyFiles > 0,
+    );
     setBusy(null);
+
     if (res.worktrees) {
       setAll(res.worktrees);
-      return;
+      const gone = new Set(res.worktrees.map((w) => w.path));
+      setSelected((prev) => new Set([...prev].filter((p) => gone.has(p))));
     }
-    setFailed({ path: w.path, message: res.error || "could not remove it" });
+    const failures = (res.results ?? []).filter((r) => !r.ok);
+    if (failures.length === 1) {
+      setFailed({ path: failures[0].path, message: failures[0].error || "could not remove it" });
+    } else if (failures.length > 1) {
+      setFailed({ path: "batch", message: `${failures.length} could not be removed` });
+    } else if (!res.worktrees) {
+      setFailed({ path: "batch", message: res.error || "could not remove them" });
+    }
   };
 
   if (error) return <div className="wt-empty">{error}</div>;
@@ -118,11 +178,36 @@ export function WorktreesView({
             </button>
           )}
         </span>
+        {deletable.length > 0 && (
+          <label className="wt-check wt-check-all" title="Select every one shown that has no session">
+            <input type="checkbox" checked={allShownChosen} onChange={toggleAllShown} />
+            <span>all</span>
+          </label>
+        )}
+
         <span className="wt-count">
           {shown.length} worktree{shown.length === 1 ? "" : "s"}
           {orphans > 0 && <span className="wt-count-orphans"> · {orphans} with no session</span>}
         </span>
+
+        {chosen.length > 0 && (
+          <span className="wt-batch">
+            <span className="wt-batch-count">{chosen.length} selected</span>
+            <button className="wt-batch-clear" onClick={() => setSelected(new Set())}>
+              clear
+            </button>
+            <button
+              className="wt-delete wt-batch-delete"
+              onClick={() => remove(chosen)}
+              disabled={busy !== null}
+            >
+              {busy === "batch" ? "deleting…" : `delete ${chosen.length}`}
+            </button>
+          </span>
+        )}
       </div>
+
+      {failed?.path === "batch" && <div className="wt-failed wt-failed-batch">{failed.message}</div>}
 
       {shown.length === 0 ? (
         <div className="wt-empty">
@@ -141,6 +226,17 @@ export function WorktreesView({
                 className={`wt-row${w.sessionName === activeSession ? " wt-row-active" : ""}`}
                 data-orphan={!jumpable}
               >
+                {jumpable ? (
+                  <span className="wt-check-gap" aria-hidden="true" />
+                ) : (
+                  <label className="wt-check" title="Select for batch delete">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(w.path)}
+                      onChange={() => toggle(w.path)}
+                    />
+                  </label>
+                )}
                 <button
                   className="wt-row-main"
                   disabled={!jumpable}
@@ -170,7 +266,7 @@ export function WorktreesView({
                       <span className="wt-tag wt-tag-orphan">no session</span>
                       <button
                         className="wt-delete"
-                        onClick={() => remove(w)}
+                        onClick={() => remove([w])}
                         disabled={busy === w.path}
                         title="Delete this worktree directory — the branch is kept"
                       >

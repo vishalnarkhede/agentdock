@@ -194,3 +194,61 @@
    single flex line. */
 .wt-row { flex-wrap: wrap; }
 .wt-failed { flex: 1 0 100%; }
+
+/* ─── Selection ─────────────────────────────────────────────────────────────
+   Only rows no session owns can be selected, so the checkbox column is empty
+   for the rest rather than showing a control that would refuse. */
+.wt-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding-left: 12px;
+  cursor: pointer;
+}
+.wt-check input { cursor: pointer; accent-color: var(--intent-primary); }
+
+/* Keeps the branch column aligned on rows that have no checkbox. */
+.wt-check-gap {
+  flex-shrink: 0;
+  width: 13px;
+  padding-left: 12px;
+}
+
+.wt-check-all {
+  padding-left: 0;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+
+.wt-row-main { padding-left: 10px; }
+
+.wt-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.wt-batch-count {
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-1);
+}
+
+.wt-batch-clear {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  cursor: pointer;
+  text-decoration: underline;
+}
+.wt-batch-clear:hover { color: var(--text-1); }
+
+.wt-batch-delete { padding: 4px 10px; }
+
+.wt-failed-batch {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
