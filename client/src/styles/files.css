@@ -50,6 +50,16 @@
   color: var(--text-1);
 }
 
+.fe-seg-option:disabled {
+  color: var(--text-4);
+  cursor: default;
+}
+
+.fe-seg-option:disabled:hover {
+  background: none;
+  color: var(--text-4);
+}
+
 /* ─── Changed-line counts ─── */
 .fe-change-counts {
   display: flex;
@@ -128,9 +138,139 @@
   color: var(--text-1);
 }
 
+/* ─── Rendered markdown ───
+   The reading view for .md files. CodeMirror covers source; this covers prose,
+   so the two never share a rule. */
+.fe-md {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 28px;
+  color: var(--text-2);
+  font-size: var(--fs-base);
+  line-height: 1.65;
+}
+
+.fe-md > :first-child { margin-top: 0; }
+
+.fe-md h1,
+.fe-md h2,
+.fe-md h3,
+.fe-md h4,
+.fe-md h5,
+.fe-md h6 {
+  color: var(--text-1);
+  line-height: 1.3;
+  margin: 1.4em 0 0.5em;
+}
+
+.fe-md h1 { font-size: calc(var(--fs-base) + 6px); }
+.fe-md h2 { font-size: calc(var(--fs-base) + 3px); }
+.fe-md h3 { font-size: calc(var(--fs-base) + 1px); }
+.fe-md h4,
+.fe-md h5,
+.fe-md h6 { font-size: var(--fs-base); }
+
+.fe-md h1,
+.fe-md h2 {
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.3em;
+}
+
+.fe-md p { margin: 0.7em 0; }
+
+.fe-md ul,
+.fe-md ol {
+  margin: 0.7em 0;
+  padding-left: 1.5em;
+}
+
+.fe-md li { margin: 0.3em 0; }
+
+.fe-md li::marker { color: var(--text-3); }
+
+/* GFM task lists: read-only, since editing happens in source. */
+.fe-md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.2em; }
+
+.fe-md input[type="checkbox"] {
+  accent-color: var(--intent-primary);
+  margin-right: 6px;
+  pointer-events: none;
+}
+
+.fe-md a { color: var(--cyan); }
+
+.fe-md code {
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--cyan);
+  font-family: var(--font-mono, monospace);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  padding: 1px 5px;
+}
+
+.fe-md pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  margin: 0.9em 0;
+  overflow-x: auto;
+  padding: 12px;
+}
+
+.fe-md pre code {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  line-height: 1.5;
+  padding: 0;
+}
+
+.fe-md blockquote {
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-3);
+  margin: 0.9em 0;
+  padding-left: 12px;
+}
+
+.fe-md table {
+  border-collapse: collapse;
+  display: block;
+  margin: 0.9em 0;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.fe-md th,
+.fe-md td {
+  border: 1px solid var(--border-subtle);
+  font-size: max(11px, calc(var(--fs-base) - 1px));
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.fe-md th {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.fe-md hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 1.4em 0;
+}
+
+.fe-md img {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ─── Keyboard focus ─── */
 .fe-tree-panel [data-fe-row]:focus-visible,
 .fe-tree-panel .fe-seg-option:focus-visible,
+.fe-file-panel .fe-seg-option:focus-visible,
 .fe-tree-panel .fe-search-clear:focus-visible,
 .fe-file-panel .fe-file-search-close:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -144,7 +284,8 @@
 }
 
 @media (max-width: 768px) {
-  .fe-tree-panel .fe-seg-option {
+  .fe-tree-panel .fe-seg-option,
+  .fe-file-panel .fe-seg-option {
     min-height: 44px;
     padding: 0 12px;
   }

@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { fetchFsDir, fetchFsFile, writeFsFile, sendSessionInput } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
@@ -375,6 +377,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roots.join(",")]);
 
+  // Markdown opens as a document; the toggle is per-file, reset by the next open.
+  const [mdPreview, setMdPreview] = useState(true);
+
   // File search (Cmd+F)
   const [fileSearchActive, setFileSearchActive] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
@@ -446,6 +451,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   }, []);
 
   const handleOpenGrepResult = useCallback(async (result: GrepResult) => {
+    // Arriving at a line number means the lines matter, so a markdown file lands
+    // in source rather than in the preview, which has no lines to land on.
+    setMdPreview(false);
     if (openFile?.path === result.path) {
       // Already open: CodeMirror knows where line N is; no line-height maths.
       setActiveMatchLine(result.lineNumber);
@@ -499,6 +507,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   const handleOpenFile = useCallback(async (path: string) => {
     if (openFile?.path === path) return;
+    setMdPreview(true);
     setLoadingPath(path);
     setError(null);
     try {
@@ -583,6 +592,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   const dirty = draft !== null && openFile !== null && draft !== openFile.content;
   const editing = draft !== null;
+
+  const isMarkdown = openFile?.language === "markdown";
+  // Editing, in-file search and line jumps all need the editor's line model, so
+  // they outrank the preview instead of fighting it.
+  const showPreview = Boolean(isMarkdown && mdPreview && !editing && !fileSearchActive);
 
   const startEditing = useCallback(() => {
     if (!openFile) return;
@@ -943,6 +957,22 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             <div className="fe-file-header">
               <span className="fe-file-breadcrumb">{getBreadcrumb(openFile.path)}</span>
               <span className="fe-file-size">{Math.round(openFile.size / 1024 * 10) / 10}KB</span>
+              {isMarkdown && (
+                <div className="fe-seg" role="group" aria-label="Markdown view">
+                  <button
+                    className={`fe-seg-option${showPreview ? " fe-seg-option-active" : ""}`}
+                    onClick={() => { setMdPreview(true); closeFileSearch(); }}
+                    disabled={editing}
+                    title={editing ? "Finish editing to read it rendered" : undefined}
+                    aria-pressed={showPreview}
+                  >preview</button>
+                  <button
+                    className={`fe-seg-option${!showPreview ? " fe-seg-option-active" : ""}`}
+                    onClick={() => setMdPreview(false)}
+                    aria-pressed={!showPreview}
+                  >source</button>
+                </div>
+              )}
               <span className="fe-file-search-hint">⌘F</span>
             </div>
             {fileSearchActive && (
@@ -999,20 +1029,27 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 </div>
               )}
 
-              <CodeViewLazy
-                viewRef={codeRef}
-                path={openFile.path}
-                content={shownContent}
-                editable={editing}
-                onChange={setDraft}
-                highlightTerm={fileSearchActive ? fileSearchQuery : ""}
-                activeLine={activeMatchLine}
-                onCmdClick={(word: string, line: number) => navigateToSymbol(word, line)}
-                onMatchCount={setFileSearchMatchCount}
-                onSelectionChange={sessionName ? setSelection : undefined}
-              />
+              {showPreview ? (
+                <div className="fe-md">
+                  <Markdown remarkPlugins={[remarkGfm]}>{shownContent}</Markdown>
+                </div>
+              ) : (
+                <CodeViewLazy
+                  viewRef={codeRef}
+                  path={openFile.path}
+                  content={shownContent}
+                  editable={editing}
+                  onChange={setDraft}
+                  highlightTerm={fileSearchActive ? fileSearchQuery : ""}
+                  activeLine={activeMatchLine}
+                  onCmdClick={(word: string, line: number) => navigateToSymbol(word, line)}
+                  onMatchCount={setFileSearchMatchCount}
+                  onSelectionChange={sessionName ? setSelection : undefined}
+                />
+              )}
 
-              {sessionName && selection && !noteOpen && (
+              {/* A selection belongs to the editor, so its note UI goes with it. */}
+              {!showPreview && sessionName && selection && !noteOpen && (
                 <div className="fe-note-bar">
                   <span className="fe-note-range">
                     {selection.startLine === selection.endLine
@@ -1025,7 +1062,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 </div>
               )}
 
-              {sessionName && selection && noteOpen && (
+              {!showPreview && sessionName && selection && noteOpen && (
                 <div className="fe-note" role="dialog" aria-label="Note on the selection">
                   <div className="fe-note-head">
                     <span>
