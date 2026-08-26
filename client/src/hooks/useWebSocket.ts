@@ -1,81 +1,65 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { wsUrl } from "../api";
-import { isDemo, getDemoSnapshot } from "../demo";
+import { getDemoSnapshot, isDemo } from "../demo";
 
 interface WsMessage {
-  type: "snapshot" | "update" | "closed" | "error" | "pong" | "mode" | "resync";
-  data: unknown;
-  /** Present on "mode": which path the server took for this session. */
-  mode?: "stream" | "snapshot";
+  type: "closed" | "error" | "pong";
+  data?: unknown;
 }
 
-// Send a ping every 30s to keep the server heartbeat alive
 const PING_INTERVAL_MS = 30_000;
 
-// Batch printable input for this long before flushing
-const INPUT_BATCH_MS = 30;
+export interface TerminalSocketOptions {
+  onBytes: (bytes: Uint8Array) => void;
+  onClosed?: () => void;
+  getTerminalSize?: () => { cols: number; rows: number } | undefined;
+  /**
+   * Attaching sizes the tmux window, so the socket stays shut until the caller
+   * has a real grid to attach at. Connecting first and correcting afterwards
+   * squeezes the window down to xterm's unmeasured default and back, and tmux
+   * repaints the screen each way.
+   */
+  ready?: boolean;
+}
 
-// Characters that must be sent immediately (not batched)
-const SPECIAL_CHARS = new Set(["\r", "\n", "\x7f", "\x1b", "\t"]);
-
-export function useWebSocket(
-  sessionName: string,
-  onData: (data: unknown) => void,
-  onClosed?: () => void,
-  /** Raw pane bytes — kept for the binary path; unused while the server sends text. */
-  onBytes?: (bytes: Uint8Array) => void,
-  /** Pane output as text, already decoded once by the server. */
-  onText?: (text: string) => void,
-  /** Which path the server took, sent once before the first paint. */
-  onMode?: (mode: "stream" | "snapshot") => void,
-  /** A fresh capture of the pane, for checking the rendered copy against. */
-  onResync?: (data: unknown) => void,
-  /** Lines of history to paint at connect — the terminal's scrollback setting. */
-  scrollback?: number,
-) {
+export function useWebSocket(sessionName: string, options: TerminalSocketOptions) {
+  const { onBytes, onClosed, getTerminalSize, ready = true } = options;
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pingInterval = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const onDataRef = useRef(onData);
-  const onClosedRef = useRef(onClosed);
   const onBytesRef = useRef(onBytes);
-  const onTextRef = useRef(onText);
-  const onModeRef = useRef(onMode);
-  const onResyncRef = useRef(onResync);
-  /* Read through a ref: changing the setting should not tear the socket down,
-     it applies the next time one opens. */
-  const scrollbackRef = useRef(scrollback);
-  onDataRef.current = onData;
-  onClosedRef.current = onClosed;
+  const onClosedRef = useRef(onClosed);
+  const getTerminalSizeRef = useRef(getTerminalSize);
   onBytesRef.current = onBytes;
-  onTextRef.current = onText;
-  onModeRef.current = onMode;
-  onResyncRef.current = onResync;
-  scrollbackRef.current = scrollback;
+  onClosedRef.current = onClosed;
+  getTerminalSizeRef.current = getTerminalSize;
 
   useEffect(() => {
+    if (!ready) return;
+
     if (isDemo()) {
       setConnected(true);
-      setTimeout(() => onDataRef.current(getDemoSnapshot(sessionName)), 100);
-      return;
+      const timer = setTimeout(() => {
+        const snapshot = getDemoSnapshot(sessionName);
+        if (snapshot && typeof snapshot.content === "string") {
+          onBytesRef.current(new TextEncoder().encode(snapshot.content));
+        }
+      }, 100);
+      return () => clearTimeout(timer);
     }
 
     let stopped = false;
 
     function connect() {
-      if (stopped) return;
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+      if (stopped || wsRef.current?.readyState === WebSocket.OPEN) return;
 
-      const ws = new WebSocket(wsUrl(sessionName, scrollbackRef.current));
-      /* Pane bytes arrive as binary frames; without this they land as Blobs and
-         every chunk would need an async read before it could be written. */
+      const ws = new WebSocket(wsUrl(sessionName, getTerminalSizeRef.current?.()));
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
       ws.onopen = () => {
         setConnected(true);
-        // Start sending pings to keep server heartbeat alive
         pingInterval.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "ping" }));
@@ -85,56 +69,34 @@ export function useWebSocket(
 
       ws.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          onBytesRef.current?.(new Uint8Array(event.data));
+          onBytesRef.current(new Uint8Array(event.data));
           return;
         }
-        /* Pane output arrives as a text frame that is not JSON. Everything the
-           server sends as JSON starts with "{", so the cheap check is enough
-           and costs nothing on the hot path. */
-        if (typeof event.data === "string" && event.data.charCodeAt(0) !== 123) {
-          onTextRef.current?.(event.data);
-          return;
-        }
+        if (typeof event.data !== "string") return;
         try {
           const msg: WsMessage = JSON.parse(event.data);
-          if (msg.type === "snapshot" || msg.type === "update") {
-            onDataRef.current(msg.data);
-          } else if (msg.type === "resync") {
-            onResyncRef.current?.(msg.data);
-          } else if (msg.type === "mode") {
-            onModeRef.current?.(msg.mode === "stream" ? "stream" : "snapshot");
-          } else if (msg.type === "closed") {
-            onClosedRef.current?.();
-          }
-          // "pong" is just an ack, no action needed
+          if (msg.type === "closed" || msg.type === "error") onClosedRef.current?.();
         } catch {
-          // Ignore parse errors
+          /* PTY output is binary; unknown text frames are not terminal data. */
         }
       };
 
       ws.onclose = () => {
         setConnected(false);
         if (pingInterval.current) clearInterval(pingInterval.current);
-        if (!stopped) {
-          reconnectTimeout.current = setTimeout(connect, 2000);
-        }
+        if (!stopped) reconnectTimeout.current = setTimeout(connect, 2000);
       };
 
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onerror = () => ws.close();
     }
 
-    // Pause WebSocket when tab is hidden, reconnect when visible
     function handleVisibility() {
       if (document.hidden) {
-        // Tab hidden — close connection to stop server-side polling
         stopped = true;
         clearTimeout(reconnectTimeout.current);
         if (pingInterval.current) clearInterval(pingInterval.current);
         wsRef.current?.close();
       } else {
-        // Tab visible again — reconnect
         stopped = false;
         connect();
       }
@@ -148,70 +110,22 @@ export function useWebSocket(
       document.removeEventListener("visibilitychange", handleVisibility);
       clearTimeout(reconnectTimeout.current);
       if (pingInterval.current) clearInterval(pingInterval.current);
-      if (flushTimer.current) clearTimeout(flushTimer.current);
-      inputBuffer.current = "";
       wsRef.current?.close();
     };
-  }, [sessionName]);
+  }, [sessionName, ready]);
 
-  // --- Input buffering: batch printable chars, flush before special keys ---
-  const inputBuffer = useRef("");
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  const flushBuffer = useCallback(() => {
-    if (inputBuffer.current && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "input", data: inputBuffer.current }));
-    }
-    inputBuffer.current = "";
-    flushTimer.current = undefined;
-  }, []);
-
-  const sendInput = useCallback((data: string) => {
-    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-
-    const isSpecial = SPECIAL_CHARS.has(data) || data.startsWith("\x1b");
-
-    if (isSpecial) {
-      // Flush any pending printable text first
-      if (inputBuffer.current) {
-        wsRef.current.send(JSON.stringify({ type: "input", data: inputBuffer.current }));
-        inputBuffer.current = "";
-      }
-      if (flushTimer.current) {
-        clearTimeout(flushTimer.current);
-        flushTimer.current = undefined;
-      }
-      // Send special key immediately
-      wsRef.current.send(JSON.stringify({ type: "input", data }));
-    } else {
-      // Buffer printable text
-      inputBuffer.current += data;
-      if (!flushTimer.current) {
-        flushTimer.current = setTimeout(flushBuffer, INPUT_BATCH_MS);
-      }
-    }
-  }, [flushBuffer]);
-
-  const sendShiftEnter = useCallback(() => {
+  const send = useCallback((message: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      // Flush buffer before special key
-      if (inputBuffer.current) {
-        wsRef.current.send(JSON.stringify({ type: "input", data: inputBuffer.current }));
-        inputBuffer.current = "";
-      }
-      if (flushTimer.current) {
-        clearTimeout(flushTimer.current);
-        flushTimer.current = undefined;
-      }
-      wsRef.current.send(JSON.stringify({ type: "shift-enter" }));
+      wsRef.current.send(JSON.stringify(message));
     }
   }, []);
 
-  const sendResize = useCallback((cols: number, rows: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "resize", cols, rows }));
-    }
-  }, []);
+  const sendInput = useCallback((data: string) => send({ type: "input", data }), [send]);
+  const sendShiftEnter = useCallback(() => send({ type: "shift-enter" }), [send]);
+  const sendResize = useCallback(
+    (cols: number, rows: number) => send({ type: "resize", cols, rows }),
+    [send],
+  );
 
   return { connected, sendInput, sendShiftEnter, sendResize };
 }

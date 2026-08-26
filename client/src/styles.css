@@ -4706,29 +4706,6 @@ mark.fe-match-active {
   color: var(--bg);
 }
 
-@media (max-width: 768px) {
-  .terminal-scroll-resume {
-    display: none;
-  }
-}
-
-.terminal-scroll-resume {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  background: var(--bg-card);
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: calc(var(--fs-base) - 2px);
-  padding: 6px 16px;
-  cursor: pointer;
-  opacity: 0.9;
-  white-space: nowrap;
-}
-
 .terminal-paste-error {
   padding: 4px 12px;
   font-size: calc(var(--fs-base) - 1px);
@@ -6799,7 +6776,8 @@ mark.fe-match-active {
     display: none;
   }
 
-  /* Hide browser scrollbar — we use our custom one */
+  /* tmux copy mode owns terminal history; xterm's alternate-screen viewport
+     has no independent scroll range. */
   .terminal-wrapper .xterm-viewport {
     scrollbar-width: none !important;
     -webkit-overflow-scrolling: touch;
@@ -6807,35 +6785,6 @@ mark.fe-match-active {
   .terminal-wrapper .xterm-viewport::-webkit-scrollbar {
     display: none;
   }
-
-  .term-scrollbar {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 18px;
-    background: rgba(255,255,255,0.05);
-    z-index: 20;
-    border-radius: 4px 0 0 4px;
-    pointer-events: all;
-  }
-
-  .term-scrollbar-thumb {
-    position: absolute;
-    left: 3px;
-    right: 3px;
-    min-height: 32px;
-    background: rgba(255,255,255,0.35);
-    border-radius: 6px;
-    cursor: grab;
-    touch-action: none;
-  }
-
-  .term-scrollbar-thumb:active {
-    background: rgba(255,255,255,0.6);
-    cursor: grabbing;
-  }
-
 
   /* Chat input on mobile — visible */
   .chat-input-bar {

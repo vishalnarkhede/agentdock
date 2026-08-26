@@ -274,12 +274,20 @@ export async function fetchSessionChildren(sessionName: string): Promise<Session
   return res.json();
 }
 
-export function wsUrl(sessionName: string, scrollback?: number): string {
+export function wsUrl(
+  sessionName: string,
+  size?: { cols: number; rows: number },
+): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  /* The reader's scrollback setting decides how much history the server paints
-     at connect, so it travels with the connection. */
-  const qs = scrollback ? `?scrollback=${Math.round(scrollback)}` : "";
-  return `${proto}//${window.location.host}/ws/sessions/${sessionName}${qs}`;
+  const params = new URLSearchParams();
+  /* A PTY must start at the browser's real grid size. Attaching at 80×24 and
+     resizing one message later makes tmux perform an avoidable second redraw. */
+  if (size) {
+    params.set("cols", String(Math.round(size.cols)));
+    params.set("rows", String(Math.round(size.rows)));
+  }
+  const query = params.toString();
+  return `${proto}//${window.location.host}/ws/sessions/${sessionName}${query ? `?${query}` : ""}`;
 }
 
 // ─── File System API ───

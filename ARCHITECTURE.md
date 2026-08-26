@@ -186,26 +186,28 @@ Agents can also emit a structured status line anywhere in their terminal output:
 Client                          Server
   |                               |
   |── WS connect /ws/{name} ────→ |
-  |← { type: "snapshot", data } ──|  (initial pane content)
+  |                    Bun.Terminal:
+  |                      tmux attach-session
+  |← raw PTY bytes (binary frames) ─|  (initial paint + live output)
   |                               |
-  |                    poll loop (adaptive 200ms–2000ms):
-  |                      tmux capture-pane → compare with last
-  |← { type: "update", data } ────|  (only on change)
-  |                               |
-  |── { type: "key", data: "ls" } →|
-  |                      tmux send-keys "ls"
-  |── { type: "paste", data: "..." }→|  (>400 chars)
-  |                      tmux load-buffer | paste-buffer
+  |── { type: "input", data } ───→|  PTY write (exact bytes)
   |── { type: "resize", cols, rows }→|
-  |                      tmux resize-pane
+  |                      PTY resize
   |── { type: "ping" } ──────────→|  (client heartbeat every 30s)
 ```
 
-**Adaptive polling**: on content change, poll at 200ms. On no change, back off by 1.5× up to 2000ms. Immediately after user keystrokes, poll at 50ms for snappier feedback. If no message from client in 60s, the connection is considered dead.
+tmux remains the persistent session owner. Each browser connection attaches a
+normal tmux client through Bun's native PTY API, and xterm.js consumes the same
+terminal byte stream a native terminal would. There are no pane snapshots,
+polling loops, control-mode parsers, or client-side resync repaints.
 
-**Large pastes**: tmux `send-keys` truncates at ~500 bytes. Text >400 chars is sent via `tmux load-buffer -` piped to `tmux paste-buffer`.
+Input, including large pastes, is written directly to the PTY and is not subject
+to `tmux send-keys` command-length limits. Resizes update the PTY grid directly.
+If no message arrives from the browser for 60 seconds, the attached viewer is
+detached while the tmux session and agent continue running.
 
-The xterm.js terminal on the client renders the `tmux capture-pane` snapshot, which includes all visible text and ANSI escape codes (colors, cursor position).
+tmux mouse mode owns desktop wheel and mobile swipe history in copy mode. The
+tmux status bar is hidden for AgentDock-managed sessions.
 
 ---
 
@@ -301,10 +303,10 @@ Sub-agents are shown in a collapsed tree under the parent session in the UI.
 ## Design Decisions
 
 **Why tmux?**
-Process management, session persistence, and terminal capture without reinventing process supervision. `tmux capture-pane` gives us the rendered terminal content including all ANSI sequences, which xterm.js renders faithfully.
+Process management and session persistence without reinventing process supervision. Bun attaches a normal terminal client to the tmux session through a native PTY, so xterm.js receives tmux's authoritative byte stream while the agent keeps running across browser disconnects.
 
 **Why Bun?**
-Fast startup (<100ms), built-in TypeScript support, native WebSocket handling, and a built-in test runner. No transpile step needed for the server.
+Fast startup (<100ms), built-in TypeScript support, native WebSocket handling, a native PTY API, and a built-in test runner. No transpile step is needed for the server.
 
 **Why no database?**
 Session state is ephemeral (tmux sessions don't survive reboots anyway). Configuration is a handful of small JSON/text files. A database would add ops complexity with no benefit at this scale.

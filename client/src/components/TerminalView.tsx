@@ -9,35 +9,12 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { paneDiffers, repaintSequence } from "../terminal-sync";
-
-/**
- * How long the screen has to have been still before a repaint is allowed.
- *
- * Three seconds, not a few hundred milliseconds, because repainting a screen
- * something else is still drawing is worse than the cell it fixes. An agent's
- * TUI redraws its own frame constantly — banner, rule, input box — from where
- * *it* believes the cursor to be. Move that cursor underneath it and the next
- * frame's decorations land on content rows: a rule drawn through a sentence,
- * the session banner stamped five times down the screen.
- *
- * A screen still for three seconds is one nothing is redrawing, which is
- * exactly the case where a wrong cell would otherwise sit there until a reload.
- */
-const REPAINT_QUIET_MS = 3000;
+import { TOUCH_WHEEL_STEP_PX, tmuxWheelSequence } from "../terminal-pty";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
 
 import type { AgentType } from "../types";
-
-interface PaneSnapshot {
-  content: string;
-  cursorX: number;
-  cursorY: number;
-  paneHeight: number;
-  scrollPosition: number;
-}
 
 const LIGHT_THEMES = new Set(["light", "minimal", "notion", "macos"]);
 
@@ -135,6 +112,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const [lastContent, setLastContent] = useState<string | null>(null);
+  const [gridMeasured, setGridMeasured] = useState(false);
+  /** Whether fit() has ever had a sized container to measure. Until it has,
+      xterm reports its 80x24 default, which must never reach tmux. */
+  const gridFittedRef = useRef(false);
   const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -147,7 +128,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const [showPasteInput, setShowPasteInput] = useState(false);
   const [pasteValue, setPasteValue] = useState("");
   const [pasteError, setPasteError] = useState("");
-  const [scrollPaused, setScrollPaused] = useState(false);
   const pasteInputRef = useRef<HTMLTextAreaElement>(null);
 
   const handlePaste = useCallback(async () => {
@@ -168,11 +148,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const touchOriginXRef = useRef<number>(0);
   const touchOriginYRef = useRef<number>(0);
   const touchScrollingRef = useRef<boolean>(false);
-  const scrollPausedRef = useRef(false);
-  /* Which path the server took for this session. Streaming means the pane's
-     bytes arrive as they are produced and xterm owns the screen; snapshot means
-     the whole pane is re-sent and repainted on every change. */
-  const streamingRef = useRef(false);
+  const touchWheelDeltaRef = useRef(0);
   const dragCountRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
@@ -181,13 +157,10 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   // even if the preference was saved while on a mobile device.
   const customKb = settings.customKeyboard && window.innerWidth <= 900;
   const [kbVisible, setKbVisible] = useState(false);
-  const [scrollThumb, setScrollThumb] = useState({ top: 0, size: 1 }); // 0–1 ratios
 
   useEffect(() => {
     onKeyboardVisibilityChange?.(customKb && kbVisible);
   }, [customKb, kbVisible, onKeyboardVisibilityChange]);
-  const scrollbarDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
-
   // Scroll to bottom when terminal tab becomes active (e.g. switching back from plan/changes)
   useEffect(() => {
     if (isActive && termRef.current) {
@@ -210,7 +183,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     let last = "";
     let timer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
+      if (!containerRef.current?.clientWidth) return;
       fitAddonRef.current?.fit();
+      gridFittedRef.current = true;
       const term = termRef.current;
       if (!term) return;
       const size = `${term.cols}x${term.rows}`;
@@ -285,6 +260,11 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       disableStdin: false,
       convertEol: true,
       scrollback: settings.scrollback,
+      /* An attached tmux client turns mouse reporting on, which otherwise takes
+         drag-select away from the browser: the drag becomes a tmux selection and
+         nothing lands on the system clipboard. On macOS xterm only hands a drag
+         back to the page when Option is held and this is set. */
+      macOptionClickForcesSelection: true,
     });
 
     const fitAddon = new FitAddon();
@@ -345,7 +325,32 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       }
     };
     attachTimer = setTimeout(attachWebgl, 0);
-    fitAddon.fit();
+
+    /* Same zero-width mount, and here it is worse than an empty glyph atlas:
+       fit() cannot measure a grid, so the terminal keeps xterm's 80x24 default,
+       and attaching at that size resizes the shared tmux window down and then
+       back up once the layout settles. tmux repaints the screen both ways,
+       which reads as the view starting at the top and scrolling to the bottom.
+       So the size is measured first and the socket waits for it. */
+    let fitAttempts = 0;
+    let fitTimer: ReturnType<typeof setTimeout> | null = null;
+    const fitWhenMeasured = () => {
+      fitTimer = null;
+      if (torndown) return;
+      if (!containerRef.current?.clientWidth || !containerRef.current?.clientHeight) {
+        /* A pane that never gets a size is not on screen, and waiting forever
+           would leave it with no terminal at all. Connect without a size — the
+           server then attaches at whatever tmux is already drawing, and the
+           resize observer sends the real grid once there is one. */
+        if (fitAttempts++ < 40) fitTimer = setTimeout(fitWhenMeasured, 25);
+        else setGridMeasured(true);
+        return;
+      }
+      fitAddon.fit();
+      gridFittedRef.current = true;
+      setGridMeasured(true);
+    };
+    fitWhenMeasured();
 
     // Intercept Shift+Enter before xterm processes it
     // Must return false for BOTH keydown and keypress to prevent xterm sending \r
@@ -376,7 +381,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
 
     // On mobile, visualViewport fires resize when the keyboard opens/closes.
     // We set the container height explicitly to match the visual viewport,
-    // then refit the terminal and nudge a snapshot poll.
+    // then refit both xterm and the attached PTY.
     const vv = window.visualViewport;
     const container = containerRef.current;
     const handleViewportResize = () => {
@@ -436,36 +441,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     window.addEventListener("focus", syncFocusState);
     const syncTimer = setTimeout(syncFocusState, 300);
 
-    // Detect scroll position on xterm's viewport — pause rendering when
-    // user scrolls up, resume when they scroll back to the bottom.
-    // Also updates the custom scrollbar thumb position.
-    const handleViewportScroll = () => {
-      const viewport = containerRef.current?.querySelector(".xterm-viewport");
-      if (!viewport) return;
-      const { scrollTop, scrollHeight, clientHeight } = viewport;
-      const atBottom = scrollTop + clientHeight >= scrollHeight - 20;
-      if (!atBottom && !scrollPausedRef.current) {
-        scrollPausedRef.current = true;
-        setScrollPaused(true);
-      } else if (atBottom && scrollPausedRef.current) {
-        scrollPausedRef.current = false;
-        setScrollPaused(false);
-      }
-      // Update thumb
-      if (scrollHeight <= clientHeight) {
-        setScrollThumb({ top: 0, size: 1 });
-      } else {
-        const size = clientHeight / scrollHeight;
-        const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
-        setScrollThumb({ top, size });
-      }
-    };
-    // Attach after a tick so xterm has rendered the viewport
-    const viewportScrollTimer = setTimeout(() => {
-      const viewport = containerRef.current?.querySelector(".xterm-viewport");
-      viewport?.addEventListener("scroll", handleViewportScroll, { passive: true });
-    }, 100);
-
     // Track focus state via xterm's hidden textarea
     // Re-focus terminal when focus moves to non-interactive elements (e.g. clicking
     // session list, tabs, plan view) so keyboard input keeps going to the terminal.
@@ -489,9 +464,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     return () => {
       clearTimeout(syncTimer);
       window.removeEventListener("focus", syncFocusState);
-      clearTimeout(viewportScrollTimer);
-      const viewport = containerRef.current?.querySelector(".xterm-viewport");
-      viewport?.removeEventListener("scroll", handleViewportScroll);
       observer.disconnect();
       window.removeEventListener("resize", handleResize);
       if (vv) vv.removeEventListener("resize", handleViewportResize);
@@ -501,6 +473,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       }
       torndown = true;
       if (attachTimer) clearTimeout(attachTimer);
+      if (fitTimer) clearTimeout(fitTimer);
+      gridFittedRef.current = false;
+      setGridMeasured(false);
       try {
         webgl?.dispose();
       } catch {
@@ -518,140 +493,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     };
   }, [settings.cursorBlink, settings.scrollback, settings.terminalFontSize]);
 
-  const handleData = useCallback((snapshot: PaneSnapshot) => {
-    const term = termRef.current;
-    if (!term) return;
-
-    // Skip rendering when user has paused scrolling
-    if (scrollPausedRef.current) {
-      // Still update lastContent so copy works with latest data
-      setLastContent(snapshot.content);
-      return;
-    }
-
-    // Clear and content in one term.write() so xterm batches them into a single
-    // animation frame — no blank flash between the clear and the render.
-    // \x1bc is a full reset: it resets the ANSI parser AND clears the screen
-    // inside the same render pass, which term.reset() did not.
-    /**
-     * The cursor is placed by counting up from the bottom rather than by
-     * addressing a row — which is what finally fixed the off-by-one this code
-     * carried a note about for weeks.
-     *
-     * Two faults compounded. tmux's capture ends in a newline, so the write
-     * left the cursor on the row *below* the pane's last line; that scrolled
-     * the screen up by one and left row 0 blank — the blank first row the old
-     * note could not explain. And stripping *every* trailing newline made a
-     * pane with blank rows at the bottom come out short, after which an
-     * absolute row address was pointing into a screen whose rows no longer
-     * lined up with tmux's at all.
-     *
-     * So: drop exactly one trailing newline, which leaves the cursor on the
-     * pane's last row, then move up by however many rows the real cursor sits
-     * above it. Relative movement needs no agreement between xterm's row count
-     * and tmux's — and that agreement was the assumption that kept breaking.
-     */
-    const body = snapshot.content.endsWith("\n")
-      ? snapshot.content.slice(0, -1)
-      : snapshot.content;
-    const paneHeight = snapshot.paneHeight || term.rows;
-    const rowsUp = Math.max(0, paneHeight - 1 - snapshot.cursorY);
-    term.write(
-      "\x1bc" +                                  // full reset — atomic with the content below
-      "\x1b[?25l" +                              // hide the cursor while painting
-      body +
-      (rowsUp > 0 ? `\x1b[${rowsUp}A` : "") +    // up from the pane's last row
-      `\x1b[${snapshot.cursorX + 1}G` +          // and across to the column
-      "\x1b[?25h"                                // show it where it really is
-    );
-
-    /* The capture carries the scrollback above the pane as well, so the write
-       leaves the viewport partway up that history. tmux owns the real history —
-       xterm's buffer only ever holds what we paint plus what the stream appends
-       after it — so this is the reader's whole scrollback, and they should start
-       at the end of it. */
-    term.scrollToBottom();
-    setLastContent(snapshot.content);
-
-    // Update scrollbar thumb after render
-    requestAnimationFrame(() => {
-      const viewport = containerRef.current?.querySelector(".xterm-viewport");
-      if (!viewport) return;
-      const { scrollTop, scrollHeight, clientHeight } = viewport;
-      if (scrollHeight <= clientHeight) { setScrollThumb({ top: 0, size: 1 }); return; }
-      const size = clientHeight / scrollHeight;
-      const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
-      setScrollThumb({ top, size });
-    });
-
-    // On mobile, scroll wrapper to keep cursor visible
-    if (window.innerWidth <= 768 && containerRef.current) {
-      const wrapper = containerRef.current;
-      const cellHeight = term.options.fontSize ? term.options.fontSize * 1.2 : 12;
-      const cursorPx = snapshot.cursorY * cellHeight;
-      const wrapperHeight = wrapper.clientHeight;
-      if (cursorPx > wrapperHeight * 0.8) {
-        wrapper.scrollTop = cursorPx - wrapperHeight * 0.5;
-      }
-    }
-  }, []);
-
-  const handleWsData = useCallback((raw: unknown) => {
-    // raw is already parsed from the WebSocket message's `data` field
-    if (typeof raw === "object" && raw !== null && "content" in raw) {
-      handleData(raw as PaneSnapshot);
-    }
-  }, [handleData]);
-
-  /**
-   * Streaming: the server sends the pane's bytes as tmux produces them, so the
-   * work here is to hand them to xterm and stay out of the way. No React state
-   * per chunk — a keystroke's echo would otherwise re-render the tree — and no
-   * skipping writes while the reader has scrolled up, because xterm already
-   * keeps the viewport still and appends to the buffer underneath.
-   */
-  const scrollbarFrame = useRef<number | null>(null);
-  const syncScrollbar = useCallback(() => {
-    if (scrollbarFrame.current !== null) return;
-    scrollbarFrame.current = requestAnimationFrame(() => {
-      scrollbarFrame.current = null;
-      const viewport = containerRef.current?.querySelector(".xterm-viewport");
-      if (!viewport) return;
-      const { scrollTop, scrollHeight, clientHeight } = viewport as HTMLElement;
-      if (scrollHeight <= clientHeight) {
-        setScrollThumb({ top: 0, size: 1 });
-        return;
-      }
-      const size = clientHeight / scrollHeight;
-      const top = (scrollTop / (scrollHeight - clientHeight)) * (1 - size);
-      setScrollThumb({ top, size });
-    });
-  }, []);
-
   const handleBytes = useCallback((bytes: Uint8Array) => {
-    const term = termRef.current;
-    if (!term) return;
-    lastOutputAt.current = Date.now();
-    term.write(bytes);
-    syncScrollbar();
-  }, [syncScrollbar]);
-
-  /* The server decodes the pane's bytes once and sends text, so xterm never has
-     to stitch a UTF-8 character across a frame boundary it cannot see — which is
-     where single box-drawing characters were turning into replacement
-     characters under a flood. */
-  /* When output last arrived. A capture taken during a lull can still be stale
-     by the time it is applied, and painting it over newer output is how a
-     repair becomes the corruption. */
-  const lastOutputAt = useRef(0);
-
-  const handleText = useCallback((text: string) => {
-    const term = termRef.current;
-    if (!term) return;
-    lastOutputAt.current = Date.now();
-    term.write(text);
-    syncScrollbar();
-  }, [syncScrollbar]);
+    termRef.current?.write(bytes);
+  }, []);
 
   /** The visible pane plus a little scrollback, read back out of xterm. */
   const readTerminalText = useCallback(() => {
@@ -666,91 +510,28 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     return lines.join("\n").replace(/\n+$/, "");
   }, []);
 
-  /* In streaming mode nothing re-sends the pane as text, but two things still
-     want it: the copy button, and the Cursor status scan (Cursor has no
-     lifecycle hooks, so its state is read off the screen). Once a second, and
-     only when it actually changed — against five re-renders a second on the
-     snapshot path. */
+  /* The PTY is a byte stream, but Copy and Cursor status detection still need a
+     text view. Read xterm once a second without putting output into React state
+     on every chunk. */
   useEffect(() => {
     const id = setInterval(() => {
-      if (!streamingRef.current || !termRef.current) return;
+      if (!termRef.current) return;
       const text = readTerminalText();
       setLastContent((prev) => (prev === text ? prev : text));
     }, 1000);
     return () => clearInterval(id);
   }, [readTerminalText]);
 
-  /**
-   * The drift check.
-   *
-   * The server re-captures the pane during lulls; this compares it with what is
-   * actually on screen and repaints only when they disagree. Almost every check
-   * agrees and costs one string compare — the repaint is for the case the user
-   * used to fix by reloading the page.
-   */
-  const resyncCount = useRef(0);
-  /* Consecutive repaints that did not settle it. */
-  const repaintTries = useRef(0);
-  const handleResync = useCallback((raw: unknown) => {
-    const term = termRef.current;
-    if (!term || !raw || typeof raw !== "object" || !("content" in raw)) return;
-    const snap = raw as PaneSnapshot;
-    /* Scrolled up: the pane is off screen, and yanking the view back to repaint
-       it would be worse than the wrong cell they are not looking at. */
-    if (scrollPausedRef.current) return;
-
-    const buf = term.buffer.active;
-    const rows: string[] = [];
-    const first = Math.max(0, buf.length - term.rows);
-    for (let i = first; i < buf.length; i++) {
-      rows.push(buf.getLine(i)?.translateToString(true) ?? "");
-    }
-    if (!paneDiffers(snap.content, rows)) {
-      repaintTries.current = 0;
-      return;
-    }
-
-    /* Three reasons to leave a wrong cell alone rather than repaint it. Each of
-       them, done anyway, produces worse corruption than the one being fixed —
-       the app keeps drawing from where *it* thinks the cursor is, so a repaint
-       that lands wrong scatters the next frame's characters across the rows
-       around it. That is what "flickering" looked like.
-
-       1. Output arrived after the capture was taken: the capture is already
-          behind, and painting it back would undo what just came in.
-       2. tmux's pane and xterm disagree about how many rows there are, which
-          happens mid-resize. Writing paneHeight lines into a shorter screen
-          scrolls it and leaves a duplicate of everything above.
-       3. Repainting twice already failed to fix it, so a third is not a repair,
-          it is a loop. */
-    if (Date.now() - lastOutputAt.current < REPAINT_QUIET_MS) return;
-    if (snap.paneHeight && snap.paneHeight !== term.rows) return;
-    if (repaintTries.current >= 2) return;
-
-    repaintTries.current += 1;
-    resyncCount.current += 1;
-    console.log(`[terminal] ${sessionName}: repainted a drifted screen (${resyncCount.current})`);
-    term.write(
-      repaintSequence(snap.content, snap.paneHeight || term.rows, snap.cursorX, snap.cursorY),
-    );
-    syncScrollbar();
-  }, [sessionName, syncScrollbar]);
-
-  const handleMode = useCallback((mode: "stream" | "snapshot") => {
-    streamingRef.current = mode === "stream";
-    console.log(`[terminal] ${sessionName}: ${mode} mode`);
-  }, [sessionName]);
-
-  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(
-    sessionName,
-    handleWsData,
+  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(sessionName, {
+    onBytes: handleBytes,
     onClosed,
-    handleBytes,
-    handleText,
-    handleMode,
-    handleResync,
-    settings.scrollback,
-  );
+    getTerminalSize: () => {
+      const term = termRef.current;
+      if (!term || !gridFittedRef.current) return undefined;
+      return { cols: term.cols, rows: term.rows };
+    },
+    ready: gridMeasured,
+  });
   sendInputRef.current = sendInput;
   sendShiftEnterRef.current = sendShiftEnter;
   const sendResizeRef = useRef<(cols: number, rows: number) => void>(() => {});
@@ -759,7 +540,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   // Sync tmux pane size with browser terminal on connect
   useEffect(() => {
     const term = termRef.current;
-    if (connected && term) {
+    if (connected && term && gridFittedRef.current) {
       fitAddonRef.current?.fit();
       sendResize(term.cols, term.rows);
     }
@@ -878,7 +659,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           <button
             className="terminal-copy-btn"
             onClick={() => {
-              const source = streamingRef.current ? readTerminalText() : lastContent || "";
+              const source = readTerminalText() || lastContent || "";
               const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
               navigator.clipboard.writeText(clean.trim());
               setCopied(true);
@@ -976,43 +757,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         : toolbarPortal?.current
           ? createPortal(toolbarContent, toolbarPortal.current)
           : toolbarContent}
-      {/* Wrapper gives the scrollbar a position:relative context scoped to the terminal area only */}
       <div className="term-scrollbar-area">
-        {scrollThumb.size < 0.99 && (
-          <div className="term-scrollbar">
-            <div
-              className="term-scrollbar-thumb"
-              style={{ top: `${scrollThumb.top * 100}%`, height: `${scrollThumb.size * 100}%` }}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                const thumb = e.currentTarget as HTMLElement;
-                const track = thumb.parentElement!;
-                const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement;
-                if (!viewport) return;
-                thumb.setPointerCapture(e.pointerId);
-                const startY = e.clientY;
-                const startScrollTop = viewport.scrollTop;
-                const trackH = track.clientHeight;
-                const scrollRange = viewport.scrollHeight - viewport.clientHeight;
-                scrollPausedRef.current = true;
-                setScrollPaused(true);
-                const onMove = (me: PointerEvent) => {
-                  const dy = me.clientY - startY;
-                  viewport.scrollTop = startScrollTop + (dy / trackH) * scrollRange;
-                };
-                const onUp = () => {
-                  thumb.releasePointerCapture(e.pointerId);
-                  const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
-                  if (atBottom) { scrollPausedRef.current = false; setScrollPaused(false); }
-                  thumb.removeEventListener("pointermove", onMove);
-                  thumb.removeEventListener("pointerup", onUp);
-                };
-                thumb.addEventListener("pointermove", onMove);
-                thumb.addEventListener("pointerup", onUp);
-              }}
-            />
-          </div>
-        )}
         <div
           ref={containerRef}
           className="terminal-wrapper"
@@ -1023,6 +768,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           touchOriginXRef.current = touch.clientX;
           touchOriginYRef.current = touch.clientY;
           touchScrollingRef.current = false;
+          touchWheelDeltaRef.current = 0;
           longPressTimer.current = setTimeout(() => {
             setContextMenu({ x: touch.clientX, y: touch.clientY });
           }, 500);
@@ -1042,6 +788,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
             }
           }
           touchScrollingRef.current = false;
+          touchWheelDeltaRef.current = 0;
         }}
         onTouchMove={(e) => {
           if (longPressTimer.current) {
@@ -1057,35 +804,19 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           if (Math.abs(dy) < 5) return; // ignore tiny jitter
           touchScrollingRef.current = true;
           touchStartYRef.current = e.touches[0].clientY; // incremental delta
-          // Manually scroll the xterm viewport (canvas intercepts touch events)
-          const viewport = containerRef.current?.querySelector(".xterm-viewport");
-          if (viewport) {
-            viewport.scrollTop += dy;
-            // Check if at bottom — resume rendering
-            const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 20;
-            if (!atBottom && !scrollPausedRef.current) {
-              scrollPausedRef.current = true;
-              setScrollPaused(true);
-            } else if (atBottom && scrollPausedRef.current) {
-              scrollPausedRef.current = false;
-              setScrollPaused(false);
+          touchWheelDeltaRef.current += dy;
+          const term = termRef.current;
+          if (term) {
+            const wheel = tmuxWheelSequence(touchWheelDeltaRef.current, term.cols, term.rows);
+            if (wheel) {
+              sendInputRef.current(wheel);
+              touchWheelDeltaRef.current %= TOUCH_WHEEL_STEP_PX;
             }
           }
           e.preventDefault();
         }}
         />
       </div>{/* end term-scrollbar-area */}
-      {scrollPaused && (
-        <button
-          className="terminal-scroll-resume"
-          onClick={() => {
-            scrollPausedRef.current = false;
-            setScrollPaused(false);
-          }}
-        >
-          scroll paused — tap to resume
-        </button>
-      )}
       {!focused && !customKb && (
         <div
           className="terminal-unfocused-hint"
@@ -1127,7 +858,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
               <button
                 onClick={() => {
                   setContextMenu(null);
-                  const source = streamingRef.current ? readTerminalText() : lastContent || "";
+                  const source = readTerminalText() || lastContent || "";
               const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
                   navigator.clipboard.writeText(clean.trim());
                 }}
@@ -1232,7 +963,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
         )}
         {lastContent && (
           <button className="mobile-term-btn" onClick={() => {
-            const source = streamingRef.current ? readTerminalText() : lastContent || "";
+            const source = readTerminalText() || lastContent || "";
             const clean = source.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
             navigator.clipboard.writeText(clean.trim());
             setCopied(true);

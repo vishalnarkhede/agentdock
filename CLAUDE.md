@@ -136,11 +136,11 @@ Terminal pattern matching is **fallback only** for Cursor Agent (no hooks). Neve
 
 ```
 Client opens ws://localhost:4800/ws/sessions/{name}
-  → Server polls tmux capture-pane every 200-2000ms (adaptive)
-  → Sends pane content as JSON
-  → Client renders in xterm.js
-  → Client keystrokes sent back via send-keys
-  → Large paste (>400 chars) uses tmux load-buffer + paste-buffer
+  → Server attaches tmux through Bun.Terminal (native PTY)
+  → Raw terminal bytes stream as binary WebSocket frames
+  → Client writes bytes directly to xterm.js
+  → Input and resize messages go directly to the PTY
+  → tmux remains the persistent session owner after disconnect
 ```
 
 ### Preferences (server-backed, replaces localStorage)
