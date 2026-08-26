@@ -715,6 +715,32 @@ export async function deleteNgrokBasicAuth(): Promise<void> {
   await fetch(`${BASE}/api/settings/ngrok-basic-auth`, { method: "DELETE" });
 }
 
+// ─── Phone link ───
+
+export interface PhoneAddress {
+  host: string;
+  iface: string;
+  kind: "wifi" | "ethernet" | "vpn" | "other" | "mdns";
+  note: string;
+}
+
+export interface PhoneLink {
+  addresses: PhoneAddress[];
+  ports: { port: number; scheme: "http" | "https" }[];
+  url: string | null;
+  problem?: string;
+}
+
+/** Never cached: the address changes with the network. */
+export async function fetchPhoneLink(): Promise<PhoneLink> {
+  if (isDemo()) {
+    return { addresses: [], ports: [], url: null, problem: "Not available in the demo." };
+  }
+  const res = await fetch(`${BASE}/api/network/phone`);
+  if (!res.ok) throw new Error(`could not read the network (${res.status})`);
+  return res.json();
+}
+
 
 // ─── Worktrees ───
 

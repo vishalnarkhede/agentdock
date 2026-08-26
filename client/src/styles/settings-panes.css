@@ -280,3 +280,113 @@
     min-height: 44px;
   }
 }
+
+/* ─── Phone link ─── */
+
+/* The markup asked for a rule that was never written — one divider, no CSS, so
+   the ngrok section ran straight into the password form. */
+.settings-section-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 2px 0;
+}
+
+.set-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.set-refresh {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+}
+
+.set-refresh:hover:not(:disabled) { color: var(--text-1); }
+.set-refresh:disabled { cursor: default; opacity: 0.6; }
+
+.set-phone {
+  gap: 15px;
+}
+
+/* The white plate is part of the code, not decoration: a scanner wants the
+   quiet zone light whatever the pane behind it is doing. */
+.qr {
+  flex-shrink: 0;
+  border-radius: calc(var(--radius) / 2);
+  background: #fff;
+}
+
+/* Big enough to read off the screen and retype if the scan is refused, which is
+   the whole reason the text is here at all. */
+.set-phone-url {
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-base) + 1px);
+  font-weight: 600;
+  color: var(--text-1);
+  word-break: break-all;
+  user-select: all;
+}
+
+.set-phone-iface {
+  color: var(--text-4);
+}
+
+.set-phone-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.set-phone-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.set-phone-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  color: var(--text-3);
+  text-decoration: none;
+}
+
+.set-phone-open:hover { color: var(--text-1); }
+
+/* A row of .set-group, but clickable: picking which route in to show. */
+.set-phone-alt {
+  width: 100%;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.set-phone-alt:hover:not(:disabled) { background: var(--surface-3); }
+.set-phone-alt:disabled { cursor: default; }
+
+.set-phone-alt-on .set-mono {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .set-phone {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

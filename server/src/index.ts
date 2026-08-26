@@ -13,6 +13,7 @@ import worktreeRoutes from "./routes/worktrees";
 import codeRoutes from "./routes/code";
 import housekeepingRoutes from "./routes/housekeeping";
 import ngrokRoutes from "./routes/ngrok";
+import networkRoutes from "./routes/network";
 import fsRoutes from "./routes/fs";
 import authRoutes, { authMiddleware, verifyWsCookie } from "./routes/auth";
 import { handleWsOpen, handleWsMessage, handleWsClose } from "./routes/ws";
@@ -40,6 +41,7 @@ app.route("/api/worktrees", worktreeRoutes);
 app.route("/api/code", codeRoutes);
 app.route("/api/housekeeping", housekeepingRoutes);
 app.route("/api/ngrok", ngrokRoutes);
+app.route("/api/network", networkRoutes);
 app.route("/api/fs", fsRoutes);
 
 // Health check
