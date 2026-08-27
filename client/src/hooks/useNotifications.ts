@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { notifySession } from "../notify";
 
 // Strip ANSI escape codes so patterns match raw text
 function stripAnsi(str: string): string {
@@ -55,10 +56,7 @@ export function useNotifications(
       if ((document.hidden || !document.hasFocus()) && permissionRef.current === "granted") {
         console.log("[notif] sending notification!");
         const displayName = sessionName.replace(/^claude-/, "");
-        new Notification(`${displayName} ready`, {
-          body: "Claude is waiting for input",
-          tag: `claude-${sessionName}`,
-        });
+        notifySession(sessionName, `${displayName} ready`, "Claude is waiting for input");
       } else {
         console.log("[notif] skipped:", !document.hidden && document.hasFocus() ? "window is focused" : `permission=${permissionRef.current}`);
       }

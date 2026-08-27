@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { SessionInfo } from "../types";
 import { queueBucket, NOTIFY_BUCKETS, type QueueBucket } from "../queue";
+import { notifySession } from "../notify";
 
 /**
  * Notifies on the transitions that actually cost you something: an agent
@@ -96,7 +97,7 @@ export function useQueueNotifications(
         s.statusLine?.message ||
         (to === "blocked" ? "It cannot continue without an answer." : "It finished its turn.");
 
-      new Notification(title, { body, tag: `agentdock-${s.name}` });
+      notifySession(s.name, title, body);
     }
 
     prev.current = next;
