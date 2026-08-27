@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsModal } from "./SettingsModal";
+import { PhoneLinkModal } from "./PhoneLink";
 import { Icon } from "./Icon";
 import { createSession, fetchPreferences, updatePreferences, fetchNgrokStatus, startNgrok, stopNgrok } from "../api";
 import { useAuth } from "../hooks/useAuth";
@@ -42,6 +43,7 @@ export function Header({ onSelectSession }: HeaderProps = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
   const [fixingMe, setFixingMe] = useState(false);
   const [talkingToMe, setTalkingToMe] = useState(false);
   const [ngrok, setNgrok] = useState<NgrokStatus>({ running: false, url: null });
@@ -412,6 +414,19 @@ export function Header({ onSelectSession }: HeaderProps = {}) {
           <Icon name="plus" size={15} />
           New
         </button>
+        {/* Next to the gear rather than inside it: reading the IP out of a
+            terminal is what this replaces, and a habit is only broken by
+            something that is fewer steps than the habit. */}
+        {!isDemo() && (
+          <button
+            className="settings-gear-btn"
+            onClick={() => setPhoneOpen(true)}
+            aria-label="Open on your phone"
+            title="Open on your phone — address and QR code"
+          >
+            <Icon name="phone" size={17} />
+          </button>
+        )}
         <button
           className="settings-gear-btn"
           data-tutorial="settings-btn"
@@ -469,6 +484,19 @@ export function Header({ onSelectSession }: HeaderProps = {}) {
             >
               <Icon name="gear" size={16} /> Settings
             </button>
+            {/* Also here because this menu replaces the desktop nav on a narrow
+                window, not only on a phone. */}
+            {!isDemo() && (
+              <button
+                className="settings-gear-btn"
+                onClick={() => {
+                  setPhoneOpen(true);
+                  setMenuOpen(false);
+                }}
+              >
+                <Icon name="phone" size={16} /> Open on phone
+              </button>
+            )}
             {!isDemo() && (
               <>
                 <button
@@ -507,6 +535,7 @@ export function Header({ onSelectSession }: HeaderProps = {}) {
         )}
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <PhoneLinkModal open={phoneOpen} onClose={() => setPhoneOpen(false)} />
     </header>
     {ngrokToast && createPortal(
       <div className="ngrok-toast">

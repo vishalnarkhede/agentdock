@@ -32,6 +32,7 @@ export type IconName =
   | "lock"
   | "merge"
   | "more"
+  | "phone"
   | "pin"
   | "plan"
   | "play"
@@ -78,6 +79,7 @@ const PATHS: Record<IconName, string> = {
   "lock": "<rect x=\"4.5\" y=\"10\" width=\"15\" height=\"10\" rx=\"2\"></rect><path d=\"M8 10V7.5a4 4 0 0 1 8 0V10\"></path>",
   "merge": "<circle cx=\"7\" cy=\"5\" r=\"2\"></circle><circle cx=\"7\" cy=\"19\" r=\"2\"></circle><circle cx=\"17\" cy=\"12\" r=\"2\"></circle><path d=\"M7 7v10\"></path><path d=\"M7 9a6 6 0 0 0 6 3h2\"></path>",
   "more": "<circle cx=\"5\" cy=\"12\" r=\"1.5\" fill=\"currentColor\" stroke=\"none\"></circle><circle cx=\"12\" cy=\"12\" r=\"1.5\" fill=\"currentColor\" stroke=\"none\"></circle><circle cx=\"19\" cy=\"12\" r=\"1.5\" fill=\"currentColor\" stroke=\"none\"></circle>",
+  "phone": "<rect x=\"7\" y=\"2.5\" width=\"10\" height=\"19\" rx=\"2\"></rect><line x1=\"10.5\" y1=\"5.5\" x2=\"13.5\" y2=\"5.5\"></line><circle cx=\"12\" cy=\"18\" r=\"0.9\" fill=\"currentColor\" stroke=\"none\"></circle>",
   "pin": "<line x1=\"12\" y1=\"17\" x2=\"12\" y2=\"22\"></line><path d=\"M9 3h6l-1 6 3 3v2H7v-2l3-3z\"></path>",
   "plan": "<polyline points=\"4 7 6 9 9 5\"></polyline><polyline points=\"4 15 6 17 9 13\"></polyline><line x1=\"12\" y1=\"7\" x2=\"20\" y2=\"7\"></line><line x1=\"12\" y1=\"15\" x2=\"20\" y2=\"15\"></line>",
   "play": "<path d=\"M7 4.5l12 7.5-12 7.5z\"></path>",

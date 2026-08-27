@@ -384,6 +384,24 @@
   font-weight: 600;
 }
 
+/* The phone link opened from the header: the settings shell without the
+   sidebar, so it sits at the width of a QR code and its address rather than the
+   width of a settings pane. */
+.phone-modal {
+  max-width: 420px;
+}
+
+.phone-modal-body {
+  padding: 16px 18px 18px;
+  overflow-y: auto;
+}
+
+/* Here the modal header carries the title, leaving refresh alone in the section
+   head — where space-between would otherwise park it on the left. */
+.set-section-head > .set-refresh:only-child {
+  margin-left: auto;
+}
+
 @media (max-width: 560px) {
   .set-phone {
     flex-direction: column;

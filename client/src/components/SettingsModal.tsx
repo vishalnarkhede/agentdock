@@ -18,14 +18,12 @@ import {
   fetchNgrokBasicAuthStatus,
   setNgrokBasicAuth as apiSetNgrokBasicAuth,
   deleteNgrokBasicAuth as apiDeleteNgrokBasicAuth,
-  fetchPhoneLink,
-  type PhoneLink,
   type SettingsHealth,
 } from "../api";
 import type { RepoConfig, MetaPropertyPreset, AgentType } from "../types";
 import { Icon, type IconName } from "./Icon";
-import { QrCode } from "./QrCode";
-import { copyText } from "../clipboard";
+import { PhoneLinkPanel } from "./PhoneLink";
+import { notify } from "../notify";
 import "../styles/settings-panes.css";
 
 type Category =
@@ -179,11 +177,14 @@ export function SettingsModal({ open, onClose }: Props) {
       perm = await Notification.requestPermission();
     }
     if (perm === "granted") {
-      new Notification("AgentDock", {
-        body: "Notifications are working!",
+      /* The click is half of what is being tested, and this one has no session
+         to open — so it reports back here instead, which is also the only
+         visible proof when the window was already in front. */
+      notify("AgentDock", "Notifications are working. Click this to test the click.", {
         tag: "settings-test",
+        onClick: () => setNotifStatus("Clicked — a real one would open its session"),
       });
-      setNotifStatus("Sent! Check your OS notification center");
+      setNotifStatus("Sent! Check your OS notification center, then click it");
     } else {
       setNotifStatus("Blocked — allow notifications in browser & macOS settings");
     }
@@ -1087,136 +1088,6 @@ function MetaPropertyRow({ preset, onUpdate, onDelete }: {
   );
 }
 
-// ─── Phone link ───
-
-/**
- * The address to open AgentDock on your phone.
- *
- * Before this, the only place that address existed was vite's startup output in
- * a terminal — fine while you can see the terminal, useless from a phone, and
- * gone entirely in a wrapper that has no terminal at all.
- *
- * It is read fresh every time the pane opens rather than remembered: a DHCP
- * lease hands out a different address on a different day, and a remembered one
- * sends you to a machine that is no longer at it.
- */
-function PhoneLinkPanel() {
-  const [link, setLink] = useState<PhoneLink | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState(0);
-  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    fetchPhoneLink()
-      .then((l) => {
-        setLink(l);
-        setChosen(0);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(load, [load]);
-
-  const port = link?.ports.find((p) => p.scheme === "http") ?? null;
-  const address = link?.addresses[chosen] ?? null;
-  /* Composed here rather than server-side so switching address is instant and
-     needs no round trip — the port is the same whichever host you dial. */
-  const url = address && port ? `http://${address.host}:${port.port}` : link?.url ?? null;
-
-  const copy = async () => {
-    if (!url) return;
-    setCopied((await copyText(url)) ? "ok" : "fail");
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  return (
-    <div className="set-section">
-      <div className="set-section-head">
-        <span className="set-section-title">Open on your phone</span>
-        <button className="set-refresh" onClick={load} disabled={loading} title="Read the network again">
-          <Icon name="refresh" size={12} />
-          {loading ? "reading…" : "refresh"}
-        </button>
-      </div>
-
-      {error && <div className="settings-security-error">{error}</div>}
-
-      {url && (
-        <div className="set-group">
-          <div className="set-group-row set-group-row-top set-phone">
-            <QrCode url={url} />
-            <div className="set-copy">
-              <span className="set-phone-url">{url}</span>
-              {address && (
-                <span className="set-copy-hint">
-                  {address.note}
-                  {address.kind !== "mdns" && <span className="set-phone-iface"> · {address.iface}</span>}
-                </span>
-              )}
-              <div className="set-phone-actions">
-                <button className="btn btn-primary" onClick={copy}>
-                  <Icon name="copy" size={12} />
-                  {copied === "ok" ? "copied" : copied === "fail" ? "copy failed" : "copy link"}
-                </button>
-                <a className="set-phone-open" href={url} target="_blank" rel="noreferrer">
-                  open here
-                  <Icon name="ext" size={11} />
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {link && !url && (
-        <>
-          <div className="set-note">
-            <Icon name="alert" size={13} />
-            <span>{link.problem ?? "No address to offer."}</span>
-          </div>
-          {link.problem?.includes("vite.mobile.config.ts") && (
-            <code className="set-cmd">cd client &amp;&amp; npx vite --config vite.mobile.config.ts</code>
-          )}
-        </>
-      )}
-
-      {/* More than one route in is the normal case — Wi-Fi and Ethernet, or a
-          VPN — and which of them a phone can reach is something only you know. */}
-      {link && link.addresses.length > 1 && (
-        <div className="set-group">
-          {link.addresses.map((a, i) => (
-            <button
-              key={a.host}
-              className={`set-group-row set-phone-alt${i === chosen ? " set-phone-alt-on" : ""}`}
-              onClick={() => setChosen(i)}
-              disabled={!port}
-            >
-              <span className={`set-dot ${i === chosen ? "set-dot-on" : ""}`} />
-              <span className="set-copy">
-                <span className="set-mono">{a.host}</span>
-                <span className="set-copy-hint">{a.note}</span>
-              </span>
-              <span className="set-tag">{a.kind === "mdns" ? "name" : a.iface}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="set-note">
-        <Icon name="globe" size={13} />
-        <span>
-          These only work on the same network. For anywhere else, start the ngrok tunnel from the
-          launch menu in the header — and set a password below first, since that address is public.
-        </span>
-      </div>
-    </div>
-  );
-}
-
 // ─── Security Panel ───
 
 function SecurityPanel() {
@@ -1388,6 +1259,8 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["↑", "↓"], description: "Navigate search results" },
       { keys: ["Enter"], description: "Open selected file" },
       { keys: ["Esc"], description: "Clear file search query, or close explorer" },
+      { keys: ["⌘["], description: "Go back to the previous file / line (⌘{ works too)" },
+      { keys: ["⌘]"], description: "Go forward again (⌘} works too)" },
       { keys: ["⌘F"], description: "Search text in open file" },
       { keys: ["Enter"], description: "Next match in file" },
       { keys: ["Shift", "Enter"], description: "Previous match in file" },
