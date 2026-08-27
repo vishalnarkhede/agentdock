@@ -785,6 +785,38 @@ export function Dashboard() {
   }, [setSearchParams]);
 
   /**
+   * The surface each session was last left on.
+   *
+   * The session list stays on screen while a surface is open, so switching
+   * session is a normal thing to do from inside Files or Changes. Carrying the
+   * open surface over to whichever session you clicked would mean a session you
+   * left mid-review comes back on whatever the last one happened to be showing;
+   * this brings each session back where you left it. Sessions not opened in
+   * this page load have nothing remembered, and keep the surface you are on.
+   */
+  const lastSurface = useRef(new Map<string, FullSurface | null>());
+
+  useEffect(() => {
+    if (isMobile || !activeSession) return;
+    lastSurface.current.set(activeSession, fullSurface);
+  }, [isMobile, activeSession, fullSurface]);
+
+  /** Open a session, on the surface it was last left on. One URL write. */
+  const openSession = useCallback((name: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("session", name);
+      if (!isMobile) {
+        const remembered = lastSurface.current.get(name);
+        const view = remembered === undefined ? next.get("view") : remembered;
+        if (view) next.set("view", view);
+        else next.delete("view");
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams, isMobile]);
+
+  /**
    * A phone renders surfaces through bottomTab; fullSurface is desktop only.
    * A ?view= link shared from a desktop would otherwise leave the main area
    * blank, so translate it once on arrival.
@@ -1037,7 +1069,7 @@ export function Dashboard() {
 
       // Set flag so the MRU update effect doesn't reorder the list during navigation
       mruNavigating.current = true;
-      setActiveSession(list[nextIdx]);
+      openSession(list[nextIdx]);
       setMobileShowTerminal(true);
       // Clear flag after state update has been processed
       setTimeout(() => { mruNavigating.current = false; }, 100);
@@ -1049,7 +1081,7 @@ export function Dashboard() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeSession, sessions, setActiveSession]);
+  }, [activeSession, sessions, openSession]);
 
   // Cleanup timers on unmount
   useEffect(() => () => {
@@ -1791,7 +1823,9 @@ export function Dashboard() {
           </button>
         </nav>
       )}
-      {(isMobile || !fullSurface) && (
+      {/* The list stays put whichever surface is open. Hiding it meant reading
+          a diff or a file was a dead end: the only ways to another session were
+          the keyboard switcher and the browser's back button. */}
       <div className="split-sidebar">
         <div className="sidebar-header">
           <div className="sidebar-search">
@@ -1926,7 +1960,7 @@ export function Dashboard() {
                       pinned={pinnedSessions.has(session.name)}
                       onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
                       onSelect={() => {
-                        setActiveSession(session.name);
+                        openSession(session.name);
                         setMobileShowTerminal(true);
                       }}
                       onStopped={handleStopped}
@@ -1980,7 +2014,7 @@ export function Dashboard() {
                       pinned={pinnedSessions.has(session.name)}
                       onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
                       onSelect={() => {
-                        setActiveSession(session.name);
+                        openSession(session.name);
                         setMobileShowTerminal(true);
                       }}
                       onStopped={handleStopped}
@@ -2015,7 +2049,7 @@ export function Dashboard() {
                 pinned={pinnedSessions.has(session.name)}
                 onTogglePin={!isChild ? () => togglePin(session.name) : undefined}
                 onSelect={() => {
-                  setActiveSession(session.name);
+                  openSession(session.name);
                   setMobileShowTerminal(true);
                 }}
                 onStopped={handleStopped}
@@ -2055,7 +2089,6 @@ export function Dashboard() {
           </div>
         )}
       </div>
-      )}
 
       <div className="split-main">
         {activeSession ? (
@@ -2123,6 +2156,19 @@ export function Dashboard() {
                       been a button, but neither looks like the way back — so a
                       reader who wanted the terminal reloaded the page. */}
                   <div className="surface-head">
+                    {/* The tab bar that normally carries this is hidden behind
+                        a surface, and without it a collapsed list cannot be
+                        brought back without leaving the surface first. */}
+                    {sidebarCollapsed && (
+                      <button
+                        className="surface-back"
+                        onClick={() => setSidebarCollapsed(false)}
+                        title="Show the session list"
+                        aria-label="Show the session list"
+                      >
+                        <Icon name="chevr" size={13} />
+                      </button>
+                    )}
                     <button
                       className="surface-back"
                       onClick={() => setFullSurface(null)}
@@ -2163,7 +2209,10 @@ export function Dashboard() {
                   ) : fullSurface === "plan" ? (
                     <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
                   ) : fullSurface === "files" ? (
-                    <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setFullSurface(null)} />
+                    /* Keyed like the other surfaces: an explorer carried from
+                       one session to the next would still be showing a file
+                       from the worktree you just left. */
+                    <FileExplorer key={activeSession} ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setFullSurface(null)} />
                   ) : (
                     <SubAgentsView
                       key={activeSession}
@@ -2268,7 +2317,7 @@ export function Dashboard() {
                       ) : bottomTab === "sub-agents" && hasChildren ? (
                         <SubAgentsView key={activeSession} parentSession={activeSession} sessions={sessions} onSelectChild={(c) => { setActiveSession(c); setBottomTab(null); setMobileShowTerminal(true); }} onRefresh={refresh} />
                       ) : bottomTab === "files" ? (
-                        <FileExplorer ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setBottomTab(null)} />
+                        <FileExplorer key={activeSession} ref={fileExplorerRef} roots={activeSessionPaths} sessionName={activeSession} onClose={() => setBottomTab(null)} />
                       ) : (
                         <PlanView key={activeSession} sessionName={activeSession} viewMode={planViewMode} />
                       )}
