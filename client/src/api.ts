@@ -356,6 +356,35 @@ export async function fetchFsFile(path: string, roots: string[]): Promise<{ cont
   return res.json();
 }
 
+export interface ExternalFsFile {
+  path: string;
+  content: string;
+  language: string;
+  size: number;
+  version: string;
+  readOnly: true;
+}
+
+/**
+ * Open one explicitly entered absolute path outside the session roots.
+ *
+ * This has its own read-only endpoint rather than weakening fetchFsFile:
+ * directory browsing, indexed search and saving must remain scoped to the
+ * session repositories.
+ */
+export async function fetchExternalFsFile(path: string): Promise<ExternalFsFile> {
+  const res = await fetch(`${BASE}/api/fs/open`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to open file");
+  }
+  return res.json();
+}
+
 export interface WriteConflict {
   conflict: true;
   error: string;

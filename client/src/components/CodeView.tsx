@@ -24,11 +24,20 @@ import {
 } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import { loadLanguage } from "../code-lang";
+import { firstMatchFrom, matchOffsets } from "../text-matches";
 import "../styles/code-view.css";
 
 export interface CodeViewHandle {
   /** Scroll `line` (1-based) into view and put the cursor there. */
   goToLine: (line: number) => void;
+  /** The cursor's line (1-based), which is wherever the last jump landed. */
+  currentLine: () => number | null;
+  /**
+   * Which occurrence of `term` a reader arriving at `line` is looking at, so a
+   * hit found by searching across files becomes a place in the walk through
+   * this file's matches. Null when the line has none at or after it.
+   */
+  matchIndexAtLine: (term: string, line: number) => number | null;
   focus: () => void;
 }
 
@@ -37,8 +46,15 @@ interface Props {
   content: string;
   editable: boolean;
   onChange?: (next: string) => void;
-  /** Every occurrence is marked; the one on `activeLine` is marked active. */
+  /** Every occurrence is marked. */
   highlightTerm?: string;
+  /**
+   * Which occurrence is the one being looked at, as an index into the matches.
+   * It is scrolled to and marked active, so walking the matches moves the file
+   * rather than only a counter. `activeLine` marks by line instead, for a hit
+   * that arrived from a search across files rather than within this one.
+   */
+  activeMatchIndex?: number | null;
   activeLine?: number | null;
   onCmdClick?: (word: string, line: number) => void;
   onMatchCount?: (n: number) => void;
@@ -120,24 +136,26 @@ const baseTheme = EditorView.theme({
 
 /* ── Occurrence highlighting, driven from the search results ───────────── */
 
-const setHits = StateEffect.define<{ term: string; activeLine: number | null }>();
+const setHits = StateEffect.define<{
+  term: string;
+  activeIndex: number | null;
+  activeLine: number | null;
+}>();
 
-function buildHits(state: EditorState, term: string, activeLine: number | null): DecorationSet {
+function buildHits(
+  state: EditorState,
+  term: string,
+  activeIndex: number | null,
+  activeLine: number | null,
+): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
   if (!term) return b.finish();
-  const needle = term.toLowerCase();
-  const text = state.doc.toString().toLowerCase();
-  let from = 0;
-  let i: number;
-  // Cap the decoration count: a one-character term in a large file would
-  // otherwise create tens of thousands of ranges for no benefit.
-  let made = 0;
-  while ((i = text.indexOf(needle, from)) !== -1 && made < 5000) {
-    const line = state.doc.lineAt(i).number;
-    b.add(i, i + needle.length, line === activeLine ? activeMark : hitMark);
-    from = i + needle.length;
-    made++;
-  }
+  const offsets = matchOffsets(state.doc.toString(), term);
+  offsets.forEach((from, index) => {
+    const active =
+      activeIndex !== null ? index === activeIndex : state.doc.lineAt(from).number === activeLine;
+    b.add(from, from + term.length, active ? activeMark : hitMark);
+  });
   return b.finish();
 }
 
@@ -148,7 +166,7 @@ const hitField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(value, tr) {
     for (const e of tr.effects) {
-      if (e.is(setHits)) return buildHits(tr.state, e.value.term, e.value.activeLine);
+      if (e.is(setHits)) return buildHits(tr.state, e.value.term, e.value.activeIndex, e.value.activeLine);
     }
     return tr.docChanged ? value.map(tr.changes) : value;
   },
@@ -158,7 +176,18 @@ const hitField = StateField.define<DecorationSet>({
 const WORD = /[A-Za-z0-9_$]/;
 
 export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
-  { path, content, editable, onChange, highlightTerm, activeLine, onCmdClick, onMatchCount, onSelectionChange },
+  {
+    path,
+    content,
+    editable,
+    onChange,
+    highlightTerm,
+    activeMatchIndex,
+    activeLine,
+    onCmdClick,
+    onMatchCount,
+    onSelectionChange,
+  },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
@@ -180,6 +209,17 @@ export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
         selection: { anchor: pos },
         effects: EditorView.scrollIntoView(pos, { y: "center" }),
       });
+    },
+    currentLine: () => {
+      const v = view.current;
+      return v ? v.state.doc.lineAt(v.state.selection.main.head).number : null;
+    },
+    matchIndexAtLine: (term: string, line: number) => {
+      const v = view.current;
+      if (!v || !term) return null;
+      const doc = v.state.doc;
+      const start = doc.line(Math.max(1, Math.min(line, doc.lines))).from;
+      return firstMatchFrom(matchOffsets(doc.toString(), term), start);
     },
     focus: () => view.current?.focus(),
   }));
@@ -295,19 +335,32 @@ export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
   useEffect(() => {
     const v = view.current;
     if (!v) return;
-    v.dispatch({ effects: setHits.of({ term: highlightTerm ?? "", activeLine: activeLine ?? null }) });
-    if (onMatchCount) {
-      const term = (highlightTerm ?? "").toLowerCase();
-      if (!term) onMatchCount(0);
-      else {
-        const hay = v.state.doc.toString().toLowerCase();
-        let n = 0;
-        let i = hay.indexOf(term);
-        while (i !== -1) { n++; i = hay.indexOf(term, i + term.length); }
-        onMatchCount(n);
-      }
-    }
-  }, [highlightTerm, activeLine, content, onMatchCount]);
+    const term = highlightTerm ?? "";
+    v.dispatch({
+      effects: setHits.of({
+        term,
+        activeIndex: activeMatchIndex ?? null,
+        activeLine: activeLine ?? null,
+      }),
+    });
+    onMatchCount?.(matchOffsets(v.state.doc.toString(), term).length);
+  }, [highlightTerm, activeMatchIndex, activeLine, content, onMatchCount]);
+
+  /* Bring the match being looked at onto the screen. The caret goes with it,
+     without selecting the match: a selection here would look like one the
+     reader made and offer to send it to the agent as a note. */
+  useEffect(() => {
+    const v = view.current;
+    if (!v || activeMatchIndex == null || !highlightTerm) return;
+    const from = matchOffsets(v.state.doc.toString(), highlightTerm)[activeMatchIndex];
+    if (from === undefined) return;
+    v.dispatch({
+      selection: { anchor: from },
+      effects: EditorView.scrollIntoView(from, { y: "center" }),
+    });
+    // Deliberately not keyed on content: a save or a reload should leave the
+    // file where the reader left it, not scroll back to the active match.
+  }, [activeMatchIndex, highlightTerm]);
 
   return <div className="cm-host" ref={host} />;
 });

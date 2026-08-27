@@ -196,6 +196,14 @@
 
 .fe-editbar-spacer { flex: 1 1 auto; }
 
+.fe-editbar-readonly {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-3);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
 .fe-editbar-state {
   color: var(--text-3);
   font-size: max(11px, calc(var(--fs-base) - 2px));

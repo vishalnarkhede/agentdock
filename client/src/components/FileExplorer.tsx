@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { fetchFsDir, fetchFsFile, writeFsFile, sendSessionInput } from "../api";
+import { fetchFsDir, fetchFsFile, fetchExternalFsFile, writeFsFile, sendSessionInput } from "../api";
 import type { FsEntry, GrepResult } from "../api";
 import { Icon } from "./Icon";
 import { FileSearch, type FileSearchHandle } from "./FileSearch";
@@ -9,6 +9,8 @@ import { CodeViewLazy, type CodeViewHandle } from "./CodeViewLazy";
 import "../styles/code-nav.css";
 import { findDefinition, fetchDocSymbols, type Candidate, type DocSymbol } from "../code-api";
 import { buildNoteMessage } from "../note-message";
+import { EMPTY_HISTORY, back, forward, markLine, visit, type NavHistory, type NavSpot } from "../nav-history";
+import { stepMatch } from "../text-matches";
 import "../styles/files.css";
 interface Props {
   roots: string[]; // absolute paths to repo root(s)
@@ -27,6 +29,8 @@ interface OpenFile {
   language: string;
   size: number;
   version: string;
+  /** Explicit full-path opens are for reference; repo-scoped files stay editable. */
+  readOnly?: boolean;
 }
 
 
@@ -414,7 +418,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const noteInput = useRef<HTMLTextAreaElement>(null);
   const [modDown, setModDown] = useState(false);
   const [usagesFor, setUsagesFor] = useState<string | null>(null);
-  const backStack = useRef<{ path: string; line: number }[]>([]);
+  /* Where you have been, for Cmd+[ and Cmd+]. A ref because nothing on screen
+     reads it — only the two shortcuts do — and re-rendering the file for every
+     visit would be work for no visible change. */
+  const history = useRef<NavHistory>(EMPTY_HISTORY);
+  /** Set while replaying a visit, so retracing the trail does not extend it. */
+  const replaying = useRef(false);
   // Bumped on every open-from-search, so clicking a second match in the file
   // already on screen still moves the active highlight.
   const [markNonce, setMarkNonce] = useState(0);
@@ -435,6 +444,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       } else if (e.key === "f" && !e.shiftKey && openFile) {
         e.preventDefault();
         setFileSearchActive(true);
+        setFileSearchIdx(0);
         setTimeout(() => {
           fileSearchInputRef.current?.focus();
           fileSearchInputRef.current?.select();
@@ -448,9 +458,33 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const closeFileSearch = useCallback(() => {
     setFileSearchActive(false);
     setFileSearchQuery("");
+    setFileSearchIdx(0);
+  }, []);
+
+  /** Pin the line you are leaving onto the trail, so back returns to it. */
+  const markDeparture = useCallback(() => {
+    if (replaying.current) return;
+    const line = codeRef.current?.currentLine();
+    if (line) history.current = markLine(history.current, line);
+  }, []);
+
+  const recordVisit = useCallback((spot: NavSpot) => {
+    if (replaying.current) return;
+    history.current = visit(history.current, spot);
+  }, []);
+
+  /** Run an open without it counting as a new place. */
+  const withoutHistory = useCallback(async (open: () => Promise<void> | void) => {
+    replaying.current = true;
+    try {
+      await open();
+    } finally {
+      replaying.current = false;
+    }
   }, []);
 
   const handleOpenGrepResult = useCallback(async (result: GrepResult) => {
+    markDeparture();
     // Arriving at a line number means the lines matter, so a markdown file lands
     // in source rather than in the preview, which has no lines to land on.
     setMdPreview(false);
@@ -458,6 +492,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       // Already open: CodeMirror knows where line N is; no line-height maths.
       setActiveMatchLine(result.lineNumber);
       codeRef.current?.goToLine(result.lineNumber);
+      recordVisit({ path: result.path, line: result.lineNumber, external: false });
       return;
     }
     pendingMarkRef.current = { path: result.path, line: result.lineNumber };
@@ -466,13 +501,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     try {
       const data = await fetchFsFile(result.path, roots);
       setOpenFile({ path: result.path, ...data });
+      recordVisit({ path: result.path, line: result.lineNumber, external: false });
     } catch (err: any) {
       setError(err.message || "Failed to read file");
       pendingMarkRef.current = null;
     } finally {
       setLoadingPath(null);
     }
-  }, [openFile, roots]);
+  }, [openFile, roots, recordVisit, markDeparture]);
 
   const handleToggleDir = useCallback(async (path: string) => {
     setExpandedDirs((prev) => {
@@ -507,18 +543,46 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   const handleOpenFile = useCallback(async (path: string) => {
     if (openFile?.path === path) return;
+    markDeparture();
     setMdPreview(true);
     setLoadingPath(path);
     setError(null);
     try {
       const data = await fetchFsFile(path, roots);
       setOpenFile({ path, ...data });
+      recordVisit({ path, line: 1, external: false });
     } catch (err: any) {
       setError(err.message || "Failed to read file");
     } finally {
       setLoadingPath(null);
     }
-  }, [openFile, roots]);
+  }, [openFile, roots, recordVisit, markDeparture]);
+
+  const loadExternalFile = useCallback(async (path: string) => {
+    markDeparture();
+    setMdPreview(true);
+    setLoadingPath(path);
+    setError(null);
+    try {
+      const data = await fetchExternalFsFile(path);
+      setDraft(null);
+      setConflict(null);
+      setSelection(null);
+      setOpenFile(data);
+      recordVisit({ path: data.path, line: 1, external: true });
+    } catch (err: any) {
+      throw new Error(err?.message || "Failed to open file");
+    } finally {
+      setLoadingPath(null);
+    }
+  }, [recordVisit, markDeparture]);
+
+  const handleOpenExternalFile = useCallback(async (path: string) => {
+    if (draft !== null && openFile !== null && draft !== openFile.content) {
+      throw new Error("Finish or discard the current edits before opening another file");
+    }
+    await loadExternalFile(path);
+  }, [draft, openFile, loadExternalFile]);
 
   const rowContainerRef = useRef<HTMLDivElement>(null);
 
@@ -590,6 +654,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [activeMatchLine, setActiveMatchLine] = useState<number | null>(null);
   const codeRef = useRef<CodeViewHandle>(null);
 
+  /* Which match the reader is on. Clamped rather than corrected in state,
+     because the count arrives from the editor a render after the term does. */
+  const activeMatchIdx =
+    fileSearchActive && fileSearchMatchCount > 0
+      ? Math.min(fileSearchIdx, fileSearchMatchCount - 1)
+      : null;
+
   const dirty = draft !== null && openFile !== null && draft !== openFile.content;
   const editing = draft !== null;
 
@@ -613,21 +684,57 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   const goTo = useCallback(
     async (path: string, line: number, pushHistory = true) => {
-      if (pushHistory && openFile) {
-        backStack.current.push({ path: openFile.path, line: 1 });
-        if (backStack.current.length > 50) backStack.current.shift();
-      }
       setPicker(null);
       setUsagesFor(null);
-      await handleOpenGrepResult({ path, name: path.split("/").pop() || path, lineNumber: line, line: "" });
+      const open = () =>
+        handleOpenGrepResult({ path, name: getBasename(path), lineNumber: line, line: "" });
+      if (pushHistory) await open();
+      else await withoutHistory(open);
     },
-    [openFile],
+    [handleOpenGrepResult, withoutHistory],
   );
 
-  const goBack = useCallback(() => {
-    const prev = backStack.current.pop();
-    if (prev) goTo(prev.path, prev.line, false);
-  }, [goTo]);
+  /** Re-open a place off the trail, as it was reached the first time. */
+  const replay = useCallback(
+    (spot: NavSpot) =>
+      withoutHistory(async () => {
+        try {
+          // The dirty check belongs to the person opening a file; travel has
+          // already asked, and the answer has not reached this closure yet.
+          if (spot.external) await loadExternalFile(spot.path);
+          else if (spot.line > 1) {
+            await handleOpenGrepResult({
+              path: spot.path,
+              name: getBasename(spot.path),
+              lineNumber: spot.line,
+              line: "",
+            });
+          } else await handleOpenFile(spot.path);
+        } catch (err: any) {
+          setError(err?.message || "Failed to open file");
+        }
+      }),
+    [withoutHistory, loadExternalFile, handleOpenGrepResult, handleOpenFile],
+  );
+
+  const travel = useCallback(
+    (direction: -1 | 1) => {
+      const step = direction === -1 ? back(history.current) : forward(history.current);
+      if (!step) return;
+      // Asked before the cursor moves, so declining leaves you where you are.
+      if (dirty && !window.confirm("Discard unsaved changes?")) return;
+      history.current = step.history;
+      setDraft(null);
+      setConflict(null);
+      setSaveError(null);
+      setPicker(null);
+      void replay(step.spot);
+    },
+    [dirty, replay],
+  );
+
+  const goBack = useCallback(() => travel(-1), [travel]);
+  const goForward = useCallback(() => travel(1), [travel]);
 
   /**
    * Clicking a name jumps to where it is declared. Clicking the declaration
@@ -654,6 +761,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           setFileSearchQuery(name);
           setFileSearchActive(true);
           setUsagesFor(name);
+          // Start the walk at the usage that was clicked, not at the top.
+          const from = atLine ?? codeRef.current?.currentLine() ?? 1;
+          setFileSearchIdx(codeRef.current?.matchIndexAtLine(name, from) ?? 0);
           return;
         }
         if (res.candidates.length === 1) {
@@ -702,7 +812,17 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         if (sel && /^[A-Za-z_$][\w$]*$/.test(sel)) navigateToSymbol(sel);
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "[") { e.preventDefault(); goBack(); return; }
+      // Physical bracket keys, so the shifted { and } an IDE user reaches for
+      // work too. Ctrl+Shift+bracket is left alone: that switches sessions.
+      if (e.code === "BracketLeft" || e.code === "BracketRight") {
+        const modified = e.metaKey || (e.ctrlKey && !e.shiftKey);
+        if (modified && !e.altKey) {
+          e.preventDefault();
+          if (e.code === "BracketLeft") goBack();
+          else goForward();
+          return;
+        }
+      }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "o" || e.key === "O")) {
         if (!openFile) return;
         e.preventDefault();
@@ -713,7 +833,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openFile, navigateToSymbol, goBack, picker]);
+  }, [openFile, navigateToSymbol, goBack, goForward, picker]);
 
   const discardEdits = useCallback(() => {
     setDraft(null);
@@ -779,9 +899,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       e.preventDefault();
       if (fileSearchMatchCount === 0) return;
       const delta = e.shiftKey ? -1 : 1;
-      setFileSearchIdx((i) => (i + delta + fileSearchMatchCount) % fileSearchMatchCount);
+      setFileSearchIdx(stepMatch(activeMatchIdx ?? 0, delta, fileSearchMatchCount));
     }
-  }, [fileSearchMatchCount, closeFileSearch]);
+  }, [fileSearchMatchCount, activeMatchIdx, closeFileSearch]);
 
   // Jump to the match the search result pointed at, once its file is open.
   useEffect(() => {
@@ -791,7 +911,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     if (pending.line === null) return;
     setActiveMatchLine(pending.line);
     codeRef.current?.goToLine(pending.line);
-  }, [openFile]);
+    /* Landing here is also a position in this file's matches, so Enter carries
+       on from the hit that was clicked instead of restarting at the top. */
+    const landed = codeRef.current?.matchIndexAtLine(fileSearchQuery, pending.line);
+    if (landed != null) setFileSearchIdx(landed);
+  }, [openFile, fileSearchQuery]);
 
   // Relative path from root for breadcrumb
   /* A selection is per-file: keeping one across a navigation would attach a
@@ -872,6 +996,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           ref={fileSearchRef}
           roots={roots}
           activePath={openFilePath}
+          onOpenPath={handleOpenExternalFile}
           onOpenFile={(path, line, term) => {
             if (term) {
               // Reuse the in-file search: the term lights up everywhere in the
@@ -983,13 +1108,17 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   type="text"
                   placeholder="search in file…"
                   value={fileSearchQuery}
-                  onChange={(e) => setFileSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    // A new term starts its own walk, from the first match.
+                    setFileSearchQuery(e.target.value);
+                    setFileSearchIdx(0);
+                  }}
                   onKeyDown={handleFileSearchKeyDown}
                 />
                 <span className="fe-file-search-count">
                   {fileSearchMatchCount === 0
                     ? (fileSearchQuery ? "no matches" : "")
-                    : `${fileSearchIdx + 1}/${fileSearchMatchCount}`}
+                    : `${(activeMatchIdx ?? 0) + 1}/${fileSearchMatchCount}`}
                 </span>
                 <button className="fe-file-search-close" onClick={closeFileSearch} title="Close (Esc)">
                   <Icon name="close" size={12} />
@@ -1008,6 +1137,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     </button>
                     <button className="fe-editbtn" onClick={stopEditing}>done</button>
                   </>
+                ) : openFile.readOnly ? (
+                  <span className="fe-editbar-readonly">
+                    <Icon name="lock" size={11} /> outside workspace · read only
+                  </span>
                 ) : (
                   <button className="fe-editbtn" onClick={startEditing} title="Edit this file">
                     <Icon name="edit" size={12} /> edit
@@ -1041,6 +1174,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   editable={editing}
                   onChange={setDraft}
                   highlightTerm={fileSearchActive ? fileSearchQuery : ""}
+                  activeMatchIndex={activeMatchIdx}
                   activeLine={activeMatchLine}
                   onCmdClick={(word: string, line: number) => navigateToSymbol(word, line)}
                   onMatchCount={setFileSearchMatchCount}

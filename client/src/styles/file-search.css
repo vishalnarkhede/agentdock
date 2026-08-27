@@ -74,6 +74,60 @@
   background: var(--intent-primary);
 }
 
+.fsx-path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  flex: 0 0 auto;
+}
+
+.fsx-path-input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+}
+
+.fsx-path-input:focus {
+  border-color: var(--intent-primary);
+}
+
+.fsx-path-open {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  cursor: pointer;
+}
+
+.fsx-path-open:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.fsx-path-open:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.fsx-path-error {
+  grid-column: 1 / -1;
+  color: var(--intent-danger);
+  font-size: max(11px, calc(var(--fs-base) - 2px));
+  line-height: 1.35;
+}
+
 .fsx-opts {
   display: flex;
   gap: 4px;

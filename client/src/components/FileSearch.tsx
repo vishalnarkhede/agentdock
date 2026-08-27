@@ -29,6 +29,7 @@ export interface FileSearchHandle {
 interface Props {
   roots: string[];
   onOpenFile: (path: string, line?: number, term?: string) => void;
+  onOpenPath: (path: string) => Promise<void>;
   activePath?: string | null;
   /** Shown in place of results when the query is empty — the file tree. */
   children?: React.ReactNode;
@@ -116,7 +117,7 @@ function Marked({ parts }: { parts: { s: string; hit: boolean }[] }) {
 }
 
 export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearch(
-  { roots, onOpenFile, activePath, children },
+  { roots, onOpenFile, onOpenPath, activePath, children },
   ref,
 ) {
   const [query, setQuery] = useState("");
@@ -128,8 +129,13 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
   const [opts, setOpts] = useState<Options>(loadOptions);
   const [showOpts, setShowOpts] = useState(false);
   const [cursor, setCursor] = useState(0);
+  const [pathOpen, setPathOpen] = useState(false);
+  const [pathValue, setPathValue] = useState("");
+  const [pathBusy, setPathBusy] = useState(false);
+  const [pathError, setPathError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Abort is not instantaneous, so a sequence number decides which response is
@@ -308,6 +314,32 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
 
   const toggle = (k: keyof Options) => setOpts((o) => ({ ...o, [k]: !o[k] }));
 
+  const togglePath = () => {
+    setPathOpen((open) => {
+      if (!open) {
+        setPathError(null);
+        requestAnimationFrame(() => pathInputRef.current?.focus());
+      }
+      return !open;
+    });
+  };
+
+  const openPath = async () => {
+    const path = pathValue.trim();
+    if (!path || pathBusy) return;
+    setPathBusy(true);
+    setPathError(null);
+    try {
+      await onOpenPath(path);
+      setPathOpen(false);
+      setPathValue("");
+    } catch (err: any) {
+      setPathError(err?.message || "Could not open file");
+    } finally {
+      setPathBusy(false);
+    }
+  };
+
   return (
     <div className="fsx">
       <div className="fsx-bar">
@@ -328,6 +360,15 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
           </button>
         )}
         <button
+          className={`fsx-optbtn${pathOpen ? " fsx-optbtn-on" : ""}`}
+          onClick={togglePath}
+          title="Open a full file path"
+          aria-label="Open a full file path"
+          aria-expanded={pathOpen}
+        >
+          <Icon name="file" size={13} />
+        </button>
+        <button
           className={`fsx-optbtn${showOpts ? " fsx-optbtn-on" : ""}${opts.regex || opts.caseSensitive || opts.wholeWord ? " fsx-optbtn-dirty" : ""}`}
           onClick={() => setShowOpts((v) => !v)}
           title="Search options"
@@ -336,6 +377,41 @@ export const FileSearch = forwardRef<FileSearchHandle, Props>(function FileSearc
           <Icon name="filter" size={13} />
         </button>
       </div>
+
+      {pathOpen && (
+        <div className="fsx-path">
+          <input
+            ref={pathInputRef}
+            className="fsx-path-input"
+            placeholder="/full/path/to/file or ~/file"
+            value={pathValue}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => {
+              setPathValue(e.target.value);
+              setPathError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void openPath();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setPathOpen(false);
+                setPathError(null);
+              }
+            }}
+          />
+          <button
+            className="fsx-path-open"
+            onClick={() => void openPath()}
+            disabled={!pathValue.trim() || pathBusy}
+          >
+            {pathBusy ? "opening…" : "open"}
+          </button>
+          {pathError && <span className="fsx-path-error">{pathError}</span>}
+        </div>
+      )}
 
       {showOpts && (
         <div className="fsx-opts" role="group" aria-label="Search options">

@@ -15,6 +15,7 @@ interface Props {
   editable: boolean;
   onChange?: (next: string) => void;
   highlightTerm?: string;
+  activeMatchIndex?: number | null;
   activeLine?: number | null;
   onCmdClick?: (word: string, line: number) => void;
   onMatchCount?: (n: number) => void;

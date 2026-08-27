@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { readdir, readFile, stat, writeFile, rename } from "fs/promises";
 import { createHash } from "crypto";
-import { join, resolve, extname, basename } from "path";
+import { join, resolve, extname, basename, isAbsolute } from "path";
+import { homedir } from "os";
 import { getBasePath } from "../services/config";
 import { getIndex, invalidate } from "../services/file-index";
 import { rank } from "../services/fuzzy";
@@ -180,6 +181,59 @@ app.get("/read", async (c) => {
     });
   } catch (err: any) {
     return c.json({ error: err.message || "failed to read file" }, 500);
+  }
+});
+
+// POST /api/fs/open { path: <absolute-path> }
+//
+// This is deliberately separate from /read. The normal endpoint proves a file
+// belongs to the active session roots and /write applies the same proof before
+// saving. An explicitly entered full path is a one-file, read-only exception:
+// it must not silently turn tree browsing, search, or editing into arbitrary
+// filesystem access.
+app.post("/open", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const rawPath = typeof body?.path === "string" ? body.path.trim() : "";
+  if (!rawPath) return c.json({ error: "path is required" }, 400);
+
+  const expanded = rawPath === "~"
+    ? homedir()
+    : rawPath.startsWith("~/")
+      ? join(homedir(), rawPath.slice(2))
+      : rawPath;
+  if (!isAbsolute(expanded)) {
+    return c.json({ error: "enter a full path starting with / or ~/" }, 400);
+  }
+
+  const resolvedPath = resolve(expanded);
+  const ext = extname(resolvedPath).toLowerCase();
+  if (BINARY_EXTENSIONS.has(ext)) {
+    return c.json({ error: "binary files cannot be previewed" }, 400);
+  }
+
+  try {
+    const info = await stat(resolvedPath);
+    if (!info.isFile()) return c.json({ error: "not a file" }, 400);
+    if (info.size > MAX_FILE_SIZE) {
+      return c.json(
+        { error: `file too large (${Math.round(info.size / 1024)}KB, max 500KB)` },
+        400,
+      );
+    }
+
+    const content = await readFile(resolvedPath, "utf-8");
+    return c.json({
+      path: resolvedPath,
+      content,
+      language: getLanguage(resolvedPath),
+      size: info.size,
+      version: fileVersion(content, info.mtimeMs),
+      readOnly: true,
+    });
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return c.json({ error: "file not found" }, 404);
+    if (err?.code === "EACCES") return c.json({ error: "permission denied" }, 403);
+    return c.json({ error: err?.message || "failed to read file" }, 500);
   }
 });
 
