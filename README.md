@@ -191,7 +191,7 @@ MCP servers (e.g., [Linear MCP](https://github.com/linear/linear-mcp)) can be ad
 2. **Agent launches** in a tmux session with appropriate permissions for file edits, git, and GitHub CLI
 3. **Status is tracked** via Claude Code lifecycle hooks (`PreToolUse`, `Stop`, `Notification`, etc.) that write to `/tmp/agentdock-status/` — no terminal scraping needed
 4. **Watch live output** — Bun attaches to tmux through a native PTY and streams raw terminal bytes over WebSocket
-5. **Type input** — keystrokes, paste, mouse and resize events are forwarded directly to the PTY
+5. **Type input** — keystrokes, paste and resize events are forwarded directly to the PTY; selection stays with the browser, and the wheel asks tmux for its scrollback
 6. **View the plan** — agents save structured plans to `~/.config/agentdock/plans/` which appear in the Plan tab; send follow-up messages directly from there
 7. **Browse changes** — the Changes tab shows a live git diff of all modified files
 8. **Restore** — stopped sessions can be restored with full Claude conversation history, bypassing the interactive picker for reliability

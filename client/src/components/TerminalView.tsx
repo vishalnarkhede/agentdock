@@ -9,7 +9,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import "../styles/terminal-states.css";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { TOUCH_WHEEL_STEP_PX, tmuxWheelSequence } from "../terminal-pty";
+import { touchScrollLines, wheelScrollLines } from "../terminal-pty";
 import { useNotifications } from "../hooks/useNotifications";
 import { useSettings } from "../hooks/useSettings";
 import { openInIterm, uploadFile, switchAgent } from "../api";
@@ -17,6 +17,26 @@ import { openInIterm, uploadFile, switchAgent } from "../api";
 import type { AgentType } from "../types";
 
 const LIGHT_THEMES = new Set(["light", "minimal", "notion", "macos"]);
+
+/** How often the screen is compared with itself while waiting for the attach
+    redraw to settle. Two of these is the delay between a finished screen and
+    seeing it, so it is kept short. */
+const SETTLE_POLL_MS = 80;
+/** Share of rows that may change between two samples for the screen to count as
+    settled. A spinner or a clock redraws one row; an attach redraw rewrites the
+    screen, and that is what must not be watched happening. */
+const SETTLE_ROW_CHANGE = 0.1;
+/** Samples in a row that have to look settled. One is not enough: a redraw
+    arrives in bursts, and a gap between two of them looks like calm. */
+const SETTLE_SAMPLES = 2;
+/** An agent mid-answer changes the screen continuously and would never settle,
+    so the wait is capped once output has started. */
+const PAINT_CAP_MS = 1600;
+/** And a session that sends nothing at all — an attach that failed, a server
+    that is not up — must not stay invisible. Long enough that a slow attach
+    still gets its redraw hidden: the first bytes can be a few hundred ms behind
+    the socket. */
+const PAINT_BLANK_MS = 2500;
 
 const DARK_TERM_THEME = {
   foreground: "#a9b1d6",
@@ -116,6 +136,19 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   /** Whether fit() has ever had a sized container to measure. Until it has,
       xterm reports its 80x24 default, which must never reach tmux. */
   const gridFittedRef = useRef(false);
+  /**
+   * Whether the attach paint has settled enough to be worth looking at.
+   *
+   * A tmux client repaints the whole screen three times in its first frames:
+   * once on attach, then again each time the terminal answers the capability
+   * and size questions tmux asks it. Each repaint is written row by row, so an
+   * xterm that renders them as they arrive shows the screen sweeping downwards
+   * two or three times — which is what opening a session looked like, as if the
+   * view started at the top and scrolled to the bottom. The rows are hidden
+   * until the stream goes quiet, so the first thing a reader sees is the
+   * finished screen.
+   */
+  const [painted, setPainted] = useState(false);
   const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -153,6 +186,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const sendShiftEnterRef = useRef<() => void>(() => {});
+  const sendScrollRef = useRef<(lines: number) => void>(() => {});
   // Custom keyboard only makes sense on mobile — never activate it on desktop
   // even if the preference was saved while on a mobile device.
   const customKb = settings.customKeyboard && window.innerWidth <= 900;
@@ -260,11 +294,6 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       disableStdin: false,
       convertEol: true,
       scrollback: settings.scrollback,
-      /* An attached tmux client turns mouse reporting on, which otherwise takes
-         drag-select away from the browser: the drag becomes a tmux selection and
-         nothing lands on the system clipboard. On macOS xterm only hands a drag
-         back to the page when Option is held and this is set. */
-      macOptionClickForcesSelection: true,
     });
 
     const fitAddon = new FitAddon();
@@ -367,6 +396,20 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     // Forward all other keyboard input to the server
     term.onData((data) => {
       sendInputRef.current(data);
+    });
+
+    /* The wheel is a scroll request to tmux, never input.
+       
+       xterm has nothing of its own to scroll here — an attached client lives on
+       the alternate screen, where the browser's scrollback stays empty — and
+       left to itself it turns the wheel into arrow keys, which walks the agent's
+       prompt history instead of the view. So the event is cancelled and the
+       history asked for by name. */
+    term.attachCustomWheelEventHandler((event) => {
+      const rowHeight = term.element ? term.element.clientHeight / term.rows : undefined;
+      const lines = wheelScrollLines(event.deltaY, event.deltaMode, term.rows, rowHeight);
+      if (lines) sendScrollRef.current(lines);
+      return false;
     });
 
     termRef.current = term;
@@ -493,9 +536,63 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     };
   }, [settings.cursorBlink, settings.scrollback, settings.terminalFontSize]);
 
+  const paintedRef = useRef(false);
+  const paintStartedRef = useRef(false);
+  const settlePoll = useRef<ReturnType<typeof setInterval> | null>(null);
+  const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = useCallback(() => {
+    if (paintedRef.current) return;
+    paintedRef.current = true;
+    if (settlePoll.current) clearInterval(settlePoll.current);
+    if (capTimer.current) clearTimeout(capTimer.current);
+    setPainted(true);
+  }, []);
+
+  /** The visible rows, as strings, for comparing one sample with the next. */
+  const readRows = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return [];
+    const buf = term.buffer.active;
+    const rows: string[] = [];
+    for (let i = 0; i < term.rows; i++) {
+      rows.push(buf.getLine(buf.viewportY + i)?.translateToString(true) ?? "");
+    }
+    return rows;
+  }, []);
+
+  useEffect(() => {
+    capTimer.current = setTimeout(show, PAINT_BLANK_MS);
+    return () => {
+      if (settlePoll.current) clearInterval(settlePoll.current);
+      if (capTimer.current) clearTimeout(capTimer.current);
+    };
+  }, [show]);
+
   const handleBytes = useCallback((bytes: Uint8Array) => {
     termRef.current?.write(bytes);
-  }, []);
+    if (paintedRef.current || paintStartedRef.current) return;
+
+    /* The redraw has started, so from here the question is when the screen
+       stops moving rather than whether anything is coming at all. Watching the
+       rows rather than the byte stream is what makes this reliable: a redraw
+       arrives in bursts with gaps between them, and an agent that repaints the
+       same screen forever never stops sending. */
+    paintStartedRef.current = true;
+    if (capTimer.current) clearTimeout(capTimer.current);
+    capTimer.current = setTimeout(show, PAINT_CAP_MS);
+
+    let previous = readRows();
+    let settled = 0;
+    settlePoll.current = setInterval(() => {
+      const rows = readRows();
+      const total = Math.max(rows.length, previous.length, 1);
+      let changed = 0;
+      for (let i = 0; i < total; i++) if (rows[i] !== previous[i]) changed++;
+      previous = rows;
+      settled = changed / total <= SETTLE_ROW_CHANGE ? settled + 1 : 0;
+      if (settled >= SETTLE_SAMPLES) show();
+    }, SETTLE_POLL_MS);
+  }, [readRows, show]);
 
   /** The visible pane plus a little scrollback, read back out of xterm. */
   const readTerminalText = useCallback(() => {
@@ -522,7 +619,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     return () => clearInterval(id);
   }, [readTerminalText]);
 
-  const { connected, sendInput, sendShiftEnter, sendResize } = useWebSocket(sessionName, {
+  const { connected, sendInput, sendShiftEnter, sendResize, sendScroll } = useWebSocket(sessionName, {
     onBytes: handleBytes,
     onClosed,
     getTerminalSize: () => {
@@ -536,6 +633,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
   sendShiftEnterRef.current = sendShiftEnter;
   const sendResizeRef = useRef<(cols: number, rows: number) => void>(() => {});
   sendResizeRef.current = sendResize;
+  sendScrollRef.current = sendScroll;
 
   // Sync tmux pane size with browser terminal on connect
   useEffect(() => {
@@ -760,7 +858,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
       <div className="term-scrollbar-area">
         <div
           ref={containerRef}
-          className="terminal-wrapper"
+          className={`terminal-wrapper${painted ? "" : " terminal-wrapper-painting"}`}
         onClick={() => { if (!customKb && !focused) termRef.current?.focus(); }}
         onTouchStart={(e) => {
           const touch = e.touches[0];
@@ -805,14 +903,9 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
           touchScrollingRef.current = true;
           touchStartYRef.current = e.touches[0].clientY; // incremental delta
           touchWheelDeltaRef.current += dy;
-          const term = termRef.current;
-          if (term) {
-            const wheel = tmuxWheelSequence(touchWheelDeltaRef.current, term.cols, term.rows);
-            if (wheel) {
-              sendInputRef.current(wheel);
-              touchWheelDeltaRef.current %= TOUCH_WHEEL_STEP_PX;
-            }
-          }
+          const { lines, remainderPx } = touchScrollLines(touchWheelDeltaRef.current);
+          touchWheelDeltaRef.current = remainderPx;
+          if (lines) sendScrollRef.current(lines);
           e.preventDefault();
         }}
         />

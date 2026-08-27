@@ -206,8 +206,55 @@ to `tmux send-keys` command-length limits. Resizes update the PTY grid directly.
 If no message arrives from the browser for 60 seconds, the attached viewer is
 detached while the tmux session and agent continue running.
 
-tmux mouse mode owns desktop wheel and mobile swipe history in copy mode. The
-tmux status bar is hidden for AgentDock-managed sessions.
+tmux mouse mode is switched off for AgentDock-managed sessions, which leaves
+drag-select to the browser: with it on, xterm forwards the drag to tmux, which
+selects into a tmux buffer and cancels on release. The scrollback still belongs
+to tmux, since an attached client sits on the alternate screen — so the wheel and
+mobile swipes are sent as `{ type: "scroll", lines }` and served by tmux copy
+mode, never as input. The tmux status bar is hidden for these sessions too.
+
+While a browser is attached, its grid size is pinned as the window size with
+`resize-window`, and the window option is unset again on detach. tmux otherwise
+sizes a window to whichever client was last active, so a second viewer of the
+same session — the same session in iTerm, on a phone, in another tab — would
+resize the window under the browser; tmux then paints only the area the window
+covers and fills the rest, which is where the grid of dots over the terminal came
+from. `fill-character` is set to a space so any area a window does not cover
+reads as empty terminal rather than dots on the tmux versions that support it.
+Detaching also leaves the browser's grid as the session's `default-size`, because
+tmux otherwise falls back to the size the session was created at as soon as the
+last client goes — which made every reopen a resize.
+
+### Opening a session
+
+Three things make an attach look instant rather than like a screen scrolling past.
+
+**The window is sized before the PTY exists.** Resizing a window signals the
+program in it, and an agent TUI answers by rewriting its whole transcript: one
+size change on a Cursor session measured 3.1MB of redraw over three seconds.
+`settlePtyWindow()` therefore resizes first and polls `capture-pane` until the
+pane stops changing (capped at 1.2s), so tmux absorbs the redraw and the attach
+that follows paints the finished screen. It is a no-op — a single tmux call —
+when the window already has the right size, which is the common case now that
+`default-size` holds it between visits.
+
+**Output is batched for 8ms before it is sent.** A redrawing TUI writes in tiny
+pieces; forwarding each PTY chunk as its own frame turned one Cursor redraw into
+81,000 WebSocket frames of about twelve bytes, and the browser rendered that
+fragment by fragment for over a second. Batched, the same redraw is a few dozen
+frames and one repaint. Input is never delayed.
+
+**The rows stay at `opacity: 0` until the screen stops moving.** tmux still
+paints the screen about three times on attach — once on attach, then again as the
+terminal answers the capability and size questions it asks. The client samples
+its own visible rows every 80ms and fades them in once two samples in a row
+differ by no more than a tenth of the rows, capped at 1.6s after the first byte
+so an agent mid-answer is never held back. Watching the rows rather than the byte
+stream is what makes this reliable: redraws arrive in bursts with gaps between
+them, and an agent that repaints an unchanged screen never stops sending.
+
+Resizes that do not change the grid are dropped server-side, since a window set
+to the size it already has repaints as well.
 
 ---
 

@@ -4523,6 +4523,19 @@ mark.fe-match-active {
   overflow: hidden;
 }
 
+/* Attaching a tmux client repaints the screen two or three times within a few
+   frames, and each repaint is drawn row by row, so the rows are kept invisible
+   until the paint has settled — see `painted` in TerminalView. Opacity rather
+   than visibility or display: the grid is measured from this element's box, and
+   a hidden box measures as nothing. */
+.terminal-wrapper {
+  transition: opacity 100ms ease-out;
+}
+
+.terminal-wrapper-painting {
+  opacity: 0;
+}
+
 .terminal-wrapper .xterm {
   height: 100%;
 }
@@ -6776,8 +6789,8 @@ mark.fe-match-active {
     display: none;
   }
 
-  /* tmux copy mode owns terminal history; xterm's alternate-screen viewport
-     has no independent scroll range. */
+  /* tmux copy mode owns terminal history, reached through an explicit scroll
+     request; xterm's alternate-screen viewport has no scroll range of its own. */
   .terminal-wrapper .xterm-viewport {
     scrollbar-width: none !important;
     -webkit-overflow-scrolling: touch;

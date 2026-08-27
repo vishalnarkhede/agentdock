@@ -126,6 +126,9 @@ export function useWebSocket(sessionName: string, options: TerminalSocketOptions
     (cols: number, rows: number) => send({ type: "resize", cols, rows }),
     [send],
   );
+  /* Its own message rather than input bytes: the scrollback is tmux's, and a
+     wheel that arrived as input would reach the agent as a keystroke. */
+  const sendScroll = useCallback((lines: number) => send({ type: "scroll", lines }), [send]);
 
-  return { connected, sendInput, sendShiftEnter, sendResize };
+  return { connected, sendInput, sendShiftEnter, sendResize, sendScroll };
 }
