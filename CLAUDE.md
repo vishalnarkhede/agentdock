@@ -49,6 +49,8 @@ server/src/
     tmux.ts                   # Tmux command interface (create, kill, send-keys, capture)
     status.ts                 # Status detection (hooks primary, terminal fallback)
     worktree.ts               # Git worktree create/delete
+    lsp.ts                    # Language server pool (definitions, references, hover)
+    symbol-index.ts           # Regex symbol index — the fallback when no server serves a file
     linear.ts                 # Linear ticket fetching
     slack.ts                  # Slack message fetching
   routes/
@@ -59,6 +61,7 @@ server/src/
     ws.ts                     # WebSocket terminal streaming
     auth.ts                   # Auth middleware, login/logout
     quick.ts                  # Quick actions (Slack-to-fix)
+    code.ts                   # Code intelligence: definition, references, hover, symbols
     repos.ts, tickets.ts, upload.ts, db.ts
   hooks/
     status-hook.sh            # Claude Code lifecycle hook script
@@ -132,6 +135,43 @@ Hooks write to `/tmp/agentdock-status/{sessionName}`:
 
 Terminal pattern matching is **fallback only** for Cursor Agent (no hooks). Never add more terminal scanning for Claude — hooks are the source of truth.
 
+### Files Search
+
+Search uses the bundled `@vscode/ripgrep` binary rather than assuming `rg` is
+on a Finder/launchd PATH. Native search is staged: filename matches come from
+the in-memory path index after a 70ms debounce, then content matches replace the
+content section when ripgrep finishes. Multiple session roots run concurrently,
+each ripgrep is capped at four threads and 200 results, and cancellation kills
+the child process.
+
+The path index is kept current with a recursive FSEvents watcher on macOS. Its
+cache and watchers are capped at six roots; platforms without recursive watch
+retain the short TTL fallback. Do not return to rebuilding the path index on
+every query or combine filename and content search into one blocking client
+request.
+
+### Code Intelligence (language servers, with the regex index as fallback)
+
+Cmd-click in Files asks a language server, not a regular expression. `lsp.ts`
+keeps one warm process per (server, project root) — gopls, tsserver, pyright,
+sourcekit-lsp — started on first use and reaped after five idle minutes. The pool
+is capped at two; only one Go workspace may stay warm, with a RAM-scaled
+`GOMEMLIMIT` capped at 1 GiB, while Node language servers get 512 MiB heaps. Every entry point
+returns `null` rather than throwing, so a missing server, a cold index or a crash
+falls back to `symbol-index.ts` and the response says which layer answered in
+`source`. Interactive definitions wait 350ms, then return `source: "warming"`
+while the exact request continues in the background, so the UI never waits on a
+monorepo or guesses the wrong overload or field.
+
+Position-based lookups are **POST** because they carry the unsaved buffer;
+without it a lookup resolves against the file on disk and lands on the wrong
+line. Positions are 1-based in both axes everywhere in AgentDock and converted
+at the LSP boundary. The regex index is a startup/unsupported-language fallback,
+not a substitute for semantic navigation.
+
+Full detail, including the two tsserver quirks that need workarounds, is in
+[docs/code-intelligence.md](docs/code-intelligence.md).
+
 ### WebSocket Terminal Streaming
 
 ```
@@ -151,14 +191,12 @@ text never reaches the reader's clipboard. Scrolling does not need it: the
 history is requested by name instead.
 
 The attached browser's grid is pinned as the tmux window size (`resize-window`
-on attach and on every real resize, unset on detach). Without the pin, a second
-viewer of the same session — iTerm, a phone, another tab — resizes the window
-under the browser, and tmux fills the area the window no longer covers with
-middle dots. `fill-character` is set to a space so that area reads as empty
-terminal on the tmux versions that have the option. Detaching also sets the
-browser's grid as the session's `default-size`: without it tmux reverts to the
-size the session was created at when the last client leaves, so every reopen
-resized the window again.
+on attach and on every real resize). `window-size` stays `manual` after
+detach — unsetting it made the next iTerm or `tmux attach` SIGWINCH the agent
+and replay the transcript. Other viewers letterbox or see blank padding
+(`fill-character` is a space) rather than resizing the window. Detaching also
+stores the browser's grid as `default-size` so a dropped pin does not snap
+back to the 80×24 the session was created at.
 
 **Never resize a window with a browser attached to it if it can be done first.**
 A resize signals the agent, and an agent TUI answers by rewriting its whole
@@ -299,30 +337,31 @@ When asked to redesign a component or "fix UX":
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **agentdock** (1924 symbols, 4107 relationships, 162 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **agentdock** (4470 symbols, 9186 relationships, 228 execution flows).
 
-> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST run impact analysis before editing.** Use `impact({target: "symbolName", direction: "upstream"})` (MCP) or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .` (CLI fallback); report callers, processes, and risk. Never substitute grep for graph analysis.
+- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
 - When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
 - For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER edit a function, class, or method before MCP/CLI impact analysis.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
 - NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit changes without running `detect_changes()` to check affected scope.
+- NEVER commit before MCP/CLI graph change analysis.
 
 ## Resources
 
 | Resource | Use for |
-|----------|---------|
+| --- | --- |
 | `gitnexus://repo/agentdock/context` | Codebase overview, check index freshness |
 | `gitnexus://repo/agentdock/clusters` | All functional areas |
 | `gitnexus://repo/agentdock/processes` | All execution flows |
@@ -331,12 +370,12 @@ This project is indexed by GitNexus as **agentdock** (1924 symbols, 4107 relatio
 ## CLI
 
 | Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| --- | --- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->

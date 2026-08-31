@@ -1,4 +1,5 @@
 import { resolve } from "path";
+import { rgPath as bundledRipgrep } from "@vscode/ripgrep";
 
 /**
  * Content search over one or more roots.
@@ -47,6 +48,13 @@ let rgPathCache: string | null | undefined;
 /** Resolve a real ripgrep binary, or null. Spawning and hoping throws ENOENT. */
 async function findRipgrep(): Promise<string | null> {
   if (rgPathCache !== undefined) return rgPathCache;
+  // VS Code ships the search engine it was designed and tested with instead of
+  // depending on a user's shell PATH. AgentDock is often started by launchd or
+  // Finder, where even an installed `rg` is invisible.
+  if (bundledRipgrep) {
+    rgPathCache = bundledRipgrep;
+    return rgPathCache;
+  }
   try {
     const proc = Bun.spawn(["which", "rg"], { stdout: "pipe", stderr: "ignore" });
     const out = (await new Response(proc.stdout).text()).trim();
@@ -89,7 +97,14 @@ const EXCLUDE_GLOBS = [
 ];
 
 function rgArgs(o: SearchOptions, root: string): string[] {
-  const a = ["--no-heading", "--line-number", "--column", "--color", "never", "--max-columns", String(MAX_LINE)];
+  const a = [
+    "--no-heading", "--line-number", "--column", "--color", "never",
+    "--max-columns", String(MAX_LINE),
+    "--hidden", "--no-config",
+    // Four workers keep search interactive without letting one query saturate
+    // every performance core while language servers and terminals are active.
+    "--threads", "4",
+  ];
   if (!o.regex) a.push("--fixed-strings");
   if (!o.caseSensitive) a.push("--ignore-case");
   if (o.wholeWord) a.push("--word-regexp");
@@ -229,35 +244,59 @@ function parseLine(
 export async function searchContent(o: SearchOptions): Promise<SearchResult> {
   const started = Date.now();
   const matches: ContentMatch[] = [];
-  let truncated = false;
-  let tool = "none";
 
-  if (!o.query) return { matches, truncated, tookMs: 0, tool };
+  if (!o.query) return { matches, truncated: false, tookMs: 0, tool: "none" };
 
   const rg = await findRipgrep();
+  const roots = o.roots.map((root) => resolve(root));
 
-  for (const raw of o.roots) {
-    if (matches.length >= o.limit || o.signal?.aborted) {
-      truncated = truncated || matches.length >= o.limit;
-      break;
-    }
-    const root = resolve(raw);
-
+  // VS Code searches workspace folders concurrently. AgentDock used to wait
+  // for root A to finish before even starting root B, so a two-repo session
+  // paid the sum of both scans. Each root is independently capped; at the
+  // normal 200-result limit this keeps memory bounded to a few hundred KB.
+  const results = await Promise.all(roots.map(async (root) => {
+    const rootMatches: ContentMatch[] = [];
+    let tool = "grep";
+    let truncated = false;
     if (rg) {
       tool = "rg";
-      truncated = await stream([rg, ...rgArgs(o, root)], root, false, true, o.limit, o.signal, matches) || truncated;
-      continue;
-    }
-
-    if (await isGitRoot(root)) {
+      truncated = await stream(
+        [rg, ...rgArgs(o, root)],
+        root,
+        false,
+        true,
+        o.limit,
+        o.signal,
+        rootMatches,
+      );
+    } else if (await isGitRoot(root)) {
       tool = "git-grep";
-      truncated = await stream(["git", "-C", root, ...gitGrepArgs(o)], root, true, true, o.limit, o.signal, matches) || truncated;
-      continue;
+      truncated = await stream(
+        ["git", "-C", root, ...gitGrepArgs(o)],
+        root,
+        true,
+        true,
+        o.limit,
+        o.signal,
+        rootMatches,
+      );
+    } else {
+      truncated = await stream(
+        ["grep", ...grepArgs(o, root)],
+        root,
+        false,
+        false,
+        o.limit,
+        o.signal,
+        rootMatches,
+      );
     }
+    return { matches: rootMatches, truncated, tool };
+  }));
 
-    tool = "grep";
-    truncated = await stream(["grep", ...grepArgs(o, root)], root, false, false, o.limit, o.signal, matches) || truncated;
-  }
+  for (const result of results) matches.push(...result.matches);
+  const truncated = matches.length > o.limit || results.some((result) => result.truncated);
+  const tool = results[0]?.tool ?? "none";
 
   return {
     matches: matches.slice(0, o.limit),

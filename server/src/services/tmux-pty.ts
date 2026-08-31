@@ -56,6 +56,22 @@ const clampRows = (rows: number) => Math.max(5, Math.min(200, Math.round(rows)))
     walk the whole history in a single command. */
 const MAX_SCROLL_LINES = 40;
 
+/** Gather wheel ticks for one frame so a trackpad does not spawn a tmux
+    process per pixel. Each of those enters copy-mode on every attached
+    client and redraws the pane — two viewers made that feel like the
+    browser had slowed down. */
+const SCROLL_COALESCE_MS = 8;
+
+type ScrollSlot = {
+  pending: number;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+const scrollSlots = new Map<string, ScrollSlot>();
+
+export type ScheduleScroll = (fn: () => void, ms: number) => unknown;
+export type CancelScroll = (id: unknown) => void;
+
 type RunTmux = (args: string[]) => { exitCode: number };
 type ReadTmux = (args: string[]) => { exitCode: number; stdout: string };
 
@@ -103,11 +119,16 @@ export function configurePtySession(
      status off keeps the UI capture-pane used to produce: tmux's status bar was
      never part of it. Both are session options, and session names are generated
      by AgentDock, so they are safe to pass as argv values. */
-  for (const [option, value] of [
-    ["status", "off"],
-    ["mouse", "off"],
+  for (const args of [
+    ["tmux", "set-option", "-t", session, "status", "off"],
+    ["tmux", "set-option", "-t", session, "mouse", "off"],
+    /* latest (the default) makes every new client — Ghostty, iTerm, a raw
+       `tmux attach` — resize the window. Cursor and Claude answer that
+       SIGWINCH by rewriting the transcript, which is the jump to the bottom
+       on open. manual keeps the size attach-stable; only resize-window moves it. */
+    ["tmux", "set-option", "-w", "-t", session, "window-size", "manual"],
   ]) {
-    if (run(["tmux", "set-option", "-t", session, option, value]).exitCode !== 0) return false;
+    if (run(args).exitCode !== 0) return false;
   }
 
   /* Whatever area of the browser's grid the window does not cover is filled by
@@ -210,30 +231,24 @@ export async function settlePtyWindow(
 }
 
 /**
- * Let tmux size the window from its clients again, and leave the browser's grid
- * behind as the size to use when there are none.
+ * Remember the browser's grid as default-size, and leave the window pinned.
  *
- * Without the default, tmux falls back to the size the session was created at
- * as soon as the last client goes, so the window a browser had just sized to
- * its own grid snapped back the moment it closed the tab — and the next open
- * resized it again, making the agent redraw its transcript every single time.
- * With it, reopening a session finds the window already the right size and
- * nothing has to move.
+ * window-size stays manual so a later iTerm or `tmux attach` cannot resize
+ * the session. default-size is what tmux uses if that pin is ever dropped,
+ * instead of snapping back to the 80x24 the session was created at.
  */
 export function releasePtyWindow(
   session: string,
   size?: TerminalSize,
   run: RunTmux = (args) => Bun.spawnSync(args),
 ): boolean {
-  // Before the option is dropped, so the fallback is already in place when tmux
-  // recalculates the size.
+  // Keep window-size manual. Unsetting it made the next iTerm/`tmux attach`
+  // resize the window under the agent, which is the same jump the native
+  // client was showing.
   if (size) {
-    run(["tmux", "set-option", "-t", session, "default-size", `${size.cols}x${size.rows}`]);
+    return run(["tmux", "set-option", "-t", session, "default-size", `${size.cols}x${size.rows}`]).exitCode === 0;
   }
-  // Unset rather than set to a value: resize-window turned window-size manual
-  // for this window only, so dropping it restores whatever the user configured
-  // and another viewer can size the window again.
-  return run(["tmux", "set-option", "-w", "-t", session, "-u", "window-size"]).exitCode === 0;
+  return run(["tmux", "has-session", "-t", session]).exitCode === 0;
 }
 
 /**
@@ -269,6 +284,61 @@ export function scrollPtySession(
       ? ["tmux", "copy-mode", "-e", "-t", session, ";", ...send, "scroll-up"]
       : ["tmux", ...send, "scroll-down"];
   return run(args).exitCode === 0;
+}
+
+/**
+ * Fold rapid wheel ticks for one session into a single tmux call.
+ *
+ * The browser and the native viewer both attach to the same session.
+ * `copy-mode -t session` moves every client, so one tick per pixel was
+ * redrawing Ghostty and the PTY over and over. Summing first keeps the
+ * same distance and drops the extra processes.
+ */
+export function queuePtyScroll(
+  session: string,
+  lines: number,
+  run: RunTmux = (args) => Bun.spawnSync(args),
+  schedule: ScheduleScroll = (fn, ms) => setTimeout(fn, ms),
+  cancel: CancelScroll = (id) => {
+    clearTimeout(id as ReturnType<typeof setTimeout>);
+  },
+): void {
+  if (!Number.isFinite(lines) || lines === 0) return;
+  let slot = scrollSlots.get(session);
+  if (!slot) {
+    slot = { pending: 0, timer: null };
+    scrollSlots.set(session, slot);
+  }
+  const next = slot.pending + lines;
+  slot.pending = Math.max(-MAX_SCROLL_LINES, Math.min(MAX_SCROLL_LINES, next));
+  if (slot.pending === 0) {
+    if (slot.timer != null) {
+      cancel(slot.timer);
+      slot.timer = null;
+    }
+    return;
+  }
+  if (slot.timer != null) return;
+  slot.timer = schedule(() => {
+    if (scrollSlots.get(session) !== slot) return;
+    slot.timer = null;
+    const n = slot.pending;
+    slot.pending = 0;
+    if (n !== 0) scrollPtySession(session, n, run);
+  }, SCROLL_COALESCE_MS) as ReturnType<typeof setTimeout>;
+}
+
+/** Drop a session's queued wheel so a closing socket does not fire later. */
+export function cancelPtyScroll(
+  session: string,
+  cancel: CancelScroll = (id) => {
+    clearTimeout(id as ReturnType<typeof setTimeout>);
+  },
+): void {
+  const slot = scrollSlots.get(session);
+  if (!slot) return;
+  if (slot.timer != null) cancel(slot.timer);
+  scrollSlots.delete(session);
 }
 
 const spawnPty: SpawnPty = (session, options) => {

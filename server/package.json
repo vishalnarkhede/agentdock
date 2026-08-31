@@ -6,9 +6,13 @@
     "test": "bun test --preload ./src/__tests__/test-preload.ts"
   },
   "dependencies": {
-    "hono": "^4.7.0"
+    "@vscode/ripgrep": "^1.18.0",
+    "hono": "^4.7.0",
+    "vscode-jsonrpc": "^9.0.2",
+    "vscode-languageserver-protocol": "^3.18.2"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "5"
   }
 }

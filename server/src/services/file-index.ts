@@ -1,4 +1,5 @@
 import { readdir, stat } from "fs/promises";
+import { watch, type FSWatcher } from "fs";
 import { join, resolve } from "path";
 
 /**
@@ -23,7 +24,9 @@ export interface FileIndex {
   truncated: boolean;
 }
 
-const TTL_MS = 10_000;
+const WATCHED_TTL_MS = 5 * 60_000;
+const FALLBACK_TTL_MS = 10_000;
+const MAX_ROOTS = 6;
 const WALK_CAP = 50_000;
 
 const SKIP_DIRS = new Set([
@@ -34,6 +37,45 @@ const SKIP_DIRS = new Set([
 
 const cache = new Map<string, FileIndex>();
 const inflight = new Map<string, Promise<FileIndex>>();
+const watchers = new Map<string, FSWatcher>();
+const lastUsedAt = new Map<string, number>();
+
+function watchRoot(root: string): void {
+  if (watchers.has(root)) return;
+  try {
+    // macOS backs a recursive watcher with FSEvents, so it is dramatically
+    // cheaper than walking the tree every ten seconds. On platforms that do
+    // not support recursive watch this throws and the short TTL remains.
+    const watcher = watch(root, { recursive: true }, () => {
+      cache.delete(root);
+    });
+    watcher.unref();
+    watcher.on("error", () => {
+      watcher.close();
+      watchers.delete(root);
+    });
+    watchers.set(root, watcher);
+  } catch {
+    // FALLBACK_TTL_MS keeps new files discoverable without a watcher.
+  }
+}
+
+function evictOldRoots(): void {
+  while (cache.size > MAX_ROOTS || watchers.size > MAX_ROOTS) {
+    let oldest: string | null = null;
+    const roots = new Set([...cache.keys(), ...watchers.keys()]);
+    for (const root of roots) {
+      if (oldest === null || (lastUsedAt.get(root) ?? 0) < (lastUsedAt.get(oldest) ?? 0)) {
+        oldest = root;
+      }
+    }
+    if (!oldest) return;
+    cache.delete(oldest);
+    lastUsedAt.delete(oldest);
+    watchers.get(oldest)?.close();
+    watchers.delete(oldest);
+  }
+}
 
 async function git(root: string, args: string[]): Promise<string | null> {
   try {
@@ -152,8 +194,10 @@ async function build(root: string): Promise<FileIndex> {
  */
 export async function getIndex(root: string): Promise<FileIndex> {
   const key = resolve(root);
+  lastUsedAt.set(key, Date.now());
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.builtAt < TTL_MS) return hit;
+  const ttl = watchers.has(key) ? WATCHED_TTL_MS : FALLBACK_TTL_MS;
+  if (hit && Date.now() - hit.builtAt < ttl) return hit;
 
   const pending = inflight.get(key);
   if (pending) return pending;
@@ -161,6 +205,8 @@ export async function getIndex(root: string): Promise<FileIndex> {
   const task = build(key)
     .then((idx) => {
       cache.set(key, idx);
+      watchRoot(key);
+      evictOldRoots();
       return idx;
     })
     .catch((err) => {
@@ -176,8 +222,14 @@ export async function getIndex(root: string): Promise<FileIndex> {
 }
 
 export function invalidate(root?: string): void {
-  if (root) cache.delete(resolve(root));
-  else cache.clear();
+  if (root) {
+    cache.delete(resolve(root));
+  } else {
+    cache.clear();
+    for (const watcher of watchers.values()) watcher.close();
+    watchers.clear();
+    lastUsedAt.clear();
+  }
 }
 
 export function peek(root: string): FileIndex | undefined {

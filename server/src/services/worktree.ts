@@ -1,6 +1,6 @@
 import { basename, join, dirname } from "path";
 import { existsSync, mkdirSync, copyFileSync, readdirSync, rmdirSync, symlinkSync } from "fs";
-import { getBasePath } from "./config";
+import { getBasePath, getPreferences } from "./config";
 
 async function git(
   repoPath: string,
@@ -135,6 +135,7 @@ export async function createWorktree(
 
   await copyEnvFiles(repoPath, wtDir);
   await linkHiddenEntries(repoPath, wtDir);
+  await runPostCreate(wtDir);
 
   // Symlink node_modules from the main repo to avoid reinstalling deps.
   // If the worktree needs different deps, the agent can run npm install
@@ -150,6 +151,23 @@ export async function createWorktree(
   }
 
   return wtDir;
+}
+
+async function runPostCreate(wtDir: string): Promise<void> {
+  const command = getPreferences().worktreePostCreate?.trim();
+  if (!command) return;
+  const proc = Bun.spawn(["/bin/bash", "-lc", command], {
+    cwd: wtDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(
+      `Worktree post-create command failed in ${wtDir}: ${stderr.trim() || `exit ${exitCode}`}`,
+    );
+  }
 }
 
 /**

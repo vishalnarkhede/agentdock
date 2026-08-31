@@ -1,5 +1,5 @@
 import { hasSession } from "../services/tmux";
-import { attachPty, scrollPtySession, settlePtyWindow, type PtyClient } from "../services/tmux-pty";
+import { attachPty, cancelPtyScroll, queuePtyScroll, settlePtyWindow, type PtyClient } from "../services/tmux-pty";
 
 const HEARTBEAT_TIMEOUT_MS = 60_000;
 
@@ -173,8 +173,11 @@ export function handleWsMessage(ws: any, message: string | Buffer) {
       pty.write(msg.data);
     } else if (msg.type === "scroll" && typeof msg.lines === "number") {
       /* Not written into the PTY: the history belongs to tmux, not to the
-         program on the other end of it, and a wheel must not look like input. */
-      scrollPtySession(sessionName, msg.lines);
+         program on the other end of it, and a wheel must not look like input.
+         Ticks are folded together so a trackpad does not spawn tmux once per
+         pixel — that redraws every attached client and is what made the
+         browser feel stuck once Ghostty was also watching. */
+      queuePtyScroll(sessionName, msg.lines);
     }
   } catch {
     /* Ignore malformed client messages; the connection remains usable. */
@@ -182,6 +185,9 @@ export function handleWsMessage(ws: any, message: string | Buffer) {
 }
 
 export function handleWsClose(ws: any) {
+  if (typeof ws.data?.sessionName === "string") {
+    cancelPtyScroll(ws.data.sessionName);
+  }
   ws.data?.cleanup?.();
   if (ws.data?.heartbeatInterval) clearInterval(ws.data.heartbeatInterval);
   console.log(`[ws] closed: session="${ws.data?.sessionName}"`);

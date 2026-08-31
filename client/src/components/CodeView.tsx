@@ -56,7 +56,8 @@ interface Props {
    */
   activeMatchIndex?: number | null;
   activeLine?: number | null;
-  onCmdClick?: (word: string, line: number) => void;
+  /** Column is 1-based, so it can be handed straight to a language server. */
+  onCmdClick?: (word: string, line: number, col: number) => void;
   onMatchCount?: (n: number) => void;
   /** The current selection, or null when it is empty. Line numbers are 1-based
    *  and inclusive, so they read the way the gutter does. */
@@ -286,7 +287,7 @@ export const CodeView = forwardRef<CodeViewHandle, Props>(function CodeView(
             const word = text.slice(a, b);
             if (!word || /^\d+$/.test(word)) return false;
             e.preventDefault();
-            cb.current.onCmdClick?.(word, line.number);
+            cb.current.onCmdClick?.(word, line.number, a + 1);
             return true;
           },
         }),

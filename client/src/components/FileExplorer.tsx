@@ -7,7 +7,14 @@ import { Icon } from "./Icon";
 import { FileSearch, type FileSearchHandle } from "./FileSearch";
 import { CodeViewLazy, type CodeViewHandle } from "./CodeViewLazy";
 import "../styles/code-nav.css";
-import { findDefinition, fetchDocSymbols, type Candidate, type DocSymbol } from "../code-api";
+import {
+  findDefinition,
+  findDefinitionAt,
+  findReferencesAt,
+  fetchDocSymbols,
+  type Candidate,
+  type DocSymbol,
+} from "../code-api";
 import { buildNoteMessage } from "../note-message";
 import { EMPTY_HISTORY, back, forward, markLine, visit, type NavHistory, type NavSpot } from "../nav-history";
 import { stepMatch } from "../text-matches";
@@ -401,7 +408,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   // Code navigation
   const [navBusy, setNavBusy] = useState(false);
-  const [picker, setPicker] = useState<{ name: string; candidates: Candidate[] } | null>(null);
+  const [picker, setPicker] = useState<{
+    name: string;
+    candidates: Candidate[];
+    /** References read as "used in", definitions as "declared in". */
+    mode?: "definitions" | "references";
+  } | null>(null);
   const [outline, setOutline] = useState<DocSymbol[] | null>(null);
   const [showOutline, setShowOutline] = useState(false);
 
@@ -742,10 +754,60 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
    * shows where it is used instead.
    */
   const navigateToSymbol = useCallback(
-    async (name: string, atLine?: number) => {
+    async (name: string, atLine?: number, atCol?: number) => {
       if (!openFile) return;
       setNavBusy(true);
+      setError(null);
       try {
+        // A language server answers about a position, and it knows call sites,
+        // so both halves of this are exact when one is installed. Everything
+        // below is the textual behaviour for languages without one.
+        if (atLine !== undefined && atCol !== undefined) {
+          const position = {
+            path: openFile.path,
+            line: atLine,
+            col: atCol,
+            roots,
+            text: dirty && draft !== null ? draft : undefined,
+          };
+          const exact = await findDefinitionAt(position);
+          if (exact.source === "warming") {
+            setError("Language server is indexing this workspace. Cmd-click again in a moment.");
+            return;
+          }
+          if (exact.source === "lsp") {
+            const elsewhere = exact.candidates.filter(
+              (c) => c.path !== openFile.path || Math.abs(c.line - atLine) > 1,
+            );
+            if (elsewhere.length === 1) {
+              await goTo(elsewhere[0].path, elsewhere[0].line);
+              return;
+            }
+            if (elsewhere.length > 1) {
+              setPicker({ name, candidates: elsewhere, mode: "definitions" });
+              return;
+            }
+            const used = await findReferencesAt(position);
+            if (used.hits.length > 0) {
+              setPicker({
+                name,
+                mode: "references",
+                candidates: used.hits.map((hit) => ({
+                  name,
+                  kind: "reference",
+                  file: hit.rel,
+                  line: hit.line,
+                  container: hit.text.trim().slice(0, 120),
+                  root: hit.root,
+                  path: hit.path,
+                  score: 0,
+                })),
+              });
+              return;
+            }
+          }
+        }
+
         const res = await findDefinition(name, roots, openFile.path);
         // Judged by the line that was clicked. Using the scroll position for
         // this made the answer depend on where the file happened to be
@@ -775,7 +837,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         setNavBusy(false);
       }
     },
-    [openFile, roots, goTo],
+    [openFile, roots, goTo, dirty, draft],
   );
 
   // Cmd/Ctrl underlines identifiers so it is obvious what is clickable.
@@ -1176,7 +1238,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   highlightTerm={fileSearchActive ? fileSearchQuery : ""}
                   activeMatchIndex={activeMatchIdx}
                   activeLine={activeMatchLine}
-                  onCmdClick={(word: string, line: number) => navigateToSymbol(word, line)}
+                  onCmdClick={(word: string, line: number, col: number) => navigateToSymbol(word, line, col)}
                   onMatchCount={setFileSearchMatchCount}
                   onSelectionChange={sessionName ? setSelection : undefined}
                 />
@@ -1248,7 +1310,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               {picker && (
                 <div className="fe-picker" role="dialog" aria-label="Choose a definition">
                   <div className="fe-picker-head">
-                    <span><code className="fe-picker-name">{picker.name}</code> is declared in {picker.candidates.length} places</span>
+                    <span>
+                      <code className="fe-picker-name">{picker.name}</code>{" "}
+                      {picker.mode === "references" ? "is used in" : "is declared in"}{" "}
+                      {picker.candidates.length} places
+                    </span>
                     <button onClick={() => setPicker(null)} aria-label="Close">×</button>
                   </div>
                   <div className="fe-picker-list">

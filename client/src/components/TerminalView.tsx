@@ -405,10 +405,20 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
        left to itself it turns the wheel into arrow keys, which walks the agent's
        prompt history instead of the view. So the event is cancelled and the
        history asked for by name. */
+    let pendingWheel = 0;
+    let wheelFrame = 0;
+    const flushWheel = () => {
+      wheelFrame = 0;
+      const n = pendingWheel;
+      pendingWheel = 0;
+      if (n) sendScrollRef.current(n);
+    };
     term.attachCustomWheelEventHandler((event) => {
       const rowHeight = term.element ? term.element.clientHeight / term.rows : undefined;
       const lines = wheelScrollLines(event.deltaY, event.deltaMode, term.rows, rowHeight);
-      if (lines) sendScrollRef.current(lines);
+      if (!lines) return false;
+      pendingWheel += lines;
+      if (!wheelFrame) wheelFrame = requestAnimationFrame(flushWheel);
       return false;
     });
 
@@ -505,6 +515,7 @@ export function TerminalView({ sessionName, agentType, onClosed, onAgentSwitched
     }
 
     return () => {
+      if (wheelFrame) cancelAnimationFrame(wheelFrame);
       clearTimeout(syncTimer);
       window.removeEventListener("focus", syncFocusState);
       observer.disconnect();

@@ -5,6 +5,8 @@ import {
   measurePtySession,
   pinPtyWindow,
   releasePtyWindow,
+  queuePtyScroll,
+  cancelPtyScroll,
   scrollPtySession,
   settlePtyWindow,
   type PtyProcess,
@@ -293,7 +295,7 @@ describe("attachPty", () => {
     client.close();
 
     expect(tmux.args.at(-1)).toEqual([
-      "tmux", "set-option", "-w", "-t", "s", "-u", "window-size",
+      "tmux", "set-option", "-t", "s", "default-size", "120x40",
     ]);
   });
 
@@ -312,7 +314,7 @@ describe("attachPty", () => {
     await settle();
 
     expect(tmux.args.at(-1)).toEqual([
-      "tmux", "set-option", "-w", "-t", "s", "-u", "window-size",
+      "tmux", "set-option", "-t", "s", "default-size", "120x40",
     ]);
   });
 });
@@ -419,17 +421,14 @@ describe("pinPtyWindow and releasePtyWindow", () => {
     ]);
   });
 
-  /* Unset, not set to a value: resize-window turns window-size manual for this
-     window, and a session the user also works in from a terminal should go back
-     to following its clients. The browser's grid is left as the default so the
-     window does not snap back to the size the session was created at the moment
-     the tab closes — which is what made every reopen resize it again. */
-  test("releasing hands the size back but leaves the browser's grid as default", () => {
+  /* Stay manual: handing size back to `latest` made the next iTerm or
+     `tmux attach` SIGWINCH the agent. The browser grid is still stored as
+     default-size so a session with no clients does not snap to 80x24. */
+  test("releasing keeps the window pinned and stores the browser's grid as default", () => {
     const tmux = tmuxStub();
     expect(releasePtyWindow("claude-one", { cols: 120, rows: 40 }, tmux.run)).toBe(true);
     expect(tmux.args).toEqual([
       ["tmux", "set-option", "-t", "claude-one", "default-size", "120x40"],
-      ["tmux", "set-option", "-w", "-t", "claude-one", "-u", "window-size"],
     ]);
   });
 
@@ -479,6 +478,7 @@ describe("configurePtySession", () => {
     expect(commands).toEqual([
       ["tmux", "set-option", "-t", "claude-one", "status", "off"],
       ["tmux", "set-option", "-t", "claude-one", "mouse", "off"],
+      ["tmux", "set-option", "-w", "-t", "claude-one", "window-size", "manual"],
       ["tmux", "set-option", "-t", "claude-one", "fill-character", " "],
     ]);
   });
@@ -546,5 +546,63 @@ describe("scrollPtySession", () => {
 
   test("reports a refusal, which is how scrolling past the end arrives", () => {
     expect(scrollPtySession("s", -1, () => ({ exitCode: 1 }))).toBe(false);
+  });
+});
+
+describe("queuePtyScroll", () => {
+  const capture = () => {
+    const args: string[][] = [];
+    const queued: Array<() => void> = [];
+    return {
+      args,
+      run: (next: string[]) => {
+        args.push(next);
+        return { exitCode: 0 };
+      },
+      schedule: (fn: () => void) => {
+        queued.push(fn);
+        return queued.length;
+      },
+      cancel: () => {},
+      flush: () => {
+        const fn = queued.shift();
+        fn?.();
+      },
+    };
+  };
+
+  test("merges rapid ticks into one tmux call", () => {
+    const { args, run, schedule, cancel, flush } = capture();
+    queuePtyScroll("claude-one", 3, run, schedule, cancel);
+    queuePtyScroll("claude-one", 2, run, schedule, cancel);
+    expect(args).toEqual([]);
+    flush();
+    expect(args).toEqual([[
+      "tmux", "copy-mode", "-e", "-t", "claude-one",
+      ";", "send-keys", "-X", "-N", "5", "-t", "claude-one", "scroll-up",
+    ]]);
+  });
+
+  test("keeps opposite directions from cancelling across a flush", () => {
+    const { args, run, schedule, cancel, flush } = capture();
+    queuePtyScroll("claude-one", 4, run, schedule, cancel);
+    flush();
+    queuePtyScroll("claude-one", -2, run, schedule, cancel);
+    flush();
+    expect(args).toEqual([
+      [
+        "tmux", "copy-mode", "-e", "-t", "claude-one",
+        ";", "send-keys", "-X", "-N", "4", "-t", "claude-one", "scroll-up",
+      ],
+      ["tmux", "send-keys", "-X", "-N", "2", "-t", "claude-one", "scroll-down"],
+    ]);
+  });
+
+  test("drops a queued tick when the socket closes", () => {
+    const { args, run, schedule, cancel, flush } = capture();
+    queuePtyScroll("claude-one", 3, run, schedule, cancel);
+    cancelPtyScroll("claude-one", cancel);
+    flush();
+    expect(args).toEqual([]);
   });
 });

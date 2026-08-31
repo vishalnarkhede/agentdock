@@ -7,6 +7,7 @@ import { getBasePath } from "../services/config";
 import { getIndex, invalidate } from "../services/file-index";
 import { rank } from "../services/fuzzy";
 import { searchContent } from "../services/content-search";
+import { notifyFileChanged } from "../services/lsp";
 
 const app = new Hono();
 
@@ -296,6 +297,9 @@ app.post("/write", async (c) => {
     await rename(tmp, resolvedPath);
 
     const after = await stat(resolvedPath);
+    // Any language server holding this file is still answering from the text it
+    // read when the file was opened.
+    void notifyFileChanged(resolvedPath, body.content);
     return c.json({
       ok: true,
       version: fileVersion(body.content, after.mtimeMs),

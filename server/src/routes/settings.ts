@@ -204,7 +204,7 @@ app.post("/hooks", (c) => {
        same claim as "the request worked" — and the spread was silently winning
        over a literal `ok: true` that TypeScript flagged as dead. The status
        code says whether the request worked; the body says what the state is. */
-    return c.json(getHookInstallState());
+    return c.json({ ...getHookInstallState(), events: REQUIRED_HOOK_EVENTS });
   } catch (err: any) {
     return c.json({ ok: false, error: err?.message || "install failed" }, 500);
   }

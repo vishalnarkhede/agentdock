@@ -1,0 +1,41 @@
+name: AgentDock
+options:
+  bundleIdPrefix: dev.agentdock
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+packages:
+  CodeEditSourceEditor:
+    url: https://github.com/CodeEditApp/CodeEditSourceEditor
+    from: 0.15.2
+targets:
+  AgentDock:
+    type: application
+    platform: macOS
+    sources:
+      - path: AgentDock
+    dependencies:
+      # Static xcframework: link it, never embed it (a .a cannot be code signed).
+      - framework: Frameworks/GhosttyKit.xcframework
+        embed: false
+      - sdk: Carbon.framework
+      - sdk: libc++.tbd
+      - package: CodeEditSourceEditor
+        product: CodeEditSourceEditor
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentdock.mac
+        PRODUCT_NAME: AgentDock
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: AgentDock
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSHighResolutionCapable: YES
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+    scheme:
+      testTargets: []

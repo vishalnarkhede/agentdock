@@ -42,6 +42,11 @@ import type { CreateSessionRequest, AgentType } from "../types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function sanitizeWorktreePrefix(raw?: string): string {
+  const cleaned = (raw ?? "wt-").replace(/[^A-Za-z0-9._/-]/g, "");
+  return cleaned.length > 0 ? cleaned : "wt-";
+}
+
 const ALLOWED_TOOLS = [
   "Read",
   "Edit",
@@ -302,7 +307,8 @@ export async function startSession(req: CreateSessionRequest): Promise<string[]>
 
     // Use a short ID for the worktree branch — Claude can rename/create
     // the real branch as part of its workflow
-    const wtBranch = `wt-${shortId()}`;
+    const prefix = sanitizeWorktreePrefix(getPreferences().worktreeBranchPrefix);
+    const wtBranch = `${prefix}${shortId()}`;
 
     // Derive sessionSlug from wtBranch so they always match
     sessionSlug = wtBranch.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
