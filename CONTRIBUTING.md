@@ -7,8 +7,11 @@ Thanks for your interest in contributing!
 ```bash
 git clone https://github.com/vishalnarkhede/agentdock.git
 cd agentdock
-bun install
+./setup.sh
+agentdock doctor
 ```
+
+Or just `bun install` if the tools are already on the machine.
 
 ### Run in development mode
 

@@ -68,6 +68,7 @@ Usage:
   $SCRIPT_NAME stop   <session | --all>
   $SCRIPT_NAME repos
   $SCRIPT_NAME web
+  $SCRIPT_NAME doctor
 
 Targets:
   alias                 Use existing clone, one session per alias
@@ -96,6 +97,7 @@ Commands:
   stop     Kill tmux session(s) and clean up worktrees
   repos    Show configured repo aliases
   web      Open the web dashboard (http://localhost:5173)
+  doctor   Check git, bun, tmux, Claude, and PATH
 
 Options for 'start':
   -r                Group all aliases into ONE session (cross-repo agent)
@@ -559,6 +561,7 @@ case "$CMD" in
   clean)  cmd_stop "$@" ;;
   repos)  cmd_repos "$@" ;;
   web)    cmd_web "$@" ;;
+  doctor) exec "$WEB_UI_DIR/scripts/doctor.sh" ;;
   -h|--help|help) usage ;;
   *) die "unknown command: $CMD (try '$SCRIPT_NAME --help')" ;;
 esac

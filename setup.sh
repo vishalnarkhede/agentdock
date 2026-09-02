@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ─────────────────────────────────────────────────────────
-# agentdock setup
-# Installs prerequisites, dependencies, and the CLI tool.
-# ─────────────────────────────────────────────────────────
+# Installs bun/tmux if needed, dependencies, and the CLI.
+# Non-interactive by default. Pass --interactive to prompt for Linear/Slack keys.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_SOURCE="${SCRIPT_DIR}/bin/agentdock"
 BIN_TARGET="${HOME}/bin/agentdock"
 CONFIG_DIR="${HOME}/.config/agentdock"
+INTERACTIVE=false
 
-echo "── agentdock setup ──"
+for arg in "$@"; do
+  case "$arg" in
+    --interactive|-i) INTERACTIVE=true ;;
+    -h|--help)
+      echo "Usage: ./setup.sh [--interactive]"
+      echo "  Installs AgentDock. Optional --interactive asks for Linear/Slack keys."
+      exit 0
+      ;;
+  esac
+done
+
+echo "── AgentDock setup ──"
 echo ""
 
-# 0. Create config directory
 mkdir -p "$CONFIG_DIR"
 
-# 1. Check / install bun
 if command -v bun &>/dev/null; then
   echo "[ok] bun $(bun --version)"
 else
@@ -27,7 +35,6 @@ else
   echo "[ok] bun $(bun --version)"
 fi
 
-# 2. Check / install tmux
 if command -v tmux &>/dev/null; then
   echo "[ok] tmux $(tmux -V)"
 else
@@ -40,120 +47,72 @@ else
     sudo apt install -y tmux
     echo "[ok] tmux $(tmux -V)"
   else
-    echo "[error] tmux not found. Install it:"
+    echo "[error] tmux not found. Install it, then re-run ./setup.sh"
     echo "  macOS:  brew install tmux"
     echo "  Linux:  sudo apt install tmux"
     exit 1
   fi
 fi
 
-# 3. Check claude CLI
-if command -v claude &>/dev/null; then
-  echo "[ok] claude CLI found"
-else
-  echo "[warn] claude CLI not found in PATH"
-  echo "  Install: https://docs.anthropic.com/en/docs/claude-code"
-fi
-
-# 4. Check gh CLI
-if command -v gh &>/dev/null; then
-  echo "[ok] gh $(gh --version | head -1)"
-else
-  echo "[warn] gh CLI not found (optional, needed for PR features)"
-  echo "  Install: brew install gh"
-fi
-
-# 5. Install node dependencies
 echo ""
 echo "Installing dependencies..."
 (cd "$SCRIPT_DIR" && bun install)
 
-# 8. Install CLI tools to ~/bin
 echo ""
 mkdir -p "${HOME}/bin"
-chmod +x "$BIN_SOURCE"
+chmod +x "$BIN_SOURCE" "${SCRIPT_DIR}/bin/ad-agent" "${SCRIPT_DIR}/scripts/doctor.sh"
 cp "$BIN_SOURCE" "$BIN_TARGET"
-chmod +x "$BIN_TARGET"
+cp "${SCRIPT_DIR}/bin/ad-agent" "${HOME}/bin/ad-agent"
+chmod +x "$BIN_TARGET" "${HOME}/bin/ad-agent"
 echo "[ok] installed agentdock → ${BIN_TARGET}"
 
-AD_AGENT_SOURCE="${SCRIPT_DIR}/bin/ad-agent"
-AD_AGENT_TARGET="${HOME}/bin/ad-agent"
-chmod +x "$AD_AGENT_SOURCE"
-cp "$AD_AGENT_SOURCE" "$AD_AGENT_TARGET"
-chmod +x "$AD_AGENT_TARGET"
-echo "[ok] installed ad-agent → ${AD_AGENT_TARGET}"
-
-# Check if ~/bin is in PATH
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "${HOME}/bin"; then
   echo ""
-  echo "[action needed] Add ~/bin to your PATH. Add this to your ~/.zshrc or ~/.bashrc:"
-  echo ""
+  echo "[action] Add ~/bin to PATH in ~/.zshrc or ~/.bashrc:"
   echo "  export PATH=\"\$HOME/bin:\$PATH\""
+fi
+
+if $INTERACTIVE; then
   echo ""
+  echo "── Optional integrations (Enter skips) ──"
+  echo ""
+  CURRENT_BASE="${HOME}/projects"
+  [[ -f "${CONFIG_DIR}/base-path" ]] && CURRENT_BASE="$(tr -d '[:space:]' < "${CONFIG_DIR}/base-path")"
+  read -rp "Repo base path [${CURRENT_BASE}]: " user_base
+  if [[ -n "$user_base" ]]; then
+    echo "$user_base" > "${CONFIG_DIR}/base-path"
+    echo "  saved: ${user_base}"
+  fi
+  if [[ ! -f "${CONFIG_DIR}/linear-api-key" ]]; then
+    read -rp "Linear API key (optional): " linear_key
+    if [[ -n "$linear_key" ]]; then
+      echo "$linear_key" > "${CONFIG_DIR}/linear-api-key"
+      chmod 600 "${CONFIG_DIR}/linear-api-key"
+    fi
+  fi
+  if [[ ! -f "${CONFIG_DIR}/linear-team-id" ]]; then
+    read -rp "Linear team ID (optional): " linear_team
+    if [[ -n "$linear_team" ]]; then
+      echo "$linear_team" > "${CONFIG_DIR}/linear-team-id"
+    fi
+  fi
+  if [[ ! -f "${CONFIG_DIR}/slack-token" ]]; then
+    read -rp "Slack bot token (optional): " slack_token
+    if [[ -n "$slack_token" ]]; then
+      echo "$slack_token" > "${CONFIG_DIR}/slack-token"
+      chmod 600 "${CONFIG_DIR}/slack-token"
+    fi
+  fi
 fi
 
-# 9. Interactive configuration (skippable)
 echo ""
-echo "── Configuration (press Enter to skip any step) ──"
-echo ""
-
-# Base path
-CURRENT_BASE="${HOME}/projects"
-[[ -f "${CONFIG_DIR}/base-path" ]] && CURRENT_BASE="$(cat "${CONFIG_DIR}/base-path" | tr -d '[:space:]')"
-read -rp "Repo base path [${CURRENT_BASE}]: " user_base
-if [[ -n "$user_base" ]]; then
-  echo "$user_base" > "${CONFIG_DIR}/base-path"
-  echo "  saved: ${user_base}"
-fi
-
-# Linear API key
-if [[ -f "${CONFIG_DIR}/linear-api-key" ]]; then
-  echo "Linear API key: configured"
-else
-  read -rp "Linear API key (lin_api_..., optional): " linear_key
-  if [[ -n "$linear_key" ]]; then
-    echo "$linear_key" > "${CONFIG_DIR}/linear-api-key"
-    chmod 600 "${CONFIG_DIR}/linear-api-key"
-    echo "  saved"
-  fi
-fi
-
-# Linear team ID
-if [[ -f "${CONFIG_DIR}/linear-team-id" ]]; then
-  echo "Linear team ID: configured"
-else
-  read -rp "Linear team ID (UUID, optional): " linear_team
-  if [[ -n "$linear_team" ]]; then
-    echo "$linear_team" > "${CONFIG_DIR}/linear-team-id"
-    echo "  saved"
-  fi
-fi
-
-# Slack token
-if [[ -f "${CONFIG_DIR}/slack-token" ]]; then
-  echo "Slack token: configured"
-else
-  read -rp "Slack bot token (xoxb-..., optional): " slack_token
-  if [[ -n "$slack_token" ]]; then
-    echo "$slack_token" > "${CONFIG_DIR}/slack-token"
-    chmod 600 "${CONFIG_DIR}/slack-token"
-    echo "  saved"
-  fi
-fi
+"${SCRIPT_DIR}/scripts/doctor.sh" || true
 
 echo ""
 echo "── Setup complete ──"
 echo ""
-echo "Start the web dashboard:"
-echo ""
 echo "  agentdock web"
 echo ""
-echo "Configure repos and integrations in the browser:"
-echo ""
-echo "  https://localhost:5173/settings"
-echo ""
-echo "Or use the CLI directly:"
-echo ""
-echo "  agentdock start my-repo"
-echo "  agentdock repos"
+echo "The first launch walks you through repos. Claude, Linear, and Slack"
+echo "can be added later in Settings — you do not need them to open the UI."
 echo ""
