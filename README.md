@@ -2,11 +2,11 @@
 
 **Stop managing AI coding agents like terminal tabs.**
 
-Mission control for parallel [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions. Run a fleet across repos from one local-first cockpit — desktop or phone. See who is working, who needs you, review the diff, and jump in.
+Mission control for parallel [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Cursor Agent](https://docs.cursor.com/cli/agent) sessions. Run a fleet across repos from one local-first cockpit — desktop or phone. See who is working, who needs you, review the diff, and jump in.
 
 <img width="1536" height="1024" alt="AgentDock dashboard: session queue and live terminal" src="https://github.com/user-attachments/assets/cf8f345c-7a43-44b1-8346-831dc6751923" />
 
-- Parallel Claude Code sessions
+- Parallel Claude Code and Cursor sessions
 - Isolated git worktrees
 - Live working / waiting / done status
 - Plans and diffs before you merge
@@ -29,15 +29,15 @@ cd agentdock
 agentdock web
 ```
 
-`./setup.sh` installs [Bun](https://bun.sh/) and [tmux](https://github.com/tmux/tmux) if they are missing, then prints a checklist. Claude Code is only required when you start an agent — the UI opens without it.
+`./setup.sh` installs [Bun](https://bun.sh/) and [tmux](https://github.com/tmux/tmux) if they are missing, then prints a checklist. Claude or Cursor is only required when you start an agent — the UI opens without them.
 
 ```text
   ✓ git
   ✓ bun
   ✓ tmux
-  ! claude CLI — needed to start an agent
+  ! claude or agent (Cursor) — needed to start a session
     https://docs.anthropic.com/en/docs/claude-code
-    then: claude login
+    https://docs.cursor.com/cli/agent
 ```
 
 Re-run the checklist anytime with `agentdock doctor`.
@@ -70,7 +70,7 @@ One dashboard
 
 ## Three ways people use it
 
-**Run a team of tasks.** Start several Claude sessions across one repo or many. Isolated worktrees keep branches from colliding. The queue shows working / waiting / done from Claude Code hooks — not by scraping the terminal.
+**Run a team of tasks.** Start several Claude or Cursor sessions across one repo or many. Isolated worktrees keep branches from colliding. The queue shows working / waiting / done — Claude Code hooks where they exist, terminal fallback for Cursor.
 
 **Review before you merge.** Open the plan the agent wrote, read the live diff, comment, and send a follow-up without leaving the session. Restore a stopped session and the conversation comes back.
 
@@ -148,7 +148,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for internals.
 
 ## Also built in
 
-Agent switching mid-conversation, session templates, pinning and grouping, custom session properties, Slack-to-fix, browser notifications, optional password. Cursor Agent works but is experimental. To plug in another CLI agent, see [AGENTS.md](./AGENTS.md).
+Switch Claude ↔ Cursor mid-conversation, session templates, pinning and grouping, custom session properties, Slack-to-fix, browser notifications, optional password. To plug in another CLI agent, see [AGENTS.md](./AGENTS.md).
 
 ## Security
 

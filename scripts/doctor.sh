@@ -54,8 +54,17 @@ if have claude; then
     check_warn "Claude is installed — run: claude login"
   fi
 else
-  check_warn "claude CLI — needed to start an agent. https://docs.anthropic.com/en/docs/claude-code"
-  echo "           then: claude login"
+  check_warn "claude CLI — https://docs.anthropic.com/en/docs/claude-code then: claude login"
+fi
+
+if have agent; then
+  check_ok "Cursor agent CLI"
+else
+  check_warn "Cursor agent CLI (optional) — https://docs.cursor.com/cli/agent"
+fi
+
+if ! have claude && ! have agent; then
+  check_warn "install Claude or Cursor before starting a session"
 fi
 
 if have gh; then
